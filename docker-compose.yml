@@ -38,7 +38,7 @@ services:
         su -s /bin/sh -c "
           python manage.py migrate --noinput &&
           python manage.py collectstatic --noinput &&
-          gunicorn yourproj.wsgi:application
+          gunicorn texagonbackend.wsgi:application
         " django
       '
     volumes:
