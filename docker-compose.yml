@@ -7,7 +7,6 @@ services:
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
-      # ACME via HTTP-01
       - --certificatesresolvers.le.acme.httpchallenge=true
       - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
       - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
@@ -19,7 +18,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./letsencrypt:/letsencrypt
     labels:
-      # Redirect all HTTP -> HTTPS
       - "traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`)"
       - "traefik.http.routers.http-catchall.entrypoints=web"
       - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
@@ -33,6 +31,7 @@ services:
     env_file: .env
     volumes:
       - media:/app/media
+      - static_volume:/app/staticfiles
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.django.rule=Host(`texagonbackend.esm.name.ng`)"
@@ -43,6 +42,7 @@ services:
 
 volumes:
   media:
+  static_volume:
 
 networks:
   web:
