@@ -28,7 +28,7 @@ COPY . .
 RUN useradd -m -u 10001 django && chown -R django:django /app
 USER django
 
-ENV DJANGO_SETTINGS_MODULE=yourproj.settings \
+ENV DJANGO_SETTINGS_MODULE=texagonbackend.settings \
     PORT=8000 \
     GUNICORN_CMD_ARGS="--bind 0.0.0.0:8000 --workers 3 --threads 2 --timeout 60"
 
@@ -39,4 +39,4 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 # migrate, collectstatic, run
 CMD python manage.py migrate --noinput && \
     python manage.py collectstatic --noinput && \
-    gunicorn yourproj.wsgi:application
+    gunicorn texagonbackend.wsgi:application
