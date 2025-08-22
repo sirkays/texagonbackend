@@ -29,6 +29,18 @@ services:
     container_name: djangoapp
     restart: unless-stopped
     env_file: .env
+    # run as root to fix ownership, then drop privileges
+    user: "0:0"
+    command: >
+      sh -lc '
+        mkdir -p /app/staticfiles /app/media &&
+        chown -R 10001:10001 /app/staticfiles /app/media &&
+        su -s /bin/sh -c "
+          python manage.py migrate --noinput &&
+          python manage.py collectstatic --noinput &&
+          gunicorn yourproj.wsgi:application
+        " django
+      '
     volumes:
       - media:/app/media
       - static_volume:/app/staticfiles
@@ -39,6 +51,7 @@ services:
       - "traefik.http.routers.django.tls.certresolver=le"
       - "traefik.http.services.django.loadbalancer.server.port=8000"
     networks: [web]
+
 
 volumes:
   media:
