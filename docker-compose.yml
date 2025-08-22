@@ -1,0 +1,49 @@
+services:
+  traefik:
+    image: traefik:v3.1
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # ACME via HTTP-01
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    labels:
+      # Redirect all HTTP -> HTTPS
+      - "traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+    networks: [web]
+
+  django:
+    build: .
+    container_name: djangoapp
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - media:/app/media
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.django.rule=Host(`texagonbackend.esm.name.ng`)"
+      - "traefik.http.routers.django.entrypoints=websecure"
+      - "traefik.http.routers.django.tls.certresolver=le"
+      - "traefik.http.services.django.loadbalancer.server.port=8000"
+    networks: [web]
+
+volumes:
+  media:
+
+networks:
+  web:
+    external: false
