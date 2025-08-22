@@ -7,6 +7,7 @@ services:
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
+      # Let's Encrypt (HTTP-01)
       - --certificatesresolvers.le.acme.httpchallenge=true
       - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
       - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
@@ -18,10 +19,26 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./letsencrypt:/letsencrypt
     labels:
+      # HTTP -> HTTPS redirect (catch-all)
       - "traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`)"
       - "traefik.http.routers.http-catchall.entrypoints=web"
       - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+    networks: [web]
+
+  # Serves /static/* and /media/* directly
+  assets:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - static_volume:/usr/share/nginx/html/static:ro
+      - media_volume:/usr/share/nginx/html/media:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.assets.rule=Host(`texagonbackend.esm.name.ng`) && (PathPrefix(`/static`) || PathPrefix(`/media`))"
+      - "traefik.http.routers.assets.entrypoints=websecure"
+      - "traefik.http.routers.assets.tls.certresolver=le"
+      - "traefik.http.services.assets.loadbalancer.server.port=80"
     networks: [web]
 
   django:
@@ -29,7 +46,7 @@ services:
     container_name: djangoapp
     restart: unless-stopped
     env_file: .env
-    # run as root to fix ownership, then drop privileges
+    # Ensure volumes are writeable by app user, then run app as 'django'
     user: "0:0"
     command: >
       sh -lc '
@@ -42,20 +59,20 @@ services:
         " django
       '
     volumes:
-      - media:/app/media
       - static_volume:/app/staticfiles
+      - media_volume:/app/media
     labels:
       - "traefik.enable=true"
+      # App routes (everything else)
       - "traefik.http.routers.django.rule=Host(`texagonbackend.esm.name.ng`)"
       - "traefik.http.routers.django.entrypoints=websecure"
       - "traefik.http.routers.django.tls.certresolver=le"
       - "traefik.http.services.django.loadbalancer.server.port=8000"
     networks: [web]
 
-
 volumes:
-  media:
   static_volume:
+  media_volume:
 
 networks:
   web:
