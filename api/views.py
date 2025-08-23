@@ -37,14 +37,14 @@ from notifications.models import Notification
 @permission_classes([HasAPIKey])
 @authentication_classes([])
 def login_view(request):
-    username = request.data.get("username")
+    email = request.data.get("email") or request.data.get("username")  # accept either key during rollout
     password = request.data.get("password")
     hours_valid = int(request.data.get("hours_valid") or 24)
 
-    if not username or not password:
-        return Response({"detail": "username and password are required."}, status=status.HTTP_400_BAD_REQUEST)
+    if not email or not password:
+        return Response({"detail": "email and password are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    user = authenticate(request, username=username, password=password)
+    user = authenticate(request, email=email, password=password)  # <— key change
     if not user:
         return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
 
