@@ -1,9 +1,10 @@
 # api/views.py
 from typing import Any, DefaultDict, Dict, List, Optional
-
+from django.db import IntegrityError
+from django.db.utils import DataError
 import traceback
 from collections import defaultdict
-
+from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Q, Sum
@@ -21,6 +22,9 @@ from academics.models import StudentProfile
 from assessments.models import Test, Question, Choice, TestAttempt
 from learning.models import Enrollment
 from orgs.models import OrganizationMembership
+import logging
+
+logger = logging.getLogger(__name__)
 
 def _has_field(model, field: str) -> bool:
     try:
@@ -423,220 +427,208 @@ def _test_has_field(model, field_name: str) -> bool:
 def submit_test(request, test_id: int):
     """
     Submit a completed test with all answers.
-
-    Expected JSON body:
-    {
-      "answers": [
-        { "question": 101, "choice": 555 },           // MCQ/True-False (choice id)
-        { "question": 102, "text": "short answer" },  // Short/Essay free text
-        ...
-      ],
-      "started_at": "2025-08-23T12:00:00Z",          // optional ISO8601
-      "duration_seconds": 1760,                      // optional
-      "suspicious_activity": 2                       // optional
-    }
-
-    Returns summary:
-    {
-      "attempt_id": 123,
-      "score": 8,
-      "total_points": 12,
-      "percentage": 66,
-      "result": "FAIL",
-      "answered": 5,
-      "auto_graded": 4,
-      "pending_manual": 1,     // e.g. essay items
-      "breakdown": [
-        { "question": 101, "points": 2, "awarded": 2, "auto_graded": true },
-        ...
-      ]
-    }
+    (docstring omitted for brevity — keep your original if you like)
     """
     user = request.user
-    student = _get_student_for_user(user)
+    student = _get_student_for_user(user)  # keep your existing helper
+
+    logger.debug("submit_test called user_id=%s test_id=%s student=%s", getattr(user, "id", None), test_id, getattr(student, "id", None))
+
     if not student:
-        return Response({"detail": "Student profile not found for user."},
-                        status=status.HTTP_400_BAD_REQUEST)
+        logger.warning("Student profile not found for user id=%s", getattr(user, "id", None))
+        return Response({"detail": "Student profile not found for user."}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         test = Test.objects.get(pk=test_id)
     except Test.DoesNotExist:
+        logger.warning("Test not found: id=%s", test_id)
         return Response({"detail": "Test not found."}, status=status.HTTP_404_NOT_FOUND)
+    except Exception:
+        logger.exception("Unexpected error fetching Test id=%s", test_id)
+        return Response({"detail": "Internal server error."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    payload = request.data or {}
-    answers_in: List[Dict[str, Any]] = payload.get("answers") or []
-    if not isinstance(answers_in, list) or not answers_in:
-        return Response({"detail": "answers must be a non-empty list."},
-                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        payload = request.data or {}
+        answers_in: List[Dict[str, Any]] = payload.get("answers") or []
+        if not isinstance(answers_in, list) or not answers_in:
+            logger.warning("Invalid answers payload user=%s test=%s payload=%s", getattr(user, "id", None), test_id, payload)
+            return Response({"detail": "answers must be a non-empty list."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Optional meta
-    started_at_iso = payload.get("started_at")
-    duration_seconds = payload.get("duration_seconds")
-    suspicious_activity = int(payload.get("suspicious_activity") or 0)
+        started_at_iso = payload.get("started_at")
+        duration_seconds = payload.get("duration_seconds")
+        suspicious_activity = payload.get("suspicious_activity", 0)
 
-    # Gather questions in this test for quick membership check
-    test_qs = Question.objects.filter(test=test).values_list("id", flat=True)
-    test_question_ids = set(test_qs)
+        # membership check: only accept question IDs that belong to this test
+        test_question_ids = set(Question.objects.filter(test=test).values_list("id", flat=True))
 
-    # Grade
-    total_points = Question.objects.filter(test=test).aggregate(
-        total=Sum("points")
-    )["total"] or 0
+        # total points from Questions (points is DecimalField)
+        total_points = Question.objects.filter(test=test).aggregate(total=Sum("points"))["total"] or Decimal(0)
 
-    score = 0
-    auto_graded_count = 0
-    pending_manual = 0
-    breakdown: List[Dict[str, Any]] = []
-    normalized_answers: List[Dict[str, Any]] = []  # what we save
+        score = Decimal(0)
+        auto_graded_count = 0
+        pending_manual = 0
+        breakdown: List[Dict[str, Any]] = []
+        normalized_answers: List[Dict[str, Any]] = []
 
-    for item in answers_in:
-        qid = item.get("question")
-        if qid not in test_question_ids:
-            # ignore answers for questions not in this test
-            continue
+        for item in answers_in:
+            qid = item.get("question")
+            if qid not in test_question_ids:
+                logger.info("Ignoring answer for question not in test: question=%s test=%s", qid, test_id)
+                continue
 
-        q = Question.objects.select_related().get(pk=qid)
-        awarded = 0
-        auto_graded = False
-
-        if "choice" in item and item["choice"] is not None:
-            # MCQ / True-False
             try:
-                choice = Choice.objects.get(pk=item["choice"], question=q)
-                auto_graded = True
-                if getattr(choice, "is_correct", False):
-                    awarded = int(getattr(q, "points", 0) or 0)
-            except Choice.DoesNotExist:
-                pass
+                q = Question.objects.get(pk=qid)
+            except Question.DoesNotExist:
+                logger.warning("Question id=%s declared in answers but not found", qid)
+                continue
 
-            normalized_answers.append({
-                "question": q.id,
-                "choice": item["choice"],
-                "text": None,
-                "awarded": awarded,
-                "points": int(getattr(q, "points", 0) or 0),
-                "auto_graded": auto_graded,
-            })
+            awarded = Decimal(0)
+            auto_graded = False
 
-        elif "text" in item:
-            # Short answer / Essay (store text, usually pending manual grading)
-            text_val = (item.get("text") or "").strip()
-            # If your Question has a correct_text field, you can auto-grade short answers:
-            correct_text = getattr(q, "correct_text", None)
-            if correct_text:
-                # very light check: contains (case-insensitive)
-                if correct_text.lower() in text_val.lower():
-                    awarded = int(getattr(q, "points", 0) or 0)
+            if "choice" in item and item["choice"] is not None:
+                # MCQ / True-False
+                try:
+                    choice = Choice.objects.get(pk=item["choice"], question=q)
                     auto_graded = True
-                else:
-                    auto_graded = True  # still auto-graded to 0 if strict
-            else:
-                pending_manual += 1
+                    if getattr(choice, "is_correct", False):
+                        awarded = Decimal(getattr(q, "points", 0) or 0)
+                except Choice.DoesNotExist:
+                    logger.warning("Choice id=%s not found for question id=%s", item.get("choice"), q.id)
+                except Exception:
+                    logger.exception("Error fetching choice id=%s for question id=%s", item.get("choice"), q.id)
 
-            normalized_answers.append({
+                normalized_answers.append({
+                    "question": q.id,
+                    "choice": item.get("choice"),
+                    "text": None,
+                    "awarded": float(awarded),
+                    "points": float(getattr(q, "points", 0) or 0),
+                    "auto_graded": auto_graded,
+                })
+
+            elif "text" in item:
+                text_val = (item.get("text") or "").strip()
+                correct_text = getattr(q, "correct_text", None)
+                if correct_text:
+                    try:
+                        if correct_text.lower() in text_val.lower():
+                            awarded = Decimal(getattr(q, "points", 0) or 0)
+                        auto_graded = True
+                    except Exception:
+                        logger.exception("Error while auto-grading text for question id=%s", q.id)
+                else:
+                    pending_manual += 1
+
+                normalized_answers.append({
+                    "question": q.id,
+                    "choice": None,
+                    "text": text_val,
+                    "awarded": float(awarded),
+                    "points": float(getattr(q, "points", 0) or 0),
+                    "auto_graded": auto_graded,
+                })
+
+            else:
+                logger.info("No recognizable answer format for question id=%s item=%s", q.id, item)
+                normalized_answers.append({
+                    "question": q.id,
+                    "choice": None,
+                    "text": None,
+                    "awarded": 0,
+                    "points": float(getattr(q, "points", 0) or 0),
+                    "auto_graded": False,
+                })
+
+            score += awarded
+            if auto_graded:
+                auto_graded_count += 1
+
+            breakdown.append({
                 "question": q.id,
-                "choice": None,
-                "text": text_val,
-                "awarded": awarded,
-                "points": int(getattr(q, "points", 0) or 0),
+                "points": float(getattr(q, "points", 0) or 0),
+                "awarded": float(awarded),
                 "auto_graded": auto_graded,
             })
 
-        else:
-            # No recognizable answer format
-            normalized_answers.append({
-                "question": q.id,
-                "choice": None,
-                "text": None,
-                "awarded": 0,
-                "points": int(getattr(q, "points", 0) or 0),
-                "auto_graded": False,
-            })
+        answered = len(normalized_answers)
+        percentage = int(round((float(score) / float(total_points)) * 100)) if total_points else 0
 
-        score += awarded
-        if auto_graded:
-            auto_graded_count += 1
+        pass_mark = int(getattr(test, "pass_mark", 70) or 70) if hasattr(test, "pass_mark") else 70
+        result = "PASS" if percentage >= pass_mark else "FAIL"
 
-        breakdown.append({
-            "question": q.id,
-            "points": int(getattr(q, "points", 0) or 0),
-            "awarded": awarded,
-            "auto_graded": auto_graded,
-        })
-
-    answered = len(normalized_answers)
-    percentage = int(round((score / total_points) * 100)) if total_points else 0
-
-    # Heuristic pass mark: 70% unless your Test model has a pass_mark field
-    pass_mark = int(getattr(test, "pass_mark", 70) or 70)
-    result = "PASS" if percentage >= pass_mark else "FAIL"
-
-    # Create/Save attempt
-    # NOTE: we detect optional fields (answers JSON, duration fields) to avoid FieldErrors.
-    now = timezone.now()
-    started_at = None
-    if started_at_iso:
-        try:
-            started_at = timezone.make_aware(timezone.datetime.fromisoformat(started_at_iso.replace("Z", "+00:00")))
-        except Exception:
-            started_at = None
-    if not started_at and duration_seconds:
-        # infer started_at if duration provided
-        try:
-            started_at = now - timezone.timedelta(seconds=int(duration_seconds))
-        except Exception:
-            started_at = None
-
-    attempt = TestAttempt.objects.create(
-        test=test,
-        student=student,
-        started_at=started_at or now,
-        submitted_at=now,
-        score=score if _test_has_field(TestAttempt, "score") else None,
-        status=getattr(TestAttempt, "Status", None).SUBMITTED if hasattr(TestAttempt, "Status") else getattr(TestAttempt, "status", "submitted"),
-    )
-    # Some projects define status choices as strings; adjust safely:
-    if _test_has_field(TestAttempt, "status") and not hasattr(TestAttempt, "Status"):
-        try:
-            attempt.status = "submitted"
-            attempt.save(update_fields=["status"])
-        except Exception:
-            pass
-
-    # Save raw answers if TestAttempt has a JSON/Text field for them
-    for candidate_field in ["answers", "answers_json", "responses", "payload", "data"]:
-        if _test_has_field(TestAttempt, candidate_field):
-            setattr(attempt, candidate_field, normalized_answers)
+        # Parse started_at safely: only make_aware if naive, convert if aware
+        now = timezone.now()
+        started_at = None
+        if started_at_iso:
             try:
-                attempt.save(update_fields=[candidate_field])
+                parsed = datetime.fromisoformat(started_at_iso.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    started_at = timezone.make_aware(parsed)
+                else:
+                    started_at = parsed.astimezone(timezone.get_default_timezone())
             except Exception:
-                pass
-            break
+                logger.exception("Failed to parse started_at ISO: %s", started_at_iso)
+                started_at = None
 
-    # Optional: save duration / suspicious counts if fields exist
-    if duration_seconds and _test_has_field(TestAttempt, "duration_seconds"):
-        attempt.duration_seconds = int(duration_seconds)
-        attempt.save(update_fields=["duration_seconds"])
+        if not started_at and duration_seconds:
+            try:
+                started_at = now - timezone.timedelta(seconds=int(duration_seconds))
+            except Exception:
+                logger.exception("Failed to infer started_at from duration_seconds=%s", duration_seconds)
+                started_at = None
 
-    if _test_has_field(TestAttempt, "suspicious_activity"):
+        # Use a plain string for status to avoid DataError on varchar(16)
+        status_val = "submitted"
+
+        # Create TestAttempt
         try:
-            attempt.suspicious_activity = int(suspicious_activity)
-            attempt.save(update_fields=["suspicious_activity"])
+            attempt = TestAttempt.objects.create(
+                test=test,
+                student=student,
+                started_at=started_at or now,
+                submitted_at=now,
+                score=score,
+                answers=normalized_answers,   # JSONField on model — safe to save list/dict
+                status=status_val,
+            )
+        except DataError:
+            logger.exception("DataError while creating TestAttempt for user=%s test=%s — likely a too-long value", getattr(user, "id", None), test_id)
+            return Response({"detail": "Server error: invalid data length."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except IntegrityError:
+            logger.exception("IntegrityError while creating TestAttempt for user=%s test=%s", getattr(user, "id", None), test_id)
+            return Response({"detail": "Server error: integrity constraint."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception:
-            pass
+            logger.exception("Unexpected failure while creating TestAttempt for user=%s test=%s", getattr(user, "id", None), test_id)
+            return Response({"detail": "Internal server error."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # If you have an AttemptAnswer model you prefer to use, you can create rows here.
-    # (Left out intentionally since your earlier models did not define it.)
+        # If you had extra fields like duration_seconds/suspicious_activity on TestAttempt, save them
+        if duration_seconds and _test_has_field(TestAttempt, "duration_seconds"):
+            try:
+                attempt.duration_seconds = int(duration_seconds)
+                attempt.save(update_fields=["duration_seconds"])
+            except Exception:
+                logger.exception("Failed saving duration_seconds on attempt id=%s", getattr(attempt, "id", None))
 
-    # Response
-    return Response({
-        "attempt_id": attempt.id,
-        "score": score,
-        "total_points": total_points,
-        "percentage": percentage,
-        "result": result,
-        "answered": answered,
-        "auto_graded": auto_graded_count,
-        "pending_manual": pending_manual,
-        "breakdown": breakdown,
-    }, status=status.HTTP_200_OK)
+        if suspicious_activity and _test_has_field(TestAttempt, "suspicious_activity"):
+            try:
+                attempt.suspicious_activity = int(suspicious_activity)
+                attempt.save(update_fields=["suspicious_activity"])
+            except Exception:
+                logger.exception("Failed saving suspicious_activity on attempt id=%s", getattr(attempt, "id", None))
+
+        # Final response
+        return Response({
+            "attempt_id": attempt.id,
+            "score": float(score),
+            "total_points": float(total_points),
+            "percentage": percentage,
+            "result": result,
+            "answered": answered,
+            "auto_graded": auto_graded_count,
+            "pending_manual": pending_manual,
+            "breakdown": breakdown,
+        }, status=status.HTTP_200_OK)
+
+    except Exception:
+        logger.exception("Unhandled exception in submit_test for user=%s test=%s", getattr(user, "id", None), test_id)
+        return Response({"detail": "Internal server error."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
