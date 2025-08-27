@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Test, Question, Choice, TestAttempt, Assignment, Submission
+from .models import Test, Question, Choice, TestAttempt, Assignment, Submission, TestAnswer
 
 class QuestionInline(admin.TabularInline):
     model = Question
@@ -58,3 +58,32 @@ class SubmissionAdmin(admin.ModelAdmin):
     list_filter = ("assignment",)
     search_fields = ("assignment__title", "student__user__username")
     autocomplete_fields = ("assignment", "student")
+
+
+@admin.register(TestAnswer)
+class TestAnswerAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "attempt",
+        "student_name",
+        "question",
+        "selected_choice",
+        "awarded_points",
+        "is_auto_graded",
+        "created_at",
+    )
+    list_filter = ("is_auto_graded", "question__qtype", "attempt__test")
+    search_fields = (
+        "attempt__student__user__first_name",
+        "attempt__student__user__last_name",
+        "attempt__test__title",
+        "question__body",
+        "answer_text",
+    )
+    raw_id_fields = ("attempt", "question", "selected_choice")
+    readonly_fields = ("created_at", "updated_at")
+
+    def student_name(self, obj):
+        return obj.attempt.student.user.get_full_name()
+    student_name.admin_order_field = "attempt__student__user__last_name"
+    student_name.short_description = "Student"

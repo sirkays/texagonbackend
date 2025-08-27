@@ -1,6 +1,7 @@
 from django.db import models
 from django.utils import timezone
 from core.models import TimeStampedModel
+from decimal import Decimal
 
 class Test(TimeStampedModel):
     class Visibility(models.TextChoices):
@@ -20,6 +21,8 @@ class Test(TimeStampedModel):
 
     def __str__(self):
         return self.title
+
+
 
 class Question(TimeStampedModel):
     class Type(models.TextChoices):
@@ -80,3 +83,36 @@ class Submission(TimeStampedModel):
 
     class Meta:
         unique_together = ("assignment", "student")
+
+
+
+class TestAnswer(TimeStampedModel):
+    """
+    One row per question answered inside a TestAttempt.
+    Supports:
+      - SCQ/TF: selected_choice
+      - MCQ: selected_choice_ids (list of choice ids)
+      - SHORT/ESSAY: answer_text
+    Also records awarded_points and whether it was auto-graded.
+    """
+    attempt = models.ForeignKey(TestAttempt, on_delete=models.CASCADE, related_name="answers_rows")
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="answers")
+    # For SCQ/TF
+    selected_choice = models.ForeignKey(Choice, on_delete=models.SET_NULL, null=True, blank=True, related_name="selected_in_answers")
+    # For MCQ: store all selected choice IDs (to avoid a join table)
+    selected_choice_ids = models.JSONField(default=list, blank=True)
+    # For text questions
+    answer_text = models.TextField(blank=True)
+    # Grading
+    awarded_points = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    is_auto_graded = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ("attempt", "question")
+        indexes = [
+            models.Index(fields=["attempt"]),
+            models.Index(fields=["question"]),
+        ]
+
+    def __str__(self):
+        return f"Answer attempt={self.attempt_id} q={self.question_id}"
