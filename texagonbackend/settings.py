@@ -14,6 +14,7 @@ ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
 if os.environ.get('LOCAL') == "0":
     CSRF_TRUSTED_ORIGINS = [
         "https://texagonbackend.esm.name.ng",
+        "https://texagonbackend.epichouse.online",
         "http://127.0.0.1:9098",
         "http://localhost"
     ]
