@@ -10,6 +10,7 @@ class LiveSession(TimeStampedModel):
     join_url = models.URLField(blank=True)
     recording_url = models.URLField(blank=True)
     meta = models.JSONField(default=dict, blank=True)
+    active = models.BooleanField(default=True)
 
 class TutoringBooking(TimeStampedModel):
     class Status(models.TextChoices):

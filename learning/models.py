@@ -30,6 +30,7 @@ class Enrollment(TimeStampedModel):
 class Module(NamedModel):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="modules")
     order = models.PositiveIntegerField(default=1)
+    active = models.BooleanField(default=True)
 
     class Meta:
         ordering = ["order"]
@@ -50,6 +51,7 @@ class Lesson(NamedModel):
     url = models.URLField(blank=True)
     duration_seconds = models.PositiveIntegerField(default=0)
     meta = models.JSONField(default=dict, blank=True)
+    active = models.BooleanField(default=True)
 
     class Meta:
         ordering = ["order"]
@@ -72,6 +74,7 @@ class Material(TimeStampedModel):
     url = models.URLField(blank=True)
     tags = models.JSONField(default=list, blank=True)
     is_public = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.title
