@@ -623,3 +623,261 @@ def save_lesson_to_my_materials(request, lesson_id: int):
 
 
 
+def _safe_file_or_url(ls: Lesson) -> Optional[str]:
+    """Prefer file.url if present, else fall back to ls.url."""
+    try:
+        if ls.file:
+            return ls.file.url
+    except Exception:
+        pass
+    return ls.url or None
+
+
+def _int(v, default=None, cap=None) -> Optional[int]:
+    try:
+        x = int(v) if v is not None else default
+        return min(x, cap) if (cap is not None and x is not None) else x
+    except Exception:
+        return default
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def resource_materials(request):
+    """
+    ResourceMaterials payload (PDFs, Videos, Audio, Journals) driven by Lesson.
+
+    Scoping / defaults:
+      - Categories = user's ACTIVE courses (Enrollment.status=ACTIVE & Course.is_active=True)
+      - Default course = first active course; default module = that course's first active module
+      - You may override with ?course_id=<id>&module_id=<id>
+      - Only active Lessons are returned (Lesson.active=True and Module.active=True)
+
+    Query params:
+      - q: search text (applies to Lesson.name, Course.name, Subject.name)
+      - course_id: restrict to a specific course
+      - module_id: restrict to a specific module of the selected course
+      - pdfs_limit, videos_limit, audio_limit, journals_limit (default 9 each)
+      - debug=1 → include traceback
+    """
+    try:
+        user = request.user
+        student = _get_student_for_user(user)
+
+        q = (request.query_params.get("q") or "").strip()
+        course_id = _int(request.query_params.get("course_id"))
+        module_id = _int(request.query_params.get("module_id"))
+
+        pdfs_limit = _int(request.query_params.get("pdfs_limit"), 9, cap=50)
+        vids_limit = _int(request.query_params.get("videos_limit"), 9, cap=50)
+        auds_limit = _int(request.query_params.get("audio_limit"), 9, cap=50)
+        journ_limit = _int(request.query_params.get("journals_limit"), 9, cap=50)
+
+        # --- If no student, return safe dummy sample (keeps UI working) ---
+        if not student:
+            categories = ["All"]
+            sample = {
+                "pdfs": [{
+                    "id": "D1", "title": "Sample PDF", "author": "Techxagon",
+                    "pages": 12, "size": "1.2 MB", "rating": 4.7,
+                    "downloads": 120, "category": "All", "pdfUrl": "/sample.pdf",
+                }],
+                "videos": [{
+                    "id": "V1", "title": "Sample Video", "instructor": "Techxagon",
+                    "duration": "45m", "views": 3200, "rating": 4.6,
+                    "category": "All", "videoUrl": "/sample-video.mp4",
+                }],
+                "audio": [{
+                    "id": "A1", "title": "Sample Audio", "speaker": "Techxagon",
+                    "duration": "30m", "listens": 800, "rating": 4.5,
+                    "category": "All", "audioUrl": "/sample-audio.mp3",
+                }],
+                "journals": [{
+                    "id": "J1", "title": "Sample Journal (Doc)", "journal": "TX Review",
+                    "date": timezone.now().strftime("%b %Y"), "pages": 10, "citations": 12,
+                    "category": "All", "content": "A short abstract lorem ipsum…",
+                }],
+            }
+            return Response({
+                "categories": categories,
+                "courses": [],
+                "selected_course_id": None,
+                "selected_module_id": None,
+                **sample
+            }, status=status.HTTP_200_OK)
+
+        # --- User's active courses (categories) ---
+        active_enrolls = (Enrollment.objects
+                          .filter(student=student, status=Enrollment.Status.ACTIVE, course__is_active=True)
+                          .select_related("course", "course__subject"))
+        course_ids = list(active_enrolls.values_list("course_id", flat=True))
+        if not course_ids:
+            # No active enrollments → return empty with categories=[]
+            return Response({
+                "categories": [],
+                "courses": [],
+                "selected_course_id": None,
+                "selected_module_id": None,
+                "pdfs": [], "videos": [], "audio": [], "journals": []
+            }, status=status.HTTP_200_OK)
+
+        courses_qs = (Course.objects
+                      .filter(id__in=course_ids)
+                      .select_related("subject", "teacher__user", "classroom")
+                      .order_by("name", "id"))
+        courses = list(courses_qs)
+        courses_meta = [{"id": c.id, "name": c.name} for c in courses]
+        categories = [c.name for c in courses]  # UI currently expects an array of strings
+
+        # Resolve selected course
+        selected_course: Optional[Course] = None
+        if course_id and any(c.id == course_id for c in courses):
+            selected_course = next(c for c in courses if c.id == course_id)
+        else:
+            selected_course = courses[0]  # default: first active course
+
+        # Resolve selected module (first active if none provided)
+        modules_qs = (Module.objects
+                      .filter(course=selected_course, active=True)
+                      .order_by("order", "id"))
+        if module_id:
+            modules_qs = modules_qs.filter(id=module_id)
+
+        # Use the first active module (after filter), else fall back to ANY active lesson under the course
+        selected_module: Optional[Module] = modules_qs.first()
+
+        # --- Base Lessons: active & in selected course (+module if picked) ---
+        base_lessons = (Lesson.objects
+                        .select_related("module", "module__course", "module__course__teacher__user", "module__course__subject")
+                        .filter(
+                            active=True,
+                            module__active=True,
+                            module__course_id=selected_course.id,
+                        ))
+        if selected_module:
+            base_lessons = base_lessons.filter(module=selected_module)
+
+        if q:
+            base_lessons = base_lessons.filter(
+                Q(name__icontains=q) |
+                Q(module__course__name__icontains=q) |
+                Q(module__course__subject__name__icontains=q)
+            )
+
+        # --- Partition by content_type ---
+        vids_qs = base_lessons.filter(content_type=Lesson.ContentType.VIDEO).order_by("-updated_at", "module__order", "order")[:vids_limit]
+        auds_qs = base_lessons.filter(content_type=Lesson.ContentType.AUDIO).order_by("-updated_at", "module__order", "order")[:auds_limit]
+        pdfs_qs = base_lessons.filter(content_type=Lesson.ContentType.PDF).order_by("-updated_at", "module__order", "order")[:pdfs_limit]
+        docs_qs = base_lessons.filter(content_type=Lesson.ContentType.DOC).order_by("-updated_at", "module__order", "order")[:journ_limit]
+
+        # --- Build each section in the shape your UI expects (with dummy fallbacks where needed) ---
+        # PDFs
+        pdfs: List[Dict[str, Any]] = []
+        for ls in pdfs_qs:
+            pdfs.append({
+                "id": str(ls.id),
+                "title": ls.name,
+                "author": getattr(getattr(selected_course.teacher, "user", None), "get_full_name", lambda: "")() or
+                          getattr(getattr(selected_course.teacher, "user", None), "username", "Instructor"),
+                "pages": int(ls.meta.get("pages", 0)) if isinstance(ls.meta, dict) else 0,
+                "size": ls.meta.get("size_label", "—") if isinstance(ls.meta, dict) else "—",
+                "rating": float(ls.meta.get("rating", 4.7)) if isinstance(ls.meta, dict) else 4.7,
+                "downloads": int(ls.meta.get("downloads", 0)) if isinstance(ls.meta, dict) else 0,
+                "category": selected_course.name,
+                "pdfUrl": _safe_file_or_url(ls),
+            })
+        if not pdfs:
+            pdfs = [{
+                "id": "P1", "title": f"{selected_course.name} – Notes",
+                "author": "Techxagon", "pages": 24, "size": "3.2 MB",
+                "rating": 4.7, "downloads": 340, "category": selected_course.name, "pdfUrl": "/sample.pdf",
+            }]
+
+        # Videos
+        videos: List[Dict[str, Any]] = []
+        for ls in vids_qs:
+            videos.append({
+                "id": str(ls.id),
+                "title": ls.name,
+                "instructor": getattr(getattr(selected_course.teacher, "user", None), "get_full_name", lambda: "")() or
+                               getattr(getattr(selected_course.teacher, "user", None), "username", "Instructor"),
+                "duration": _fmt_duration(ls.duration_seconds),
+                "views": int(ls.meta.get("views", 0)) if isinstance(ls.meta, dict) else 0,
+                "rating": float(ls.meta.get("rating", 4.7)) if isinstance(ls.meta, dict) else 4.7,
+                "category": selected_course.name,
+                "videoUrl": _safe_file_or_url(ls),
+            })
+        if not videos:
+            videos = [{
+                "id": "V1", "title": f"{selected_course.name} – Overview",
+                "instructor": "Techxagon", "duration": "45m",
+                "views": 1200, "rating": 4.6, "category": selected_course.name, "videoUrl": "/sample-video.mp4",
+            }]
+
+        # Audio
+        audio: List[Dict[str, Any]] = []
+        for ls in auds_qs:
+            audio.append({
+                "id": str(ls.id),
+                "title": ls.name,
+                "speaker": getattr(getattr(selected_course.teacher, "user", None), "get_full_name", lambda: "")() or
+                           getattr(getattr(selected_course.teacher, "user", None), "username", "Speaker"),
+                "duration": _fmt_duration(ls.duration_seconds),
+                "listens": int(ls.meta.get("listens", 0)) if isinstance(ls.meta, dict) else 0,
+                "rating": float(ls.meta.get("rating", 4.5)) if isinstance(ls.meta, dict) else 4.5,
+                "category": selected_course.name,
+                "audioUrl": _safe_file_or_url(ls),
+            })
+        if not audio:
+            audio = [{
+                "id": "A1", "title": f"{selected_course.name} – Audio Intro",
+                "speaker": "Techxagon", "duration": "30m",
+                "listens": 820, "rating": 4.4, "category": selected_course.name, "audioUrl": "/sample-audio.mp3",
+            }]
+
+        # Journals (Docs)
+        journals: List[Dict[str, Any]] = []
+        for ls in docs_qs:
+            meta = ls.meta if isinstance(ls.meta, dict) else {}
+            journals.append({
+                "id": str(ls.id),
+                "title": ls.name,
+                "journal": meta.get("journal", "Course Docs"),
+                "date": meta.get("date_label", timezone.now().strftime("%b %Y")),
+                "pages": int(meta.get("pages", 0)),
+                "citations": int(meta.get("citations", 0)),
+                "category": selected_course.name,
+                "content": meta.get("abstract") or meta.get("summary") or "—",
+            })
+        if not journals:
+            journals = [{
+                "id": "J1",
+                "title": f"{selected_course.name} – Syllabus",
+                "journal": "Course Docs",
+                "date": timezone.now().strftime("%b %Y"),
+                "pages": 10,
+                "citations": 0,
+                "category": selected_course.name,
+                "content": "Structured outline and references for the course.",
+            }]
+
+        return Response({
+            # categories for your chip list (strings)
+            "categories": categories,
+            # also return ids so you can wire filters later if needed
+            "courses": courses_meta,
+            "selected_course_id": selected_course.id if selected_course else None,
+            "selected_module_id": selected_module.id if selected_module else None,
+            # sections shaped for your UI
+            "pdfs": pdfs,
+            "videos": videos,
+            "audio": audio,
+            "journals": journals,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        err = {"detail": "Failed to load resource materials.", "error": f"{type(e).__name__}: {e}"}
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            err["traceback"] = traceback.format_exc()
+        return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
