@@ -232,6 +232,37 @@ def _lesson_url(ls: Lesson) -> Optional[str]:
 
 
 
+def _coerce_int_list(v) -> List[int]:
+    if v is None:
+        return []
+    if isinstance(v, (list, tuple, set)):
+        out = []
+        for x in v:
+            try:
+                out.append(int(x))
+            except Exception:
+                pass
+        return out
+    try:
+        return [int(v)]
+    except Exception:
+        return []
+
+def _read_json_body_for_get(request) -> Dict[str, Any]:
+    """Allows JSON body on GET (non-standard, but supported here on purpose)."""
+    if request.method != "GET":
+        return {}
+    ctype = (request.META.get("CONTENT_TYPE") or request.META.get("HTTP_CONTENT_TYPE") or "").split(";")[0].strip().lower()
+    if ctype != "application/json":
+        return {}
+    try:
+        raw = (request.body or b"").decode("utf-8").strip()
+        if not raw:
+            return {}
+        return json.loads(raw)
+    except Exception:
+        return {}
+
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -240,20 +271,21 @@ def learning_modules(request):
     """
     LearningModules payload (NO journals).
 
-    Source of truth:
-      - videos, audio, pdfs, docs, links: from Lesson ONLY
-        (scoped to: lesson.active=True AND module.active=True AND user's enrolled courses)
-      - tutorials: from LiveSession ONLY (active=True and within user's enrolled courses)
+    Accepts module filter in either:
+      - query params:  ?module_id=12   OR  ?module_id=1&module_id=2
+      - JSON body (GET): {"module_id": 12} OR {"module_ids": [1,2]}
 
-    Query params:
-      - q: search string (applies to lesson name, course, subject)
-      - videos_limit, audio_limit, pdfs_limit, docs_limit, links_limit, tutorials_limit
-      - debug=1 → include traceback in error response
+    Data sources:
+      - videos/audio/pdfs/docs/links: Lesson (active=True, module.active=True, enrolled courses)
+      - tutorials: LiveSession (active=True, in user's enrolled courses; filtered by modules' courses if provided)
     """
+    import traceback
+
     try:
         user = request.user
         student = _get_student_for_user(user)
 
+        # -------- parse limits/search --------
         def _i(v, d):
             try:
                 return int(v) if v is not None else d
@@ -268,34 +300,54 @@ def learning_modules(request):
         l_lim = _i(request.query_params.get("links_limit"), 12)
         t_lim = _i(request.query_params.get("tutorials_limit"), 6)
 
-        # Guard: if no student, return empty lists (keeps “active/currently on” contract strict)
-        if not student:
-            return Response({
-                "videos": [], "audio": [], "pdfs": [], "docs": [], "links": [], "tutorials": []
-            }, status=status.HTTP_200_OK)
+        # -------- module filter (query OR JSON body on GET) --------
+        body = _read_json_body_for_get(request)
+        module_ids = []  # collect from query first …
+        qp_multi = request.query_params.getlist("module_id") or request.query_params.getlist("module")
+        if qp_multi:
+            module_ids.extend(_coerce_int_list(qp_multi))
+        else:
+            qp_single = request.query_params.get("module_id") or request.query_params.get("module")
+            module_ids.extend(_coerce_int_list(qp_single))
 
-        # ---------- Determine the user's enrolled courses ----------
+        # … then from JSON body (supports module_id / module / module_ids)
+        for key in ("module_id", "module", "module_ids"):
+            if key in body:
+                module_ids.extend(_coerce_int_list(body[key]))
+
+        module_ids = list({mid for mid in module_ids if isinstance(mid, int)})
+
+        # -------- guard: need a student + enrollments --------
+        if not student:
+            return Response({"videos": [], "audio": [], "pdfs": [], "docs": [], "links": [], "tutorials": []},
+                            status=status.HTTP_200_OK)
+
         enrolled_course_ids = list(
             Enrollment.objects.filter(student=student).values_list("course_id", flat=True)
         )
         if not enrolled_course_ids:
-            return Response({
-                "videos": [], "audio": [], "pdfs": [], "docs": [], "links": [], "tutorials": []
-            }, status=status.HTTP_200_OK)
+            return Response({"videos": [], "audio": [], "pdfs": [], "docs": [], "links": [], "tutorials": []},
+                            status=status.HTTP_200_OK)
 
-        # ---------- Build base Lesson queryset ----------
-        # Only lessons that are active AND belong to active modules AND those modules belong to the user's enrolled courses.
+        # If module filter given, further constrain by those modules (and derive their courses)
+        course_ids_from_modules = []
+        if module_ids:
+            course_ids_from_modules = list(
+                Module.objects.filter(id__in=module_ids).values_list("course_id", flat=True)
+            )
+            # Only keep courses the user is enrolled in
+            course_ids_from_modules = [c for c in course_ids_from_modules if c in enrolled_course_ids]
+
+        # -------- base Lesson queryset --------
         base = (
             Lesson.objects.select_related(
                 "module", "module__course", "module__course__teacher__user",
                 "module__course__subject", "module__course__classroom"
             )
-            .filter(
-                active=True,
-                module__active=True,
-                module__course_id__in=enrolled_course_ids,
-            )
+            .filter(active=True, module__active=True, module__course_id__in=enrolled_course_ids)
         )
+        if module_ids:
+            base = base.filter(module_id__in=module_ids)
         if q:
             base = base.filter(
                 Q(name__icontains=q) |
@@ -303,24 +355,18 @@ def learning_modules(request):
                 Q(module__course__subject__name__icontains=q)
             )
 
-        # Pre-compute course metadata to avoid N+1
-        course_ids = list(
-            base.values_list("module__course_id", flat=True).distinct()
-        )
+        # Preload course metadata
+        course_ids = list(base.values_list("module__course_id", flat=True).distinct())
         courses = {
-            c.id: c for c in
-            Course.objects.filter(id__in=course_ids).select_related("teacher__user", "subject")
+            c.id: c for c in Course.objects.filter(id__in=course_ids).select_related("teacher__user", "subject")
         }
-        # Map: course -> progress for this student
         progress_map = {
             e.course_id: int(e.progress_pct or 0)
             for e in Enrollment.objects.filter(student=student, course_id__in=course_ids)
         }
-        # Map: course -> total enrollments (as a proxy for popularity/listeners)
         size_map = {
             r["course_id"]: r["cnt"]
-            for r in (Enrollment.objects
-                      .filter(course_id__in=course_ids)
+            for r in (Enrollment.objects.filter(course_id__in=course_ids)
                       .values("course_id").annotate(cnt=Count("id")))
         }
 
@@ -331,13 +377,14 @@ def learning_modules(request):
             subject_name = getattr(getattr(c, "subject", None), "name", None) if c else None
             return {
                 "id": ls.id,
-                "title": ls.name,                           # from Lesson
-                "content_type": ls.content_type,            # for client-side grouping if needed
+                "title": ls.name,
+                "content_type": ls.content_type,
                 "duration": _fmt_duration(ls.duration_seconds),
-                "url": _lesson_url(ls),                     # direct link to file or external url
+                "url": _lesson_url(ls),
                 "course": getattr(c, "name", None),
                 "subject": subject_name,
                 "instructor": instructor,
+                "module_id": ls.module_id,
                 "module_order": getattr(ls.module, "order", None),
                 "lesson_order": ls.order,
                 "progress": progress_map.get(getattr(c, "id", None), 0),
@@ -345,7 +392,7 @@ def learning_modules(request):
                 "updated_at": ls.updated_at.isoformat(),
             }
 
-        # ---------- Slice per content type (all from Lesson) ----------
+        # -------- per content-type lists --------
         videos_qs = base.filter(content_type=Lesson.ContentType.VIDEO).order_by("-updated_at", "module__order", "order")
         audio_qs  = base.filter(content_type=Lesson.ContentType.AUDIO).order_by("-updated_at", "module__order", "order")
         pdfs_qs   = base.filter(content_type=Lesson.ContentType.PDF).order_by("-updated_at", "module__order", "order")
@@ -358,12 +405,13 @@ def learning_modules(request):
         docs   = [lesson_item(ls) for ls in docs_qs[:d_lim]]
         links  = [lesson_item(ls) for ls in links_qs[:l_lim]]
 
-        # ---------- Tutorials from LiveSession (active + enrolled courses) ----------
+        # -------- tutorials (LiveSession) --------
         tutorials: List[Dict[str, Any]] = []
         now = timezone.now()
+        session_course_ids = course_ids_from_modules if module_ids else enrolled_course_ids
         lsessions = (
             LiveSession.objects
-            .filter(active=True, course_id__in=enrolled_course_ids)
+            .filter(active=True, course_id__in=session_course_ids)
             .select_related("course", "host__user", "course__subject")
             .order_by("scheduled_at")
         )
@@ -374,18 +422,21 @@ def learning_modules(request):
                 Q(host__user__first_name__icontains=q) |
                 Q(host__user__last_name__icontains=q)
             )
+
         for s in lsessions[:t_lim]:
+            dur = int(getattr(s, "duration_minutes", 60) or 60)
             tutorials.append({
                 "id": s.id,
                 "title": s.title,
                 "type": "Live Session",
-                "duration": f"{int(getattr(s, 'duration_minutes', 60) or 60)}m",
+                "duration": f"{dur}m",
                 "scheduledAt": s.scheduled_at.isoformat(),
                 "course": getattr(s.course, "name", None),
                 "subject": getattr(getattr(s.course, "subject", None), "name", None),
-                "host": (getattr(s.host.user, "get_full_name", lambda: "")() or s.host.user.username) if getattr(s, "host", None) and getattr(s.host, "user", None) else None,
-                "isActiveNow": bool(s.scheduled_at <= now <= s.scheduled_at + timezone.timedelta(minutes=getattr(s, "duration_minutes", 60) or 60)),
+                "host": (s.host.user.get_full_name() or s.host.user.username) if getattr(s, "host", None) and getattr(s.host, "user", None) else None,
+                "isActiveNow": bool(s.scheduled_at <= now <= s.scheduled_at + timezone.timedelta(minutes=dur)),
             })
+
         return Response({
             "videos": videos,
             "audio": audio,
@@ -393,14 +444,15 @@ def learning_modules(request):
             "docs": docs,
             "links": links,
             "tutorials": tutorials,
+            "filters": {"module_ids": module_ids},  # echo back for the client
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
         err = {"detail": "Failed to load learning modules.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            import traceback
             err["traceback"] = traceback.format_exc()
         return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 
 
@@ -568,3 +620,6 @@ def save_lesson_to_my_materials(request, lesson_id: int):
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
             err["traceback"] = traceback.format_exc()
         return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
