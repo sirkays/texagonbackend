@@ -386,7 +386,6 @@ def learning_modules(request):
                 "host": (getattr(s.host.user, "get_full_name", lambda: "")() or s.host.user.username) if getattr(s, "host", None) and getattr(s.host, "user", None) else None,
                 "isActiveNow": bool(s.scheduled_at <= now <= s.scheduled_at + timezone.timedelta(minutes=getattr(s, "duration_minutes", 60) or 60)),
             })
-
         return Response({
             "videos": videos,
             "audio": audio,
@@ -403,3 +402,169 @@ def learning_modules(request):
         return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+
+
+def _kind_from_lesson(lesson: Lesson) -> str:
+    """Map Lesson.content_type to Material.kind."""
+    m = {
+        Lesson.ContentType.VIDEO: Material.Kind.VIDEO,
+        Lesson.ContentType.AUDIO: Material.Kind.AUDIO,
+        Lesson.ContentType.PDF:   Material.Kind.PDF,
+        Lesson.ContentType.DOC:   Material.Kind.DOC,
+        Lesson.ContentType.LINK:  Material.Kind.OTHER,  # no LINK kind on Material
+    }
+    return m.get(lesson.content_type, Material.Kind.OTHER)
+
+
+def _abs_url_or_none(request, maybe_url: Optional[str]) -> Optional[str]:
+    if not maybe_url:
+        return None
+    try:
+        # if it's already absolute, keep it; else build absolute
+        if maybe_url.startswith("http://") or maybe_url.startswith("https://"):
+            return maybe_url
+        return request.build_absolute_uri(maybe_url)
+    except Exception:
+        return maybe_url
+
+
+def _material_to_dict(request, m: Material, lesson: Lesson) -> Dict[str, Any]:
+    return {
+        "id": m.id,
+        "title": m.title,
+        "kind": m.kind,
+        "tags": m.tags or [],
+        "is_public": m.is_public,
+        "active": m.active,
+        "organization": {
+            "id": m.organization_id,
+            "name": getattr(m.organization, "name", None),
+        },
+        "file_url": _abs_url_or_none(request, getattr(m.file, "url", None)),
+        "url": m.url or None,
+        "created_at": m.created_at.isoformat(),
+        "lesson": {
+            "id": lesson.id,
+            "content_type": lesson.content_type,
+            "duration_seconds": lesson.duration_seconds,
+        },
+    }
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def save_lesson_to_my_materials(request, lesson_id: int):
+    """
+    Save a Lesson as a Material for the authenticated user (idempotent).
+
+    Path:  POST /api/materials/save-lesson/<lesson_id>/
+    Body (optional):
+      - title: str (override Material.title)
+      - tags: list[str] (extra tags to store)
+      - is_public: bool (default False)
+
+    Rules:
+      - Uses the Lesson's course organization for the Material.organization.
+      - kind is derived from Lesson.content_type.
+      - If a Material for this (owner, org) with the same lesson file/url already exists,
+        returns that existing row (detail='already_saved').
+      - Blocks cross-organization save if student's org != lesson's org (403).
+    """
+    try:
+        user = request.user
+        student = _get_student_for_user(user)
+
+        # Fetch lesson (must be active)
+        try:
+            lesson = (Lesson.objects
+                      .select_related("module", "module__course", "module__course__organization")
+                      .get(pk=lesson_id, active=True))
+        except Lesson.DoesNotExist:
+            return Response({"detail": "Lesson not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+
+        course: Course = lesson.module.course
+        org: Organization = course.organization
+
+        # Optional org-guard: only allow saving lessons from user's org
+        if student and student.organization_id != org.id:
+            return Response(
+                {"detail": "You cannot save materials from another organization."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Determine kind + source
+        kind = _kind_from_lesson(lesson)
+        src_url = (lesson.url or "").strip() or None
+        src_file_name = lesson.file.name if getattr(lesson, "file", None) and lesson.file else None
+
+        if not src_url and not src_file_name:
+            # Nothing to save; require at least a URL or file
+            return Response({"detail": "Lesson has no file or URL to save."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Idempotent lookup for an existing material owned by the user pointing to same file or url in this org
+        existing = (Material.objects
+                    .filter(owner=user, organization=org, kind=kind)
+                    .filter(Q(url=src_url) | Q(file=src_file_name))
+                    .first())
+
+        # Prepare fields
+        title = (request.data.get("title") or lesson.name).strip()
+        is_public = bool(request.data.get("is_public") or False)
+
+        # Base tags: include type + pointer to lesson id; merge user-supplied tags
+        input_tags = request.data.get("tags") or []
+        try:
+            input_tags = [str(t) for t in input_tags] if isinstance(input_tags, (list, tuple)) else []
+        except Exception:
+            input_tags = []
+        base_tags = [lesson.content_type, f"lesson:{lesson.id}"]
+        tags = list(dict.fromkeys(base_tags + input_tags))  # unique, preserve order
+
+        # Create or return existing
+        if existing:
+            # Optionally update title/tags/is_public/active if client sent them
+            updated = False
+            if existing.title != title:
+                existing.title = title; updated = True
+            if tags and existing.tags != tags:
+                existing.tags = tags; updated = True
+            if existing.is_public != is_public:
+                existing.is_public = is_public; updated = True
+            if not existing.active:
+                existing.active = True; updated = True
+            if updated:
+                existing.save(update_fields=["title", "tags", "is_public", "active"])
+            return Response(
+                {"detail": "already_saved", "material": _material_to_dict(request, existing, lesson)},
+                status=status.HTTP_200_OK
+            )
+
+        # Create new Material
+        m = Material(
+            owner=user,
+            organization=org,
+            title=title,
+            kind=kind,
+            is_public=is_public,
+            active=True,
+            url=src_url or "",
+            tags=tags,
+        )
+        # Assign file if present
+        if src_file_name:
+            # Assigning the same file reference (no upload here)
+            m.file = lesson.file
+        m.save()
+
+        return Response(
+            {"detail": "saved", "material": _material_to_dict(request, m, lesson)},
+            status=status.HTTP_201_CREATED
+        )
+
+    except Exception as e:
+        err = {"detail": "Failed to save lesson to My Materials.", "error": f"{type(e).__name__}: {e}"}
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            err["traceback"] = traceback.format_exc()
+        return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
