@@ -34,7 +34,7 @@ class TeacherProfile(TimeStampedModel):
     specialties = models.ManyToManyField(Subject, blank=True)
 
     def __str__(self):
-        return f"Teacher: {self.user.get_full_name() or self.user.username}"
+        return f"Teacher: {self.user.get_full_name() or self.user.username} Email: {self.user.email}"
 
 class ParentProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="parent_profile")
