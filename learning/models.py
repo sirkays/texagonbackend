@@ -10,6 +10,9 @@ class Course(NamedModel):
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
 
+    def __str__(self):
+        return self.teacher.user.email
+
     class Meta:
         unique_together = ("organization", "subject", "classroom", "teacher")
 
