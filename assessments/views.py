@@ -18,9 +18,9 @@ from rest_framework_api_key.permissions import HasAPIKey
 from api.authentication import SessionTokenAuthentication
 
 # Project models
-from academics.models import StudentProfile
+from academics.models import StudentProfile,TeacherProfile
 from assessments.models import Test, Question, Choice, TestAttempt,TestAnswer
-from learning.models import Enrollment
+from learning.models import Enrollment, Course
 from orgs.models import OrganizationMembership
 import logging
 
@@ -624,3 +624,745 @@ def submit_test(request, test_id: int):
         "pending_manual": pending_manual,
         "breakdown": breakdown,
     }, status=status.HTTP_200_OK)
+
+
+
+
+####################################
+# api/teacher_cbt_views.py
+
+
+def _get_teacher_for_user(user) -> Optional[TeacherProfile]:
+    """Get teacher profile for the authenticated user."""
+    mem = (OrganizationMembership.objects
+           .filter(user=user, is_active=True, role__in=['teacher', 'admin', 'owner'])
+           .select_related("organization")
+           .order_by("-id")
+           .first())
+    if mem:
+        tp = TeacherProfile.objects.filter(user=user, organization=mem.organization).first()
+        if tp:
+            return tp
+    return TeacherProfile.objects.filter(user=user).order_by("-id").first()
+
+
+def _serialize_question(question: Question, include_correct_answers: bool = True) -> Dict[str, Any]:
+    """Serialize a question with its choices."""
+    choices = list(question.choices.all().order_by('order', 'id'))
+    
+    # Map question types to frontend format
+    qtype_mapping = {
+        'scq': 'multiple-choice',
+        'mcq': 'multiple-choice', 
+        'tf': 'true-false',
+        'true_false': 'true-false',
+        'short': 'short-answer',
+        'essay': 'essay'
+    }
+    
+    qtype = getattr(question, 'qtype', 'scq')
+    frontend_type = qtype_mapping.get(qtype, 'multiple-choice')
+    
+    # Get question text
+    question_text = getattr(question, 'body', '') or getattr(question, 'text', '') or str(question)
+    
+    result = {
+        'id': str(question.id),
+        'type': frontend_type,
+        'question': question_text,
+        'points': int(getattr(question, 'points', 1) or 1),
+        'options': [getattr(choice, 'text', str(choice)) for choice in choices],
+        'explanation': getattr(question, 'explanation', '') or (question.meta or {}).get('explanation', ''),
+        'difficulty': (question.meta or {}).get('difficulty', 'Medium')
+    }
+    
+    if include_correct_answers and choices:
+        if frontend_type == 'true-false':
+            # For true/false, find the correct option
+            correct_choice = next((choice for choice in choices if getattr(choice, 'is_correct', False)), None)
+            if correct_choice:
+                result['correctAnswer'] = getattr(correct_choice, 'text', '').lower() == 'true'
+        elif frontend_type == 'multiple-choice':
+            # For multiple choice, get index of correct answer
+            correct_choices = [i for i, choice in enumerate(choices) if getattr(choice, 'is_correct', False)]
+            if correct_choices:
+                result['correctAnswer'] = correct_choices[0]  # Use first correct answer for single choice
+        # For short-answer and essay, correctAnswer might be in meta
+        elif frontend_type in ['short-answer', 'essay']:
+            result['correctAnswer'] = (question.meta or {}).get('correct_answer', '')
+    
+    return result
+
+
+def _serialize_test(test: Test, include_questions: bool = False) -> Dict[str, Any]:
+    """Serialize a test object."""
+    questions_count = test.questions.count() if hasattr(test, 'questions') else 0
+    total_points = test.questions.aggregate(total=Sum('points'))['total'] or 0
+    
+    result = {
+        'id': str(test.id),
+        'title': getattr(test, 'title', f'Test #{test.id}'),
+        'description': getattr(test, 'description', ''),
+        'duration': int(getattr(test, 'duration_minutes', 30) or 30),
+        'totalPoints': int(total_points),
+        'difficulty': (test.settings or {}).get('difficulty', 'Medium'),
+        'category': getattr(test.course, 'name', '') if hasattr(test, 'course') and test.course else '',
+        'isPublished': getattr(test, 'visibility', 'draft') == 'published',
+        'questionsCount': questions_count,
+        'createdAt': test.created_at.isoformat() if hasattr(test, 'created_at') else None,
+        'updatedAt': test.updated_at.isoformat() if hasattr(test, 'updated_at') else None,
+    }
+    
+    if include_questions:
+        questions = list(test.questions.all().order_by('order', 'id'))
+        result['questions'] = [_serialize_question(q) for q in questions]
+    
+    return result
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def teacher_tests_list(request):
+    """
+    List all tests created by the authenticated teacher.
+    
+    Query params:
+      - course: filter by course ID
+      - published: 'true'/'false' to filter by publication status
+      - search: search in title and description
+      - page: page number for pagination (default: 1)
+      - limit: items per page (default: 20, max: 100)
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Get teacher's courses
+        teacher_courses = Course.objects.filter(teacher=teacher)
+        
+        # Base queryset
+        qs = Test.objects.filter(course__in=teacher_courses).select_related('course')
+        
+        # Apply filters
+        course_filter = request.query_params.get('course')
+        if course_filter:
+            try:
+                qs = qs.filter(course_id=int(course_filter))
+            except ValueError:
+                pass
+        
+        published_filter = request.query_params.get('published')
+        if published_filter == 'true':
+            qs = qs.filter(visibility='published')
+        elif published_filter == 'false':
+            qs = qs.exclude(visibility='published')
+        
+        search = request.query_params.get('search', '').strip()
+        if search:
+            qs = qs.filter(Q(title__icontains=search) | Q(instructions__icontains=search))
+        
+        # Pagination
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+            limit = min(100, max(1, int(request.query_params.get('limit', 20))))
+        except ValueError:
+            page, limit = 1, 20
+        
+        total_count = qs.count()
+        offset = (page - 1) * limit
+        tests = list(qs.order_by('-created_at')[offset:offset + limit])
+        
+        # Serialize tests
+        serialized_tests = [_serialize_test(test) for test in tests]
+        
+        return Response({
+            "tests": serialized_tests,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_count,
+                "pages": (total_count + limit - 1) // limit
+            }
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error fetching teacher tests.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def teacher_test_detail(request, test_id: int):
+    """Get detailed information about a specific test including all questions."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            test = Test.objects.select_related('course').get(
+                id=test_id, 
+                course__teacher=teacher
+            )
+        except Test.DoesNotExist:
+            return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+        
+        serialized_test = _serialize_test(test, include_questions=True)
+        
+        return Response({"test": serialized_test}, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error fetching test details.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def create_test(request):
+    """
+    Create a new test.
+    
+    Expected JSON body:
+    {
+        "title": "Test Title",
+        "description": "Test description",
+        "duration": 60,
+        "difficulty": "Medium",
+        "course_id": 123,
+        "category": "Math"
+    }
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data or {}
+        
+        # Validate required fields
+        title = data.get('title', '').strip()
+        if not title:
+            return Response({"detail": "Title is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        course_id = data.get('course_id')
+        if not course_id:
+            return Response({"detail": "Course ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Verify teacher owns the course
+        try:
+            course = Course.objects.get(id=course_id, teacher=teacher)
+        except Course.DoesNotExist:
+            return Response({"detail": "Course not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Create test
+        test_data = {
+            'course': course,
+            'title': title,
+            'instructions': data.get('description', ''),
+            'duration_minutes': max(1, int(data.get('duration', 30))),
+            'visibility': 'draft',
+            'settings': {
+                'difficulty': data.get('difficulty', 'Medium'),
+                'category': data.get('category', ''),
+            }
+        }
+        
+        test = Test.objects.create(**test_data)
+        
+        serialized_test = _serialize_test(test, include_questions=True)
+        
+        return Response({
+            "test": serialized_test,
+            "message": "Test created successfully."
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error creating test.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PUT", "PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def update_test(request, test_id: int):
+    """Update test details."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            test = Test.objects.get(id=test_id, course__teacher=teacher)
+        except Test.DoesNotExist:
+            return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+        
+        data = request.data or {}
+        
+        # Update fields
+        if 'title' in data:
+            test.title = data['title'].strip()
+        if 'description' in data:
+            test.description = data['description']
+        if 'duration' in data:
+            test.duration_minutes = max(1, int(data['duration']))
+        
+        # Update settings
+        settings = test.settings or {}
+        if 'difficulty' in data:
+            settings['difficulty'] = data['difficulty']
+        if 'category' in data:
+            settings['category'] = data['category']
+        test.settings = settings
+        
+        test.save()
+        
+        serialized_test = _serialize_test(test, include_questions=True)
+        
+        return Response({
+            "test": serialized_test,
+            "message": "Test updated successfully."
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error updating test.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def delete_test(request, test_id: int):
+    """Delete a test and all its questions."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            test = Test.objects.get(id=test_id, course__teacher=teacher)
+        except Test.DoesNotExist:
+            return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+        
+        test.delete()
+        
+        return Response({
+            "message": "Test deleted successfully."
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error deleting test.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def publish_test(request, test_id: int):
+    """Publish or unpublish a test."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            test = Test.objects.get(id=test_id, course__teacher=teacher)
+        except Test.DoesNotExist:
+            return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+        
+        data = request.data or {}
+        is_published = data.get('published', True)
+        
+        # Validate test has questions before publishing
+        if is_published and not test.questions.exists():
+            return Response({
+                "detail": "Cannot publish test without questions."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        test.visibility = 'published' if is_published else 'draft'
+        test.save()
+        
+        serialized_test = _serialize_test(test)
+        
+        return Response({
+            "test": serialized_test,
+            "message": f"Test {'published' if is_published else 'unpublished'} successfully."
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error publishing test.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def duplicate_test(request, test_id: int):
+    """Create a duplicate of an existing test."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            original_test = Test.objects.get(id=test_id, course__teacher=teacher)
+        except Test.DoesNotExist:
+            return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Create duplicate test
+        duplicate_test = Test.objects.create(
+            course=original_test.course,
+            title=f"{original_test.title} (Copy)",
+            instructions=original_test.instructions,
+            duration_minutes=original_test.duration_minutes,
+            visibility='draft',
+            settings=original_test.settings or {}
+        )
+        
+        # Duplicate questions and choices
+        original_questions = original_test.questions.all().order_by('order', 'id')
+        for question in original_questions:
+            new_question = Question.objects.create(
+                test=duplicate_test,
+                order=question.order,
+                qtype=question.qtype,
+                body=question.body,
+                points=question.points,
+                meta=question.meta or {}
+            )
+            
+            # Duplicate choices
+            for choice in question.choices.all().order_by('order', 'id'):
+                Choice.objects.create(
+                    question=new_question,
+                    order=choice.order,
+                    text=choice.text,
+                    is_correct=choice.is_correct
+                )
+        
+        serialized_test = _serialize_test(duplicate_test, include_questions=True)
+        
+        return Response({
+            "test": serialized_test,
+            "message": "Test duplicated successfully."
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error duplicating test.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def add_question(request, test_id: int):
+    """
+    Add a new question to a test.
+    
+    Expected JSON body:
+    {
+        "type": "multiple-choice",
+        "question": "What is 2+2?",
+        "options": ["3", "4", "5", "6"],
+        "correctAnswer": 1,
+        "points": 2,
+        "explanation": "Basic math",
+        "difficulty": "Easy"
+    }
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            test = Test.objects.get(id=test_id, course__teacher=teacher)
+        except Test.DoesNotExist:
+            return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+        
+        data = request.data or {}
+        
+        # Validate required fields
+        question_text = data.get('question', '').strip()
+        if not question_text:
+            return Response({"detail": "Question text is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        question_type = data.get('type', 'multiple-choice')
+        points = max(1, int(data.get('points', 1)))
+        
+        # Map frontend types to backend types
+        type_mapping = {
+            'multiple-choice': 'scq',
+            'true-false': 'tf',
+            'short-answer': 'short',
+            'essay': 'essay'
+        }
+        qtype = type_mapping.get(question_type, 'scq')
+        
+        # Get next order
+        max_order = test.questions.aggregate(max_order=Count('order'))['max_order'] or 0
+        order = max_order + 1
+        
+        # Create question
+        question = Question.objects.create(
+            test=test,
+            order=order,
+            qtype=qtype,
+            body=question_text,
+            points=points,
+            meta={
+                'explanation': data.get('explanation', ''),
+                'difficulty': data.get('difficulty', 'Medium')
+            }
+        )
+        
+        # Create choices if provided
+        options = data.get('options', [])
+        correct_answer = data.get('correctAnswer')
+        
+        if options and question_type in ['multiple-choice', 'true-false']:
+            for i, option_text in enumerate(options):
+                is_correct = False
+                if question_type == 'true-false':
+                    is_correct = (option_text.lower() == 'true' and correct_answer is True) or \
+                                (option_text.lower() == 'false' and correct_answer is False)
+                elif question_type == 'multiple-choice' and isinstance(correct_answer, int):
+                    is_correct = (i == correct_answer)
+                
+                Choice.objects.create(
+                    question=question,
+                    order=i + 1,
+                    text=option_text,
+                    is_correct=is_correct
+                )
+        elif question_type in ['short-answer', 'essay'] and correct_answer:
+            # Store correct answer in meta for text questions
+            question.meta['correct_answer'] = correct_answer
+            question.save()
+        
+        serialized_question = _serialize_question(question)
+        
+        return Response({
+            "question": serialized_question,
+            "message": "Question added successfully."
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error adding question.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PUT", "PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def update_question(request, test_id: int, question_id: int):
+    """Update a question and its choices."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            question = Question.objects.get(
+                id=question_id,
+                test_id=test_id,
+                test__course__teacher=teacher
+            )
+        except Question.DoesNotExist:
+            return Response({"detail": "Question not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+        
+        data = request.data or {}
+        
+        # Update question fields
+        if 'question' in data:
+            question.body = data['question'].strip()
+        if 'points' in data:
+            question.points = max(1, int(data['points']))
+        
+        # Update meta
+        meta = question.meta or {}
+        if 'explanation' in data:
+            meta['explanation'] = data['explanation']
+        if 'difficulty' in data:
+            meta['difficulty'] = data['difficulty']
+        question.meta = meta
+        
+        question.save()
+        
+        # Update choices if provided
+        if 'options' in data:
+            # Delete existing choices
+            question.choices.all().delete()
+            
+            options = data.get('options', [])
+            correct_answer = data.get('correctAnswer')
+            question_type = data.get('type', 'multiple-choice')
+            
+            for i, option_text in enumerate(options):
+                is_correct = False
+                if question_type == 'true-false':
+                    is_correct = (option_text.lower() == 'true' and correct_answer is True) or \
+                                (option_text.lower() == 'false' and correct_answer is False)
+                elif question_type == 'multiple-choice' and isinstance(correct_answer, int):
+                    is_correct = (i == correct_answer)
+                
+                Choice.objects.create(
+                    question=question,
+                    order=i + 1,
+                    text=option_text,
+                    is_correct=is_correct
+                )
+        
+        # Update correct answer for text questions
+        if 'correctAnswer' in data and data.get('type') in ['short-answer', 'essay']:
+            meta = question.meta or {}
+            meta['correct_answer'] = data['correctAnswer']
+            question.meta = meta
+            question.save()
+        
+        serialized_question = _serialize_question(question)
+        
+        return Response({
+            "question": serialized_question,
+            "message": "Question updated successfully."
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error updating question.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def delete_question(request, test_id: int, question_id: int):
+    """Delete a question from a test."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            question = Question.objects.get(
+                id=question_id,
+                test_id=test_id,
+                test__course__teacher=teacher
+            )
+        except Question.DoesNotExist:
+            return Response({"detail": "Question not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+        
+        question.delete()
+        
+        return Response({
+            "message": "Question deleted successfully."
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error deleting question.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def teacher_courses(request):
+    """Get list of courses taught by the authenticated teacher."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        courses = Course.objects.filter(teacher=teacher, is_active=True).select_related('subject', 'classroom')
+        
+        courses_data = []
+        for course in courses:
+            courses_data.append({
+                'id': course.id,
+                'name': course.name,
+                'subject': getattr(course.subject, 'name', '') if course.subject else '',
+                'classroom': getattr(course.classroom, 'name', '') if course.classroom else '',
+                'description': course.description
+            })
+        
+        return Response({"courses": courses_data}, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        payload = {
+            "detail": "Error fetching teacher courses.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
