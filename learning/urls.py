@@ -1,8 +1,25 @@
 from django.urls import path
-from .views import my_materials,learning_modules,save_lesson_to_my_materials,resource_materials
+from . import views
 urlpatterns = [
-    path("api/materials/mine/", my_materials, name="my-materials"),
-    path("api/modules/learning/", learning_modules, name="learning-modules"),
-    path("api/save/lesson/<int:lesson_id>/", save_lesson_to_my_materials, name="save-lesson"),
-    path("api/academics/resources/", resource_materials, name="resource-materials"),
+    path("api/materials/mine/", views.my_materials, name="my-materials"),
+    path("api/modules/learning/", views.learning_modules, name="learning-modules"),
+    path("api/save/lesson/<int:lesson_id>/", views.save_lesson_to_my_materials, name="save-lesson"),
+    path("api/academics/resources/", views.resource_materials, name="resource-materials"),
+
+
+    path('api/teacher/modules/', views.list_modules, name='teacher_list_modules'),
+    path('api/teacher/modules/<int:module_id>/', views.get_module, name='teacher_get_module'),
+    path('api/teacher/modules/create/', views.create_module, name='teacher_create_module'),
+    path('api/teacher/modules/<int:module_id>/update/', views.update_module, name='teacher_update_module'),
+    path('api/teacher/modules/<int:module_id>/delete/', views.delete_module, name='teacher_delete_module'),
+    path('api/teacher/modules/<int:module_id>/publish/', views.publish_module, name='teacher_publish_module'),
+    
+    # Lesson management
+    path('api/teacher/modules/<int:module_id>/lessons/', views.add_lesson, name='teacher_add_lesson'),
+    path('api/teacher/modules/<int:module_id>/lessons/<int:lesson_id>/', views.update_lesson, name='teacher_update_lesson'),
+    path('api/teacher/modules/<int:module_id>/lessons/<int:lesson_id>/delete/', views.delete_lesson, name='teacher_delete_lesson'),
+    
+    # Helper endpoints
+    path('api/teacher/courses/', views.get_teacher_courses, name='teacher_get_courses'),
+    path('api/teacher/module-categories/', views.get_module_categories, name='teacher_get_module_categories'),
 ]

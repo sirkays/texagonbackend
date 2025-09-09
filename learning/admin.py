@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Course, Enrollment, Module, Lesson, Material, Bookmark, Note
+from .models import Course, Enrollment, Module, Lesson, Material, Bookmark, Note,ModuleCategory
 
 class EnrollmentInline(admin.TabularInline):
     model = Enrollment
@@ -64,3 +64,6 @@ class NoteAdmin(admin.ModelAdmin):
     list_filter = ("is_private", "lesson__module__course")
     search_fields = ("student__user__username", "lesson__name", "content")
     autocomplete_fields = ("student", "lesson")
+
+
+admin.site.register(ModuleCategory)

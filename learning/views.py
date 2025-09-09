@@ -1,23 +1,23 @@
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 import traceback
-
 from django.conf import settings
-from django.db.models import Q, Count, Sum
+from django.db import IntegrityError, transaction
+from django.db.models import Q, Count, Sum, Prefetch
+from django.db.utils import DataError
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_api_key.permissions import HasAPIKey
-
 from api.authentication import SessionTokenAuthentication
-
-# ⬇️ Adjust these imports to your app labels if different
-from academics.models import StudentProfile
-from learning.models import Bookmark, Course, Enrollment, Lesson, Material, Module, Note
+from academics.models import StudentProfile, TeacherProfile
+from learning.models import Bookmark, Course, Enrollment, Lesson, Material, Module, Note, ModuleCategory
 from orgs.models import OrganizationMembership
 from live.models import LiveSession  # if LiveSession is in a different app, update import
+import logging
 
+logger = logging.getLogger(__name__)
 
 def _get_student_for_user(user) -> Optional[StudentProfile]:
     mem = (OrganizationMembership.objects
@@ -881,3 +881,666 @@ def resource_materials(request):
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
             err["traceback"] = traceback.format_exc()
         return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+
+def _has_field(model, field: str) -> bool:
+    """Check if model has a specific field."""
+    try:
+        model._meta.get_field(field)
+        return True
+    except Exception:
+        return False
+
+
+def _get_teacher_for_user(user) -> Optional[TeacherProfile]:
+    """Get teacher profile for the authenticated user."""
+    mem = (OrganizationMembership.objects
+           .filter(user=user, is_active=True, role='teacher')
+           .select_related("organization")
+           .order_by("-id")
+           .first())
+    if mem:
+        tp = TeacherProfile.objects.filter(user=user, organization=mem.organization).first()
+        if tp:
+            return tp
+    return TeacherProfile.objects.filter(user=user).order_by("-id").first()
+
+
+def _serialize_lesson(lesson: Lesson) -> Dict[str, Any]:
+    """Convert lesson model to API response format."""
+    return {
+        "id": lesson.id,
+        "title": lesson.name,
+        "type": lesson.content_type,
+        "order": lesson.order,
+        "duration": str(lesson.duration_seconds) if lesson.duration_seconds else "",
+        "file": lesson.file.url if lesson.file else None,
+        "url": lesson.url or "",
+        "videoUrl": lesson.url if lesson.content_type == "video" else "",
+        "audioUrl": lesson.url if lesson.content_type == "audio" else "",
+        "textContent": lesson.meta.get("text_content", "") if lesson.meta else "",
+        "active": lesson.active,
+        "meta": lesson.meta or {}
+    }
+
+
+def _serialize_module(module: Module, include_lessons: bool = False) -> Dict[str, Any]:
+    """Convert module model to API response format."""
+    data = {
+        "id": module.id,
+        "title": module.name,
+        "description": module.description or "",
+        "difficulty": module.difficulty,
+        "category": {
+            "id": module.category.id,
+            "name": module.category.name
+        } if module.category else None,
+        "estimatedDuration": module.estimated_duration_in_minutes or 0,
+        "order": module.order,
+        "active": module.active,
+        "isPublished": module.active,  # Using active as published status
+        "course": {
+            "id": module.course.id,
+            "name": module.course.name
+        } if module.course else None,
+        "createdAt": module.created_at.isoformat() if hasattr(module, 'created_at') else None,
+        "updatedAt": module.updated_at.isoformat() if hasattr(module, 'updated_at') else None,
+    }
+    
+    if include_lessons:
+        lessons = module.lessons.filter(active=True).order_by('order', 'id')
+        data["lessons"] = [_serialize_lesson(lesson) for lesson in lessons]
+        data["lessonCount"] = lessons.count()
+    
+    return data
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def list_modules(request):
+    """
+    List all modules for the authenticated teacher's courses.
+    
+    Query params:
+      - course: course id to filter
+      - active: '1' to show only active modules, '0' for inactive, omit for all
+      - include_lessons: '1' to include lessons in response
+      - debug: '1' to include traceback on error
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"modules": [], "detail": "No teacher profile found."}, status=status.HTTP_200_OK)
+
+        # Get teacher's courses
+        courses = Course.objects.filter(teacher=teacher, is_active=True)
+        course_ids = list(courses.values_list("id", flat=True))
+        
+        if not course_ids:
+            return Response({"modules": []}, status=status.HTTP_200_OK)
+
+        qs = Module.objects.filter(course_id__in=course_ids)
+
+        # Optional: filter by course
+        course_filter = request.query_params.get("course")
+        if course_filter:
+            try:
+                qs = qs.filter(course_id=int(course_filter))
+            except ValueError:
+                pass
+
+        # Optional: filter by active status
+        active_filter = request.query_params.get("active")
+        if active_filter == "1":
+            qs = qs.filter(active=True)
+        elif active_filter == "0":
+            qs = qs.filter(active=False)
+
+        # Include lessons if requested
+        include_lessons = request.query_params.get("include_lessons") == "1"
+        if include_lessons:
+            qs = qs.prefetch_related(
+                Prefetch('lessons', queryset=Lesson.objects.filter(active=True).order_by('order', 'id'))
+            )
+
+        # Order by course, then by order, then by id
+        qs = qs.select_related('course', 'category').order_by('course__name', 'order', 'id')
+
+        modules = [_serialize_module(module, include_lessons) for module in qs]
+
+        return Response({"modules": modules}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while fetching modules.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def get_module(request, module_id: int):
+    """Get detailed information about a specific module including all lessons."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "No teacher profile found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            module = Module.objects.select_related('course', 'category').prefetch_related(
+                Prefetch('lessons', queryset=Lesson.objects.filter(active=True).order_by('order', 'id'))
+            ).get(id=module_id, course__teacher=teacher)
+        except Module.DoesNotExist:
+            return Response({"detail": "Module not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        module_data = _serialize_module(module, include_lessons=True)
+        return Response({"module": module_data}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while fetching module.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def create_module(request):
+    """
+    Create a new module.
+    
+    Expected JSON body:
+    {
+        "title": "Module Title",
+        "description": "Module description",
+        "courseId": 123,
+        "difficulty": "BEGINNER",
+        "categoryId": 456,
+        "estimatedDuration": 60,
+        "order": 1
+    }
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "No teacher profile found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        
+        # Validate required fields
+        title = data.get("title", "").strip()
+        if not title:
+            return Response({"detail": "Title is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        course_id = data.get("course_id")
+        if not course_id:
+            return Response({"detail": "Course ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify teacher owns the course
+        try:
+            course = Course.objects.get(id=course_id, teacher=teacher, is_active=True)
+        except Course.DoesNotExist:
+            return Response({"detail": "Course not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get category if provided
+        category = None
+        category_id = data.get("categoryId")
+        if category_id:
+            try:
+                category = ModuleCategory.objects.get(id=category_id, active=True)
+            except ModuleCategory.DoesNotExist:
+                return Response({"detail": "Category not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Get next order number if not provided
+        order = data.get("order")
+        if not order:
+            last_module = Module.objects.filter(course=course).order_by('-order').first()
+            order = (last_module.order + 1) if last_module else 1
+
+        # Create module
+        module = Module.objects.create(
+            name=title,
+            description=data.get("description", ""),
+            course=course,
+            difficulty=data.get("difficulty", Module.DifficultyLevel.BEGINNER),
+            category=category,
+            estimated_duration_in_minutes=data.get("estimatedDuration", 0) or None,
+            order=order,
+            active=True
+        )
+
+        module_data = _serialize_module(module, include_lessons=True)
+        return Response({"module": module_data}, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while creating module.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PUT", "PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def update_module(request, module_id: int):
+    """Update an existing module."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "No teacher profile found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            module = Module.objects.get(id=module_id, course__teacher=teacher)
+        except Module.DoesNotExist:
+            return Response({"detail": "Module not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        
+        # Update fields if provided
+        if "title" in data:
+            title = data["title"].strip()
+            if not title:
+                return Response({"detail": "Title cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+            module.name = title
+        
+        if "description" in data:
+            module.description = data["description"]
+        
+        if "difficulty" in data:
+            if data["difficulty"] in [choice[0] for choice in Module.DifficultyLevel.choices]:
+                module.difficulty = data["difficulty"]
+        
+        if "estimatedDuration" in data:
+            module.estimated_duration_in_minutes = data["estimatedDuration"] or None
+        
+        if "order" in data:
+            module.order = data["order"]
+        
+        if "categoryId" in data:
+            if data["categoryId"]:
+                try:
+                    category = ModuleCategory.objects.get(id=data["categoryId"], active=True)
+                    module.category = category
+                except ModuleCategory.DoesNotExist:
+                    return Response({"detail": "Category not found."}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                module.category = None
+
+        module.save()
+        
+        # Refresh from DB with relations
+        module = Module.objects.select_related('course', 'category').prefetch_related(
+            Prefetch('lessons', queryset=Lesson.objects.filter(active=True).order_by('order', 'id'))
+        ).get(id=module_id)
+        
+        module_data = _serialize_module(module, include_lessons=True)
+        return Response({"module": module_data}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while updating module.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def delete_module(request, module_id: int):
+    """Delete a module (soft delete by setting active=False)."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "No teacher profile found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            module = Module.objects.get(id=module_id, course__teacher=teacher)
+        except Module.DoesNotExist:
+            return Response({"detail": "Module not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Soft delete - set active to False
+        module.active = False
+        module.save()
+        
+        # Also deactivate all lessons in this module
+        Lesson.objects.filter(module=module).update(active=False)
+
+        return Response({"detail": "Module deleted successfully."}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while deleting module.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def publish_module(request, module_id: int):
+    """
+    Publish or unpublish a module.
+    
+    Expected JSON body:
+    {
+        "published": true/false
+    }
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "No teacher profile found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            module = Module.objects.get(id=module_id, course__teacher=teacher)
+        except Module.DoesNotExist:
+            return Response({"detail": "Module not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        published = data.get("published", True)
+        
+        module.active = bool(published)
+        module.save()
+
+        action = "published" if published else "unpublished"
+        return Response({
+            "detail": f"Module {action} successfully.",
+            "published": module.active
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while publishing module.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def add_lesson(request, module_id: int):
+    """
+    Add a new lesson to a module.
+    
+    Expected JSON body:
+    {
+        "title": "Lesson Title",
+        "type": "video",
+        "duration": "300",
+        "url": "https://example.com/video.mp4",
+        "order": 1
+    }
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "No teacher profile found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            module = Module.objects.get(id=module_id, course__teacher=teacher)
+        except Module.DoesNotExist:
+            return Response({"detail": "Module not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        
+        # Validate required fields
+        title = data.get("title", "").strip()
+        if not title:
+            return Response({"detail": "Title is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        content_type = data.get("type", "video")
+        if content_type not in [choice[0] for choice in Lesson.ContentType.choices]:
+            content_type = "video"
+
+        # Get next order number if not provided
+        order = data.get("order")
+        if not order:
+            last_lesson = Lesson.objects.filter(module=module).order_by('-order').first()
+            order = (last_lesson.order + 1) if last_lesson else 1
+
+        # Parse duration
+        duration_seconds = 0
+        duration_str = data.get("duration", "")
+        if duration_str:
+            try:
+                duration_seconds = int(duration_str)
+            except ValueError:
+                pass
+
+        # Create lesson
+        lesson = Lesson.objects.create(
+            name=title,
+            module=module,
+            order=order,
+            content_type=content_type,
+            url=data.get("url", ""),
+            duration_seconds=duration_seconds,
+            meta=data.get("meta", {}),
+            active=True
+        )
+
+        lesson_data = _serialize_lesson(lesson)
+        return Response({"lesson": lesson_data}, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while adding lesson.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PUT", "PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def update_lesson(request, module_id: int, lesson_id: int):
+    """Update an existing lesson."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "No teacher profile found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            lesson = Lesson.objects.get(
+                id=lesson_id, 
+                module_id=module_id, 
+                module__course__teacher=teacher
+            )
+        except Lesson.DoesNotExist:
+            return Response({"detail": "Lesson not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        
+        # Update fields if provided
+        if "title" in data:
+            title = data["title"].strip()
+            if not title:
+                return Response({"detail": "Title cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+            lesson.name = title
+        
+        if "type" in data:
+            content_type = data["type"]
+            if content_type in [choice[0] for choice in Lesson.ContentType.choices]:
+                lesson.content_type = content_type
+        
+        if "url" in data:
+            lesson.url = data["url"]
+        
+        if "duration" in data:
+            try:
+                lesson.duration_seconds = int(data["duration"]) if data["duration"] else 0
+            except ValueError:
+                pass
+        
+        if "order" in data:
+            lesson.order = data["order"]
+        
+        if "meta" in data:
+            lesson.meta = data["meta"]
+
+        lesson.save()
+        
+        lesson_data = _serialize_lesson(lesson)
+        return Response({"lesson": lesson_data}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while updating lesson.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def delete_lesson(request, module_id: int, lesson_id: int):
+    """Delete a lesson (soft delete by setting active=False)."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "No teacher profile found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            lesson = Lesson.objects.get(
+                id=lesson_id, 
+                module_id=module_id, 
+                module__course__teacher=teacher
+            )
+        except Lesson.DoesNotExist:
+            return Response({"detail": "Lesson not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Soft delete - set active to False
+        lesson.active = False
+        lesson.save()
+
+        return Response({"detail": "Lesson deleted successfully."}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while deleting lesson.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def get_teacher_courses(request):
+    """Get all courses for the authenticated teacher."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"courses": [], "detail": "No teacher profile found."}, status=status.HTTP_200_OK)
+
+        courses = Course.objects.filter(teacher=teacher, is_active=True).select_related('subject', 'classroom')
+        
+        courses_data = []
+        for course in courses:
+            courses_data.append({
+                "id": course.id,
+                "name": course.name,
+                "subject": course.subject.name if course.subject else None,
+                "classroom": course.classroom.name if course.classroom else None,
+                "description": course.description,
+                "isActive": course.is_active
+            })
+
+        return Response({"courses": courses_data}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while fetching courses.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def get_module_categories(request):
+    """Get all active module categories."""
+    try:
+        categories = ModuleCategory.objects.filter(active=True).order_by('name')
+        
+        categories_data = []
+        for category in categories:
+            categories_data.append({
+                "id": category.id,
+                "name": category.name
+            })
+
+        return Response({"categories": categories_data}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error while fetching categories.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+
+
+
+
+
+
+
+
+
