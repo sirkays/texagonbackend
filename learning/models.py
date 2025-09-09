@@ -30,9 +30,20 @@ class Enrollment(TimeStampedModel):
     class Meta:
         unique_together = ("student", "course")
 
+class ModuleCategory(NamedModel):
+    active = models.BooleanField(default=True)
+
 class Module(NamedModel):
+    class DifficultyLevel(models.TextChoices):
+        BEGINNER = "BEGINNER", "BEGINNER"
+        INTERMEDIATE = "INTERMEDIATE", "INTERMEDIATE"
+        ADVANCED = "ADVANCED", "ADVANCED"
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="modules")
     order = models.PositiveIntegerField(default=1)
+    description = models.TextField(blank=True, null=True)
+    difficulty = models.CharField(max_length=25, choices=DifficultyLevel.choices, default=DifficultyLevel.BEGINNER)
+    category = models.ForeignKey(ModuleCategory, on_delete=models.CASCADE,  blank=True, null=True)
+    estimated_duration_in_minutes = models.PositiveIntegerField(blank=True, null=True) 
     active = models.BooleanField(default=True)
 
     class Meta:
