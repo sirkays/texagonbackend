@@ -19,31 +19,7 @@ from academics.models import StudentProfile
 from learning.models import Enrollment
 from assessments.models import TestAttempt, Question
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak  # or wherever you placed them
-
-
-# ---------------- helpers ----------------
-def _get_student_for_user(user) -> Optional[StudentProfile]:
-    mem = (OrganizationMembership.objects
-           .filter(user=user, is_active=True)
-           .select_related("organization")
-           .order_by("-id")
-           .first())
-    if mem:
-        sp = StudentProfile.objects.filter(user=user, organization=mem.organization).first()
-        if sp:
-            return sp
-    return StudentProfile.objects.filter(user=user).order_by("-id").first()
-
-
-def _to_int(v) -> int:
-    try:
-        return int(v or 0)
-    except Exception:
-        return 0
-
-
-def _sum_points(student: StudentProfile) -> int:
-    return int(PointTransaction.objects.filter(student=student).aggregate(t=Sum("points")).get("t") or 0)
+from core.utils import _get_student_for_user, _to_int, _sum_points
 
 
 def _completed_courses(student: StudentProfile) -> int:
