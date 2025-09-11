@@ -14,8 +14,8 @@ from api.authentication import SessionTokenAuthentication  # adjust import path
 from rest_framework_api_key.permissions import HasAPIKey  # adjust import path
 from .models import LiveSession  # adjust app label if different
 from academics.models import TeacherProfile  # adjust if needed
-from learning.models import Course
-from core.utils import _get_teacher_for_user
+from learning.models import Course,Enrollment
+from core.utils import _get_teacher_for_user, _get_student_for_user
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
@@ -145,3 +145,87 @@ def create_live_session(request):
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def student_live_sessions(request):
+    """
+    Get live sessions for the authenticated student.
+    - If `course_id` is provided as a query param, only sessions for that course are returned.
+    - Otherwise, sessions for all active enrollments are returned.
+
+    Example:
+    GET /api/student/live-sessions/              -> all sessions
+    GET /api/student/live-sessions/?course_id=5  -> sessions for course 5
+    """
+    try:
+        user = request.user
+        student = _get_student_for_user(user)
+        if not student:
+            return Response({"detail": "Student profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Optional course filter
+        course_id = request.query_params.get("course_id")
+
+        # Base queryset: student's active enrollments
+        enrollments = Enrollment.objects.filter(
+            student=student,
+            status=Enrollment.Status.ACTIVE
+        ).select_related(
+            "course__subject", "course__classroom", "course__teacher__user"
+        )
+
+        if course_id:
+            enrollments = enrollments.filter(course_id=course_id)
+
+        if not enrollments.exists():
+            return Response({"live_sessions": []}, status=status.HTTP_200_OK)
+
+        # Collect course IDs
+        course_ids = [en.course_id for en in enrollments]
+
+        # Fetch live sessions
+        live_sessions = (
+            LiveSession.objects.filter(course_id__in=course_ids, active=True)
+            .select_related("course__subject", "course__classroom", "course__teacher__user", "host__user")
+            .order_by("scheduled_at")
+        )
+
+        sessions_data = []
+        for session in live_sessions:
+            sessions_data.append({
+                "id": session.id,
+                "title": session.title,
+                "scheduled_at": session.scheduled_at.isoformat(),
+                "duration_minutes": session.duration_minutes,
+                "join_url": session.join_url,
+                "recording_url": session.recording_url,
+                "course": {
+                    "id": session.course.id,
+                    "name": session.course.name,
+                    "subject": getattr(session.course.subject, "name", ""),
+                    "classroom": getattr(session.course.classroom, "name", ""),
+                    "teacher": getattr(session.course.teacher.user, "email", ""),
+                },
+                "host": getattr(session.host.user, "email", ""),
+                "active": session.active,
+            })
+
+        return Response({"live_sessions": sessions_data}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error fetching student live sessions.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
