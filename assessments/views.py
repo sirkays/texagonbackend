@@ -23,6 +23,9 @@ from assessments.models import Test, Question, Choice, TestAttempt,TestAnswer
 from learning.models import Enrollment, Course
 from orgs.models import OrganizationMembership
 import logging
+from datetime import timezone as dt_timezone
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +220,7 @@ def available_tests(request):
 
         # Sort tests: scheduled first by start time, else newest first
         if _has_field(Test, "start_at"):
-            tests.sort(key=lambda t: (getattr(t, "start_at", None) or timezone.datetime.max.replace(tzinfo=timezone.utc), -t.id))
+            tests.sort(key=lambda t: (getattr(t, "start_at", None) or timezone.datetime.max.replace(tzinfo=dt_timezone.utc), -t.id))
         else:
             tests.sort(key=lambda t: -t.id)
 

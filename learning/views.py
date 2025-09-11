@@ -15,6 +15,10 @@ from academics.models import StudentProfile, TeacherProfile
 from learning.models import Bookmark, Course, Enrollment, Lesson, Material, Module, Note, ModuleCategory
 from orgs.models import OrganizationMembership
 from live.models import LiveSession  # if LiveSession is in a different app, update import
+import os
+import json
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.decorators import parser_classes
 import logging
 
 logger = logging.getLogger(__name__)
@@ -1292,19 +1296,22 @@ def publish_module(request, module_id: int):
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 @transaction.atomic
 def add_lesson(request, module_id: int):
     """
     Add a new lesson to a module.
-    
-    Expected JSON body:
-    {
-        "title": "Lesson Title",
-        "type": "video",
-        "duration": "300",
-        "url": "https://example.com/video.mp4",
-        "order": 1
-    }
+
+    Accepts multipart/form-data. Use field name 'file' for the uploaded file.
+
+    Example form fields:
+      - title (required)
+      - type (optional) (video|audio|pdf|doc|link)
+      - duration (optional) (seconds)
+      - url (optional)
+      - order (optional)
+      - meta (optional) JSON string or JSON object
+      - file (optional) file upload
     """
     try:
         user = request.user
@@ -1318,42 +1325,84 @@ def add_lesson(request, module_id: int):
             return Response({"detail": "Module not found."}, status=status.HTTP_404_NOT_FOUND)
 
         data = request.data or {}
-        
+
         # Validate required fields
-        title = data.get("title", "").strip()
+        title = (data.get("title") or "").strip()
         if not title:
             return Response({"detail": "Title is required."}, status=status.HTTP_400_BAD_REQUEST)
-        
+
+        # Determine content type (validate choice)
         content_type = data.get("type", "video")
         if content_type not in [choice[0] for choice in Lesson.ContentType.choices]:
             content_type = "video"
 
         # Get next order number if not provided
         order = data.get("order")
-        if not order:
+        if order in (None, ""):
             last_lesson = Lesson.objects.filter(module=module).order_by('-order').first()
             order = (last_lesson.order + 1) if last_lesson else 1
+        else:
+            try:
+                order = int(order)
+            except (TypeError, ValueError):
+                order = 1
 
         # Parse duration
         duration_seconds = 0
-        duration_str = data.get("duration", "")
-        if duration_str:
+        duration_str = data.get("duration", "") or ""
+        if duration_str != "":
             try:
                 duration_seconds = int(duration_str)
             except ValueError:
-                pass
+                duration_seconds = 0
 
-        # Create lesson
-        lesson = Lesson.objects.create(
+        # Parse meta if provided as string (multipart forms often send JSON as string)
+        meta = data.get("meta", {}) or {}
+        if isinstance(meta, str) and meta:
+            try:
+                meta = json.loads(meta)
+            except json.JSONDecodeError:
+                # leave as string or empty dict
+                meta = {}
+
+        # Handle file upload (if any)
+        uploaded_file = None
+        if request.FILES:
+            uploaded_file = request.FILES.get("file")  # field name 'file'
+            if uploaded_file:
+                # attempt to set content_type based on extension if user didn't provide a suitable type
+                name = uploaded_file.name or ""
+                _, ext = os.path.splitext(name)
+                ext = ext.lower().lstrip(".")
+                ext_to_type = {
+                    # video
+                    "mp4": "video", "mov": "video", "avi": "video", "mkv": "video", "webm": "video",
+                    # audio
+                    "mp3": "audio", "wav": "audio", "m4a": "audio", "aac": "audio",
+                    # pdf
+                    "pdf": "pdf",
+                    # documents
+                    "doc": "doc", "docx": "doc", "txt": "doc", "rtf": "doc", "odt": "doc",
+                }
+                guessed = ext_to_type.get(ext)
+                if guessed and guessed in [choice[0] for choice in Lesson.ContentType.choices]:
+                    content_type = guessed
+
+        # Create lesson (assign file if provided)
+        lesson = Lesson(
             name=title,
             module=module,
             order=order,
             content_type=content_type,
-            url=data.get("url", ""),
+            url=data.get("url", "") or "",
             duration_seconds=duration_seconds,
-            meta=data.get("meta", {}),
+            meta=meta,
             active=True
         )
+        if uploaded_file:
+            lesson.file = uploaded_file
+
+        lesson.save()
 
         lesson_data = _serialize_lesson(lesson)
         return Response({"lesson": lesson_data}, status=status.HTTP_201_CREATED)
@@ -1371,9 +1420,10 @@ def add_lesson(request, module_id: int):
 @api_view(["PUT", "PATCH"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 @transaction.atomic
 def update_lesson(request, module_id: int, lesson_id: int):
-    """Update an existing lesson."""
+    """Update an existing lesson. Supports uploading a new file (field 'file') or removing existing file."""
     try:
         user = request.user
         teacher = _get_teacher_for_user(user)
@@ -1382,44 +1432,83 @@ def update_lesson(request, module_id: int, lesson_id: int):
 
         try:
             lesson = Lesson.objects.get(
-                id=lesson_id, 
-                module_id=module_id, 
+                id=lesson_id,
+                module_id=module_id,
                 module__course__teacher=teacher
             )
         except Lesson.DoesNotExist:
             return Response({"detail": "Lesson not found."}, status=status.HTTP_404_NOT_FOUND)
 
         data = request.data or {}
-        
+
         # Update fields if provided
         if "title" in data:
-            title = data["title"].strip()
+            title = (data["title"] or "").strip()
             if not title:
                 return Response({"detail": "Title cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
             lesson.name = title
-        
+
         if "type" in data:
             content_type = data["type"]
             if content_type in [choice[0] for choice in Lesson.ContentType.choices]:
                 lesson.content_type = content_type
-        
+
         if "url" in data:
-            lesson.url = data["url"]
-        
+            lesson.url = data["url"] or ""
+
         if "duration" in data:
             try:
                 lesson.duration_seconds = int(data["duration"]) if data["duration"] else 0
             except ValueError:
                 pass
-        
-        if "order" in data:
-            lesson.order = data["order"]
-        
+
+        if "order" in data and data["order"] not in (None, ""):
+            try:
+                lesson.order = int(data["order"])
+            except (TypeError, ValueError):
+                pass
+
         if "meta" in data:
-            lesson.meta = data["meta"]
+            meta = data.get("meta", {})
+            if isinstance(meta, str) and meta:
+                try:
+                    meta = json.loads(meta)
+                except json.JSONDecodeError:
+                    meta = {}
+            lesson.meta = meta
+
+        # Remove file if requested (send remove_file=true in form-data or JSON)
+        remove_file = str(data.get("remove_file", "")).lower() in ("1", "true", "yes")
+        if remove_file and lesson.file:
+            # delete file from storage and clear field
+            lesson.file.delete(save=False)
+            lesson.file = None
+
+        # Handle uploaded file (replace existing)
+        if request.FILES:
+            uploaded_file = request.FILES.get("file")
+            if uploaded_file:
+                # optionally remove previous file
+                if lesson.file:
+                    lesson.file.delete(save=False)
+                lesson.file = uploaded_file
+
+                # attempt to update content_type from extension if sensible
+                name = uploaded_file.name or ""
+                _, ext = os.path.splitext(name)
+                ext = ext.lower().lstrip(".")
+                ext_to_type = {
+                    "mp4": "video", "mov": "video", "avi": "video", "mkv": "video", "webm": "video",
+                    "mp3": "audio", "wav": "audio", "m4a": "audio", "aac": "audio",
+                    "pdf": "pdf",
+                    "doc": "doc", "docx": "doc", "txt": "doc", "rtf": "doc", "odt": "doc",
+                }
+                guessed = ext_to_type.get(ext)
+                if guessed and guessed in [choice[0] for choice in Lesson.ContentType.choices]:
+                    lesson.content_type = guessed
 
         lesson.save()
-        
+
         lesson_data = _serialize_lesson(lesson)
         return Response({"lesson": lesson_data}, status=status.HTTP_200_OK)
 
