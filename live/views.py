@@ -229,3 +229,68 @@ def student_live_sessions(request):
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def update_live_session_status(request, session_id):
+    """
+    Update the status of a LiveSession.
+    Only the teacher assigned to the course may update it.
+
+    Example PATCH body:
+    {
+        "status": "completed"   # pending | started | completed | cancelled
+    }
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Find live session
+        try:
+            live_session = LiveSession.objects.select_related("course__teacher").get(pk=session_id)
+        except LiveSession.DoesNotExist:
+            return Response({"detail": "Live session not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Ensure the teacher is assigned to the course
+        if live_session.course.teacher_id != teacher.id:
+            return Response({"detail": "You are not authorized to update this live session."},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Validate status
+        new_status = request.data.get("status")
+        valid_choices = dict(LiveSession.Status.choices).keys()
+        if not new_status or new_status not in valid_choices:
+            return Response({
+                "detail": f"Invalid status. Must be one of: {list(valid_choices)}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Update
+        live_session.status = new_status
+        live_session.save(update_fields=["status"])
+
+        payload = {
+            "id": live_session.id,
+            "title": live_session.title,
+            "course_id": live_session.course_id,
+            "status": live_session.status,
+            "scheduled_at": live_session.scheduled_at.isoformat(),
+            "duration_minutes": live_session.duration_minutes,
+            "updated": getattr(live_session, "modified", None)  # TimeStampedModel usually has modified/updated
+        }
+
+        return Response(payload, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error updating live session status.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

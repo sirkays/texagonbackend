@@ -2,6 +2,11 @@ from django.db import models
 from core.models import TimeStampedModel
 
 class LiveSession(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "started", "Started"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
     course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="live_sessions")
     title = models.CharField(max_length=255)
     scheduled_at = models.DateTimeField()
@@ -10,6 +15,7 @@ class LiveSession(TimeStampedModel):
     join_url = models.URLField(blank=True)
     recording_url = models.URLField(blank=True)
     meta = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     active = models.BooleanField(default=True)
 
 class TutoringBooking(TimeStampedModel):
