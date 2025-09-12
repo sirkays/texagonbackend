@@ -988,7 +988,7 @@ def list_modules(request):
         if not course_ids:
             return Response({"modules": []}, status=status.HTTP_200_OK)
 
-        qs = Module.objects.filter(course_id__in=course_ids)
+        qs = Module.objects.filter(course_id__in=course_ids, active=True)
 
         # Optional: filter by course
         course_filter = request.query_params.get("course")
@@ -1047,6 +1047,9 @@ def get_module(request, module_id: int):
         except Module.DoesNotExist:
             return Response({"detail": "Module not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        if module.active is False:
+            return Response({"detail": "Module not active."}, status=status.HTTP_404_NOT_FOUND)
+            
         module_data = _serialize_module(module, include_lessons=True)
         return Response({"module": module_data}, status=status.HTTP_200_OK)
 
@@ -1434,7 +1437,8 @@ def update_lesson(request, module_id: int, lesson_id: int):
             lesson = Lesson.objects.get(
                 id=lesson_id,
                 module_id=module_id,
-                module__course__teacher=teacher
+                module__course__teacher=teacher,
+                active =True
             )
         except Lesson.DoesNotExist:
             return Response({"detail": "Lesson not found."}, status=status.HTTP_404_NOT_FOUND)
