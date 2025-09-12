@@ -337,7 +337,7 @@ def learning_modules(request):
         course_ids_from_modules = []
         if module_ids:
             course_ids_from_modules = list(
-                Module.objects.filter(id__in=module_ids).values_list("course_id", flat=True)
+                Module.objects.filter(id__in=module_ids, active=True).values_list("course_id", flat=True)
             )
             # Only keep courses the user is enrolled in
             course_ids_from_modules = [c for c in course_ids_from_modules if c in enrolled_course_ids]
@@ -1049,7 +1049,7 @@ def get_module(request, module_id: int):
 
         if module.active is False:
             return Response({"detail": "Module not active."}, status=status.HTTP_404_NOT_FOUND)
-            
+
         module_data = _serialize_module(module, include_lessons=True)
         return Response({"module": module_data}, status=status.HTTP_200_OK)
 
