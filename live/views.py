@@ -154,41 +154,59 @@ def create_live_session(request):
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
-def student_live_sessions(request):
+def user_live_sessions(request):
     """
-    Get live sessions for the authenticated student.
+    Get live sessions for the authenticated student or teacher.
+
     - If `course_id` is provided as a query param, only sessions for that course are returned.
-    - Otherwise, sessions for all active enrollments are returned.
+    - For students: sessions come from their active enrollments.
+    - For teachers: sessions come from the courses they teach.
 
     Example:
-    GET /api/student/live-sessions/              -> all sessions
-    GET /api/student/live-sessions/?course_id=5  -> sessions for course 5
+    GET /api/live-sessions/              -> all sessions
+    GET /api/live-sessions/?course_id=5  -> sessions for course 5
     """
     try:
         user = request.user
         student = _get_student_for_user(user)
-        if not student:
-            return Response({"detail": "Student profile not found."}, status=status.HTTP_403_FORBIDDEN)
+        teacher = None if student else _get_teacher_for_user(user)
+
+        if not student and not teacher:
+            return Response(
+                {"detail": "Student or Teacher profile not found."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # Optional course filter
         course_id = request.query_params.get("course_id")
 
-        # Base queryset: student's active enrollments
-        enrollments = Enrollment.objects.filter(
-            student=student,
-            status=Enrollment.Status.ACTIVE
-        ).select_related(
-            "course__subject", "course__classroom", "course__teacher__user"
-        )
+        # Base queryset
+        if student:
+            enrollments = Enrollment.objects.filter(
+                student=student,
+                status=Enrollment.Status.ACTIVE
+            ).select_related(
+                "course__subject", "course__classroom", "course__teacher__user"
+            )
 
-        if course_id:
-            enrollments = enrollments.filter(course_id=course_id)
+            if course_id:
+                enrollments = enrollments.filter(course_id=course_id)
 
-        if not enrollments.exists():
-            return Response({"live_sessions": []}, status=status.HTTP_200_OK)
+            if not enrollments.exists():
+                return Response({"live_sessions": []}, status=status.HTTP_200_OK)
 
-        # Collect course IDs
-        course_ids = [en.course_id for en in enrollments]
+            course_ids = [en.course_id for en in enrollments]
+
+        else:  # teacher
+            courses = Course.objects.filter(teacher=teacher, is_active=True)
+
+            if course_id:
+                courses = courses.filter(id=course_id)
+
+            if not courses.exists():
+                return Response({"live_sessions": []}, status=status.HTTP_200_OK)
+
+            course_ids = list(courses.values_list("id", flat=True))
 
         # Fetch live sessions
         live_sessions = (
@@ -208,25 +226,27 @@ def student_live_sessions(request):
                 "recording_url": session.recording_url,
                 "course": {
                     "id": session.course.id,
-                    "name": session.course.name,
+                    "name": getattr(session.course, "name", ""),
                     "subject": getattr(session.course.subject, "name", ""),
                     "classroom": getattr(session.course.classroom, "name", ""),
                     "teacher": getattr(session.course.teacher.user, "email", ""),
                 },
                 "host": getattr(session.host.user, "email", ""),
                 "active": session.active,
+                "status": session.status,
             })
 
         return Response({"live_sessions": sessions_data}, status=status.HTTP_200_OK)
 
     except Exception as e:
         payload = {
-            "detail": "Error fetching student live sessions.",
+            "detail": "Error fetching live sessions.",
             "error": f"{type(e).__name__}: {e}",
         }
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 
 
