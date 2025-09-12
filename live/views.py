@@ -294,3 +294,134 @@ def update_live_session_status(request, session_id):
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def delete_live_session(request, session_id):
+    """
+    Delete a LiveSession.
+    Only the teacher assigned to the course of the session may delete it.
+
+    Example:
+    DELETE /api/live-sessions/12/
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Find session
+        try:
+            live_session = LiveSession.objects.select_related("course__teacher").get(pk=session_id)
+        except LiveSession.DoesNotExist:
+            return Response({"detail": "Live session not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check ownership
+        if live_session.course.teacher_id != teacher.id:
+            return Response({"detail": "You are not authorized to delete this live session."},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Delete session
+        live_session.delete()
+
+        return Response({"detail": f"Live session {session_id} deleted successfully."},
+                        status=status.HTTP_204_NO_CONTENT)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error deleting live session.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def update_live_session(request, session_id):
+    """
+    Update a LiveSession (partial update).
+    Only the teacher assigned to the course may update it.
+
+    Example PATCH body:
+    {
+        "title": "New Title",
+        "scheduled_at": "2025-09-12T14:00:00Z",
+        "duration_minutes": 90,
+        "join_url": "https://zoom.us/new-link",
+        "active": false
+    }
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Get session
+        try:
+            live_session = LiveSession.objects.select_related("course__teacher").get(pk=session_id)
+        except LiveSession.DoesNotExist:
+            return Response({"detail": "Live session not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if teacher is assigned
+        if live_session.course.teacher_id != teacher.id:
+            return Response({"detail": "You are not authorized to update this live session."},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Allowed fields to update
+        allowed_fields = [
+            "title", "scheduled_at", "duration_minutes",
+            "join_url", "recording_url", "meta", "active"
+        ]
+
+        data = request.data
+        updated = False
+
+        for field in allowed_fields:
+            if field in data:
+                setattr(live_session, field, data[field])
+                updated = True
+
+        if updated:
+            live_session.save()
+        else:
+            return Response({"detail": "No valid fields provided for update."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        payload = {
+            "id": live_session.id,
+            "title": live_session.title,
+            "scheduled_at": live_session.scheduled_at.isoformat(),
+            "duration_minutes": live_session.duration_minutes,
+            "join_url": live_session.join_url,
+            "recording_url": live_session.recording_url,
+            "meta": live_session.meta,
+            "status": live_session.status,
+            "active": live_session.active,
+            "course": {
+                "id": live_session.course.id,
+                "name": live_session.course.name,
+                "teacher": getattr(live_session.course.teacher.user, "email", ""),
+            }
+        }
+
+        return Response(payload, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error updating live session.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
