@@ -15,12 +15,12 @@ from api.authentication import SessionTokenAuthentication
 
 # 🔧 adjust imports to your app labels/namespaces
 from orgs.models import OrganizationMembership
-from academics.models import StudentProfile
+from academics.models import StudentProfile, ParentProfile
 from learning.models import Enrollment
 from assessments.models import TestAttempt, Question
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak  # or wherever you placed them
 from core.utils import _get_student_for_user, _to_int, _sum_points
-
+from django.contrib.auth.decorators import login_required
 
 def _completed_courses(student: StudentProfile) -> int:
     return int(
@@ -275,3 +275,24 @@ def _dummy_payload() -> Dict[str, Any]:
         "achievements": achievements,
         "badges": badges,
     }
+
+
+@login_required
+def generate_subs(request):
+    now = timezone.now()
+    qs = ParentProfile.objects.select_related("organization_subscription__plan").filter(
+        organization_subscription__isnull=False,
+        organization_subscription__status=ParentProfile.organization_subscription.field.related_model.Status.ACTIVE
+    )
+    # above filter uses model attr for clarity; you can replace with literal "active"
+
+    total_created = 0
+    for parent in qs:
+        try:
+            created = parent.generate_subscription_invoices(now=now)
+            total_created += len(created)
+
+        except Exception as e:
+            pass
+
+    return JsonResponse({"total_created":total_created})
