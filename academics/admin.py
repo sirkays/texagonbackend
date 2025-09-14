@@ -29,12 +29,26 @@ class TeacherProfileAdmin(admin.ModelAdmin):
     autocomplete_fields = ("user", "organization")
     filter_horizontal = ("specialties",)
 
+
+
 @admin.register(ParentProfile)
 class ParentProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "organization", "created_at")
-    list_filter = ("organization",)
+    list_display = (
+        "user",
+        "organization",
+        "organization_subscription",
+        "last_billed_at",
+        "created_at",
+    )
+    list_filter = (
+        "organization",
+        "organization_subscription",
+        ("last_billed_at", admin.DateFieldListFilter),
+    )
     search_fields = ("user__username", "user__email", "organization__name")
-    autocomplete_fields = ("user", "organization")
+    autocomplete_fields = ("user", "organization", "organization_subscription")
+    ordering = ("-created_at",)
+
 
 @admin.register(ParentChildLink)
 class ParentChildLinkAdmin(admin.ModelAdmin):
