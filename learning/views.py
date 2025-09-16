@@ -1372,6 +1372,7 @@ def add_lesson(request, module_id: int):
         uploaded_file = None
         if request.FILES:
             uploaded_file = request.FILES.get("file")  # field name 'file'
+            cover_image = request.FILES.get("cover_image")
             if uploaded_file:
                 # attempt to set content_type based on extension if user didn't provide a suitable type
                 name = uploaded_file.name or ""
@@ -1390,7 +1391,7 @@ def add_lesson(request, module_id: int):
                 guessed = ext_to_type.get(ext)
                 if guessed and guessed in [choice[0] for choice in Lesson.ContentType.choices]:
                     content_type = guessed
-
+        
         # Create lesson (assign file if provided)
         lesson = Lesson(
             name=title,
@@ -1404,6 +1405,9 @@ def add_lesson(request, module_id: int):
         )
         if uploaded_file:
             lesson.file = uploaded_file
+
+        if cover_image:
+            lesson.cover_image = cover_image
 
         lesson.save()
 
@@ -1490,7 +1494,12 @@ def update_lesson(request, module_id: int, lesson_id: int):
 
         # Handle uploaded file (replace existing)
         if request.FILES:
+
             uploaded_file = request.FILES.get("file")
+            cover_image = request.FILES.get("cover_image")
+            if cover_image:
+                lesson.cover_image = cover_image
+                
             if uploaded_file:
                 # optionally remove previous file
                 if lesson.file:

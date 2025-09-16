@@ -277,7 +277,7 @@ def _dummy_payload() -> Dict[str, Any]:
     }
 
 
-@login_required
+#@login_required
 def generate_subs(request):
     now = timezone.now()
     qs = ParentProfile.objects.select_related("organization_subscription__plan").filter(
@@ -285,7 +285,7 @@ def generate_subs(request):
         organization_subscription__status=ParentProfile.organization_subscription.field.related_model.Status.ACTIVE
     )
     # above filter uses model attr for clarity; you can replace with literal "active"
-
+    print(qs, " qs... ")
     total_created = 0
     for parent in qs:
         try:

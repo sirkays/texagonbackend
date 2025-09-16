@@ -96,6 +96,7 @@ class ParentProfile(TimeStampedModel):
             return []
 
         plan = subscription.plan
+        print(plan, " pppp")
         billing_days = self._billing_period_days()
 
         if self.last_billed_at:
@@ -109,13 +110,15 @@ class ParentProfile(TimeStampedModel):
         created_invoices = []
         max_iterations = 24
         iterations = 0
-
+        
+        """
         sub_end_datetime = None
         if subscription.end_date:
             sub_end_datetime = timezone.make_aware(
                 datetime.datetime.combine(subscription.end_date, datetime.time.max)
             )
 
+        """
         # Prepare/get parent membership once (we'll attach it to all created invoices)
         # Option: create membership automatically if not present.
         membership, _ = OrganizationMembership.objects.get_or_create(
@@ -125,10 +128,10 @@ class ParentProfile(TimeStampedModel):
             defaults={"is_active": True}
         )
         # Note: get_or_create honors the unique_together ("user","organization","role")
-
+        print(iterations, " iterations ",max_iterations)
         while iterations < max_iterations and next_due <= now:
-            if sub_end_datetime and next_due > sub_end_datetime:
-                break
+            #if sub_end_datetime and next_due > sub_end_datetime:
+                #break
 
             issued_at = next_due
             amount = Decimal(getattr(plan, "price", 0) or 0)

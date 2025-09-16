@@ -59,6 +59,7 @@ class Lesson(NamedModel):
         LINK = "link", "External Link"
 
     module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name="lessons")
+    cover_image = models.ImageField(upload_to="covers/", blank=True, null=True)
     order = models.PositiveIntegerField(default=1)
     content_type = models.CharField(max_length=16, choices=ContentType.choices)
     file = models.FileField(upload_to="lessons/files/", blank=True, null=True)
