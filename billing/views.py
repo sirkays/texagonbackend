@@ -10,9 +10,12 @@ from rest_framework import status
 from rest_framework_api_key.permissions import HasAPIKey
 from api.authentication import SessionTokenAuthentication  # your auth
 from orgs.models import OrganizationMembership
-from billing.models_invoice import SubscriptionInvoice, SubscriptionPayment  # adjust paths
-
+from billing.models import SubscriptionInvoice, SubscriptionPayment  # adjust paths
+from .utils import generate_payment_link
 import secrets
+
+from academics.models import ParentProfile  # adjust import path to your ParentProfile
+
 
 # try to import nanoid; fallback if not installed
 try:
@@ -43,9 +46,10 @@ def _user_active_membership_for_org(user, org):
     return OrganizationMembership.objects.filter(user=user, organization=org, is_active=True).order_by("-id").first()
 
 
-def _serialize_payment(payment: SubscriptionPayment) -> dict:
+def _serialize_payment(payment: SubscriptionPayment,payment_link: str) -> dict:
     """Minimal serializer for responses (expand as needed)."""
     return {
+        "payment_link":payment_link,
         "id": payment.pk,
         "reference": payment.reference,
         "invoice_id": payment.invoice_id,
@@ -78,12 +82,18 @@ def create_subscription_payment(request):
         return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
 
     invoice_id = request.data.get("invoice") or request.data.get("invoice_id")
+    redirect_url = request.data.get("redirect_url")
+
+    if not redirect_url:
+        return Response({"detail": "Missing 'redirect_url' in request body."}, status=status.HTTP_400_BAD_REQUEST)
+
+
     if not invoice_id:
         return Response({"detail": "Missing 'invoice' id in request body."}, status=status.HTTP_400_BAD_REQUEST)
 
     # load invoice with subscription -> organization
     try:
-        invoice = SubscriptionInvoice.objects.select_related("subscription__organization").get(pk=invoice_id)
+        invoice = SubscriptionInvoice.objects.select_related("subscription__organization").get(number=invoice_id)
     except SubscriptionInvoice.DoesNotExist:
         return Response({"detail": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -113,10 +123,22 @@ def create_subscription_payment(request):
 
     try:
         payment.save()
+        payment_plan = invoice.subscription.plan.name
+        customer_detail = {
+            "email":request.user.email,
+        }
+        title = "Subscription Payment"
+        payment_link = generate_payment_link(
+            request,
+            request.user.id, 
+            reference, redirect_url,
+            title,customer_detail,
+            amount,payment_plan
+        )
     except Exception as e:
         return Response({"detail": "Could not create payment.", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response(_serialize_payment(payment), status=status.HTTP_201_CREATED)
+    return Response(_serialize_payment(payment, payment_link), status=status.HTTP_201_CREATED)
 
 
 @api_view(["PATCH"])
@@ -140,18 +162,15 @@ def update_subscription_payment(request, reference):
 
     payment = get_object_or_404(SubscriptionPayment.objects.select_related("invoice__subscription__organization"), reference=reference)
     org = payment.invoice.subscription.organization
-
     membership = _user_active_membership_for_org(user, org)
     if membership is None:
         return Response({"detail": "User is not attached to the payment's organization."}, status=status.HTTP_403_FORBIDDEN)
-
     allowed_fields = {"status", "method", "paid_at"}
     payload_keys = set(request.data.keys()) & allowed_fields
     if not payload_keys:
         return Response({"detail": f"Provide one of the updatable fields: {', '.join(sorted(allowed_fields))}."},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    # Validate status if provided
     status_value = request.data.get("status")
     if status_value is not None:
         valid_statuses = {choice[0] for choice in SubscriptionPayment.Status.choices}
@@ -185,6 +204,76 @@ def update_subscription_payment(request, reference):
     except Exception as e:
         return Response({"detail": "Could not update payment.", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response(_serialize_payment(payment), status=status.HTTP_200_OK)
+    return Response(_serialize_payment(payment, "None"), status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def fetch_parent_invoices(request):
+    """
+    GET /api/parent/invoices/?status=paid
+
+    Returns invoices for the logged-in parent. Filters by:
+      - invoices where organization_membership == the parent's membership (preferred)
+      - fallback: invoices whose meta references the parent_profile_id (compatibility)
+    Optional: ?status=<one_of_open,paid,void,uncollectible,active>
+    """
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    parent_profile = getattr(user, "parent_profile", None)
+    if parent_profile is None:
+        return Response({"detail": "Parent profile not found for this user."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Try to find the parent membership (prefer any membership record regardless of is_active,
+    # because invoices are historical and we may still want to show them).
+    membership = (
+        OrganizationMembership.objects
+        .filter(user=user, organization=parent_profile.organization, role=OrganizationMembership.Role.PARENT)
+        .order_by("-id")
+        .first()
+    )
+
+    status_param = request.query_params.get("status")
+    if status_param:
+        valid_statuses = {choice[0] for choice in SubscriptionInvoice.Status.choices}
+        if status_param not in valid_statuses:
+            return Response(
+                {"detail": f"Invalid status '{status_param}'. Valid: {', '.join(sorted(valid_statuses))}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    qs = SubscriptionInvoice.objects.select_related("subscription__organization", "organization_membership")
+
+    if membership:
+        # Preferred branch: filter by FK
+        invoices_qs = qs.filter(organization_membership=membership).order_by("-issued_at")
+    else:
+        return Response({"detail": "Membership profile not found for this user."}, status=status.HTTP_404_NOT_FOUND)
+    if status_param:
+        invoices_qs = invoices_qs.filter(status=status_param)
+    # Simple serializer
+    def _serialize(inv: SubscriptionInvoice):
+        return {
+            "id": inv.pk,
+            "number": inv.number,
+            "subscription_id": inv.subscription_id,
+            "organization_id": inv.subscription.organization_id if inv.subscription_id else None,
+            "organization_membership_id": inv.organization_membership_id,
+            "amount": str(inv.amount),
+            "currency": inv.currency,
+            "issued_at": inv.issued_at.isoformat() if inv.issued_at else None,
+            "due_at": inv.due_at.isoformat() if inv.due_at else None,
+            "status": inv.status,
+            "meta": inv.meta or {},
+            "created_at": getattr(inv, "created_at", None).isoformat() if getattr(inv, "created_at", None) else None,
+            "updated_at": getattr(inv, "updated_at", None).isoformat() if getattr(inv, "updated_at", None) else None,
+        }
+
+    data = [_serialize(inv) for inv in invoices_qs]
+    return Response({"count": len(data), "results": data}, status=status.HTTP_200_OK)
+
 
 

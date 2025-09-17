@@ -10,6 +10,11 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "CHANGE_ME")
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
+PAYMENT_TEST = os.environ.get("PAYMENT_TEST", "1") == "1"
+LOGO_URL = os.environ.get("LOGO_URL", "https://texagon.epichouse.online/logo.png")
+
+TEST_KEY_SECRET = os.environ.get("TEST_KEY_SECRET", "CHANGE_ME")
+FLW_SECRET_KEY = os.environ.get("FLW_SECRET_KEY", "CHANGE_ME")
 
 if os.environ.get('LOCAL') == "0":
     CSRF_TRUSTED_ORIGINS = [
