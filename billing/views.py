@@ -11,9 +11,9 @@ from rest_framework_api_key.permissions import HasAPIKey
 from api.authentication import SessionTokenAuthentication  # your auth
 from orgs.models import OrganizationMembership
 from billing.models import SubscriptionInvoice, SubscriptionPayment  # adjust paths
-from .utils import generate_payment_link
+from .utils import generate_payment_link,confirm_transaction
 import secrets
-
+from core.utils import get_object_or_404_ajax
 from academics.models import ParentProfile  # adjust import path to your ParentProfile
 
 
@@ -274,6 +274,69 @@ def fetch_parent_invoices(request):
 
     data = [_serialize(inv) for inv in invoices_qs]
     return Response({"count": len(data), "results": data}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def confirm_payement(request):
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    parent_profile = getattr(user, "parent_profile", None)
+    if parent_profile is None:
+        return Response({"detail": "Parent profile not found for this user."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Try to find the parent membership (prefer any membership record regardless of is_active,
+    # because invoices are historical and we may still want to show them).
+    membership = (
+        OrganizationMembership.objects
+        .filter(user=user, organization=parent_profile.organization, role=OrganizationMembership.Role.PARENT)
+        .order_by("-id")
+        .first()
+    )
+
+    transaction_id = request.data.get("transaction_id")
+    tx_ref = request.data.get("tx_ref")
+    invoice_id = request.data.get("invoice_id")
+    
+    subscription_payment = get_object_or_404_ajax(
+        SubscriptionPayment, reference=tx_ref, 
+        invoice__number=invoice_id, invoice__organization_membership__user=request.user,
+    )
+
+    if subscription_payment is False:
+        return Response({"detail": "We could not confirm payment at this moment. Contact support if it not confirmed in 30min"}, 
+        status=status.HTTP_404_NOT_FOUND)
+    return Response({"status":"success"}, status=status.HTTP_200_OK)
+    res = confirm_transaction(transaction_id)
+    
+    if res[1] != "success":
+        messages.warning(request, 
+        f'Something went wrong, Contact support at info@texagon.epichouse.online with transaction no. {transaction_id}')
+        subscription_payment.change_current_trans("failed")
+        return Response({"detail": "Could not update payment, because we could not confirm payment"}, status=status.HTTP_400_BAD_REQUEST)
+
+    subscription_payment.change_current_trans("success")
+
+    subscription_payment.invoice.status = "paid"
+    subscription_payment.invoice.save()
+    
+    return Response({"status":"success"}, status=status.HTTP_200_OK)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

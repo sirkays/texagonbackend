@@ -42,6 +42,7 @@ class SubscriptionInvoice(TimeStampedModel):
     due_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)  # open, paid, void, 
     meta = models.JSONField(default=dict, blank=True)
+    transaction_id = models.CharField(max_length=450, blank=True, null=True)
 
     def clean(self):
         super().clean()
@@ -78,3 +79,9 @@ class SubscriptionPayment(TimeStampedModel):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.CREATED)  # success, failed, pending
     paid_at = models.DateTimeField(default=timezone.now)
     meta = models.JSONField(default=dict, blank=True)
+    transaction_id = models.CharField(max_length=450, blank=True, null=True)
+
+    def change_current_trans(self, status):
+        self.status = status
+        self.paid_at = timezone.now()
+        self.save()

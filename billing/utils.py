@@ -53,3 +53,14 @@ def generate_payment_link(request, user_id:int, tx_ref:str,redirect_url:str,titl
 
     return get_payment_link(payload)
 
+def confirm_transaction(transaction_id):
+    
+    if PAYMENT_TEST:
+        FLW_SECRET_KEY = TEST_KEY_SECRET
+    #TEST_KEY_SECRET = "FLWSECK_TEST-baf077665388f439db111cb3d2a94181-X"
+    url = f"https://api.flutterwave.com/v3/transactions/{transaction_id}/verify"
+    headers = {'Content-Type': 'application/json','Authorization':f'Bearer {FLW_SECRET_KEY}'}
+    r = requests.get(url, headers=headers)
+    r = r.json()
+    status = r['status']
+    return (r,status)

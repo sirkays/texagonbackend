@@ -845,7 +845,7 @@ def create_test(request):
     Expected JSON body:
     {
         "title": "Test Title",
-        "description": "Test description",
+        "instructions": "Test instructions",
         "duration": 60,
         "difficulty": "Medium",
         "course_id": 123,
@@ -879,7 +879,7 @@ def create_test(request):
         test_data = {
             'course': course,
             'title': title,
-            'instructions': data.get('description', ''),
+            'instructions': data.get('instructions', ''),
             'duration_minutes': max(1, int(data.get('duration', 30))),
             'visibility': 'draft',
             'settings': {
@@ -929,8 +929,8 @@ def update_test(request, test_id: int):
         # Update fields
         if 'title' in data:
             test.title = data['title'].strip()
-        if 'description' in data:
-            test.description = data['description']
+        if 'instructions' in data:
+            test.instructions = data['instructions']
         if 'duration' in data:
             test.duration_minutes = max(1, int(data['duration']))
         

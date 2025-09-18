@@ -6,6 +6,7 @@ from django.utils import timezone
 from typing import Any, Dict, List, Optional
 import traceback
 from decimal import Decimal
+from django.shortcuts import _get_queryset
 
 # ---------------- helpers ----------------
 def _get_student_for_user(user) -> Optional[StudentProfile]:
@@ -44,3 +45,22 @@ def _to_int(v) -> int:
 def _sum_points(student: StudentProfile) -> int:
     return int(PointTransaction.objects.filter(student=student).aggregate(t=Sum("points")).get("t") or 0)
 
+
+
+
+def get_object_or_404_ajax(klass, *args, custom_message=None, **kwargs):
+    queryset = _get_queryset(klass)
+
+    try:
+        obj = queryset.get(*args, **kwargs)
+    except queryset.model.DoesNotExist:
+        # Log the error
+        #logger.error(f'Object not found: {klass} with args={args}, kwargs={kwargs}')
+
+        # Raise Http404 with custom message if provided
+        if custom_message:
+            return custom_message
+        else:
+            return False
+    
+    return obj
