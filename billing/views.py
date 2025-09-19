@@ -310,7 +310,10 @@ def confirm_payement(request):
     if subscription_payment is False:
         return Response({"detail": "We could not confirm payment at this moment. Contact support if it not confirmed in 30min"}, 
         status=status.HTTP_404_NOT_FOUND)
-    return Response({"status":"success"}, status=status.HTTP_200_OK)
+
+    subscription_payment.transaction_id = transaction_id
+    subscription_payment.save()
+    
     res = confirm_transaction(transaction_id)
     
     if res[1] != "success":

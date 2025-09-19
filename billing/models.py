@@ -81,6 +81,7 @@ class SubscriptionPayment(TimeStampedModel):
     meta = models.JSONField(default=dict, blank=True)
     transaction_id = models.CharField(max_length=450, blank=True, null=True)
     redirect_url =  models.URLField(max_length=1250, blank=True, null=True)
+    transaction_id = models.CharField(max_length=1200, blank=True, null=True)
 
     def change_current_trans(self, status):
         self.status = status
