@@ -29,10 +29,6 @@ def get_payment_link(payload):
 
 
 def generate_payment_link(request, user_id:int, tx_ref:str,redirect_url:str,title:str,customer_detail:dict,total_amount:float, payment_plan:str):
-    if '127.0.0.1:8000' in get_current_site(request).domain:
-        redirect_url= f"http://127.0.0.1:8000{redirect_url}"
-    else:
-        redirect_url = f"https://{get_current_site(request).domain}{redirect_url}"
 
     payload = {
         "tx_ref": tx_ref,
