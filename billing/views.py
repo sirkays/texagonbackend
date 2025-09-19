@@ -115,6 +115,7 @@ def create_subscription_payment(request):
         reference=reference,
         amount=amount,
         currency=currency,
+        redirect_url=redirect_url,
         method="",  # left blank per your spec
         status=SubscriptionPayment.Status.CREATED,
         # paid_at defaults to timezone.now() per your model; we can leave it as default
