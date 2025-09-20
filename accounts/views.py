@@ -1,19 +1,26 @@
 from django.shortcuts import render
-from orgs.models import OrganizationMembership 
 from django.conf import settings
-from api.retrieve_token import get_token_from_header
-from api.authentication import SessionTokenAuthentication
+from django.utils import timezone
+from django.db.models import Avg, Sum, Count, F, Q
+from datetime import timedelta
+
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework_api_key.permissions import HasAPIKey
-from rest_framework import status
-from datetime import timedelta
-from django.utils import timezone
-from django.db.models import Sum, F, Q
-from academics.models import StudentProfile
+
+from api.retrieve_token import get_token_from_header
+from api.authentication import SessionTokenAuthentication
+
+from orgs.models import OrganizationMembership
+from academics.models import ParentProfile, StudentProfile, ParentChildLink
 from learning.models import Course, Enrollment, Lesson, Bookmark
-from assessments.models import Test
+from assessments.models import Test, TestAttempt
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak
+from billing.models import SubscriptionInvoice, SubscriptionPayment
+from notifications.models import Notification
+
+
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -303,3 +310,231 @@ def dashboard_overview(request):
     }
     return Response(payload, status=status.HTTP_200_OK)
 
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def parent_overview(request):
+    """
+    Parent dashboard overview endpoint.
+    Returns aggregated data for all children linked to the authenticated parent.
+    """
+    try:
+        # Get the parent profile for the authenticated user
+        parent_profile = ParentProfile.objects.get(user=request.user)
+    except ParentProfile.DoesNotExist:
+        return Response(
+            {"detail": "Parent profile not found for this user."}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Get all children linked to this parent
+    children_links = ParentChildLink.objects.filter(parent=parent_profile).select_related(
+        'student__user', 'student__current_classroom'
+    )
+    
+    if not children_links.exists():
+        return Response(
+            {"detail": "No children found for this parent."}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    children_data = []
+    total_study_hours = 0
+    total_rewards = 0
+    
+    # Process each child
+    for link in children_links:
+        student = link.student
+        user = student.user
+        
+        # Get enrollments and course progress
+        enrollments = Enrollment.objects.filter(student=student, status=Enrollment.Status.ACTIVE)
+        courses_enrolled = enrollments.count()
+        courses_completed = enrollments.filter(status=Enrollment.Status.COMPLETED).count()
+        
+        # Calculate average score from test attempts
+        test_attempts = TestAttempt.objects.filter(student=student, status='graded')
+        avg_score = test_attempts.aggregate(avg_score=Avg('score'))['avg_score'] or 0
+        
+        # Get weekly study hours (mock calculation - you may want to track this differently)
+        weekly_hours = 8 + (student.id % 10)  # Mock data, replace with actual tracking
+        total_study_hours += weekly_hours
+        
+        # Get rewards/badges count
+        badge_count = BadgeAward.objects.filter(student=student).count()
+        total_rewards += badge_count
+        
+        # Get current streak
+        try:
+            streak = Streak.objects.get(student=student)
+            current_streak = streak.current_days
+        except Streak.DoesNotExist:
+            current_streak = 0
+        
+        # Get upcoming test
+        upcoming_tests = Test.objects.filter(
+            course__enrollments__student=student,
+            visibility=Test.Visibility.PUBLISHED,
+            start_at__gt=timezone.now()
+        ).order_by('start_at').first()
+        
+        upcoming_test_info = "No upcoming tests"
+        if upcoming_tests:
+            upcoming_test_info = f"{upcoming_tests.title} - {upcoming_tests.start_at.strftime('%A %I:%M %p')}"
+        
+        # Get last activity (mock - replace with actual activity tracking)
+        last_active = "2 hours ago"  # Mock data
+        
+        child_data = {
+            "id": student.id,
+            "name": user.get_full_name() or user.email.split('@')[0],
+            "grade": getattr(student.current_classroom, 'name', 'N/A'),
+            "school": parent_profile.organization.name,
+            "avatar": user.avatar.url if user.avatar else None,
+            "coursesEnrolled": courses_enrolled,
+            "coursesCompleted": courses_completed,
+            "averageScore": round(float(avg_score), 1),
+            "weeklyHours": weekly_hours,
+            "lastActive": last_active,
+            "upcomingTest": upcoming_test_info,
+            "currentStreak": current_streak,
+            "totalRewards": badge_count,
+        }
+        children_data.append(child_data)
+
+    # Calculate family stats
+    family_stats = [
+        {
+            "title": "Total Children",
+            "value": str(len(children_data)),
+            "change": "All active",
+            "icon": "Baby",
+            "color": "text-purple-600",
+            "bgColor": "bg-purple-100",
+        },
+        {
+            "title": "Combined Study Hours",
+            "value": str(total_study_hours),
+            "change": "This week",
+            "icon": "Clock",
+            "color": "text-blue-600",
+            "bgColor": "bg-blue-100",
+        },
+        {
+            "title": "Total Rewards Earned",
+            "value": str(total_rewards),
+            "change": "Across all children",
+            "icon": "Trophy",
+            "color": "text-orange-600",
+            "bgColor": "bg-orange-100",
+        },
+    ]
+
+    # Get recent activity
+    recent_activity = []
+    
+    # Recent test attempts
+    recent_tests = TestAttempt.objects.filter(
+        student__in=[link.student for link in children_links],
+        submitted_at__isnull=False
+    ).select_related('student__user', 'test').order_by('-submitted_at')[:5]
+    
+    for attempt in recent_tests:
+        recent_activity.append({
+            "type": "test",
+            "child": attempt.student.user.get_full_name() or attempt.student.user.email.split('@')[0],
+            "title": f"Took {attempt.test.title}",
+            "description": f"Scored {attempt.score}%",
+            "time": get_time_ago(attempt.submitted_at),
+            "icon": "Target",
+            "color": "text-blue-600",
+        })
+    
+    # Recent badge awards
+    recent_badges = BadgeAward.objects.filter(
+        student__in=[link.student for link in children_links]
+    ).select_related('student__user', 'badge').order_by('-awarded_at')[:3]
+    
+    for award in recent_badges:
+        recent_activity.append({
+            "type": "achievement",
+            "child": award.student.user.get_full_name() or award.student.user.email.split('@')[0],
+            "title": f"Earned {award.badge.name}",
+            "description": award.reason or "Great achievement!",
+            "time": get_time_ago(award.awarded_at),
+            "icon": "Trophy",
+            "color": "text-green-600",
+        })
+    
+    # Recent payments
+    recent_payments = SubscriptionPayment.objects.filter(
+        invoice__organization_membership__user=request.user,
+        status=SubscriptionPayment.Status.SUCCESS
+    ).order_by('-paid_at')[:2]
+    
+    for payment in recent_payments:
+        recent_activity.append({
+            "type": "payment",
+            "child": "All Children",
+            "title": "Subscription Payment",
+            "description": f"₦{payment.amount} paid successfully",
+            "time": get_time_ago(payment.paid_at),
+            "icon": "CreditCard",
+            "color": "text-purple-600",
+        })
+    
+    # Sort recent activity by time (most recent first)
+    recent_activity.sort(key=lambda x: x['time'], reverse=False)
+    recent_activity = recent_activity[:10]  # Limit to 10 items
+
+    # Get upcoming events
+    upcoming_events = []
+    
+    # Upcoming tests
+    upcoming_tests = Test.objects.filter(
+        course__enrollments__student__in=[link.student for link in children_links],
+        visibility=Test.Visibility.PUBLISHED,
+        start_at__gt=timezone.now()
+    ).select_related('course').order_by('start_at')[:10]
+    
+    for test in upcoming_tests:
+        # Get the student(s) enrolled in this course
+        enrolled_students = [link.student for link in children_links 
+                           if link.student.enrollments.filter(course=test.course).exists()]
+        
+        for student in enrolled_students:
+            importance = "high" if test.start_at <= timezone.now() + timedelta(days=2) else "medium"
+            upcoming_events.append({
+                "child": student.user.get_full_name() or student.user.email.split('@')[0],
+                "event": test.title,
+                "date": test.start_at.strftime('%A, %I:%M %p'),
+                "type": "Test",
+                "importance": importance,
+            })
+
+    return Response({
+        "children": children_data,
+        "familyStats": family_stats,
+        "recentActivity": recent_activity,
+        "upcomingEvents": upcoming_events,
+    })
+
+
+def get_time_ago(datetime_obj):
+    """Helper function to convert datetime to human-readable time ago format."""
+    now = timezone.now()
+    diff = now - datetime_obj
+    
+    if diff.days > 0:
+        return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
+    elif diff.seconds > 3600:
+        hours = diff.seconds // 3600
+        return f"{hours} hour{'s' if hours > 1 else ''} ago"
+    elif diff.seconds > 60:
+        minutes = diff.seconds // 60
+        return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+    else:
+        return "Just now"

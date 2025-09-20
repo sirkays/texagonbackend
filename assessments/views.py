@@ -173,7 +173,7 @@ def available_tests(request):
         if not course_ids:
             return Response({"tests": []}, status=status.HTTP_200_OK)
 
-        qs = Test.objects.filter(course_id__in=course_ids)
+        qs = Test.objects.filter(course_id__in=course_ids, start_at__isnull=False, end_at__isnull=False)
 
         # Optional: filter by course
         course_filter = request.query_params.get("course")
@@ -844,13 +844,16 @@ def create_test(request):
     
     Expected JSON body:
     {
-        "title": "Test Title",
-        "instructions": "Test instructions",
+        "title": "Algebra Midterm",
+        "instructions": "Complete all questions within the time limit.",
         "duration": 60,
         "difficulty": "Medium",
         "course_id": 123,
-        "category": "Math"
+        "category": "Math",
+        "start_date": "2025-09-25T09:00:00Z",
+        "end_date": "2025-09-25T10:00:00Z"
     }
+
     """
     try:
         user = request.user
@@ -933,13 +936,20 @@ def update_test(request, test_id: int):
             test.instructions = data['instructions']
         if 'duration' in data:
             test.duration_minutes = max(1, int(data['duration']))
-        
+
+        if 'start_at' in data:
+            test.start_at = data['start_at']
+        if 'end_at' in data:
+            test.start_at = data['end_at']
+
         # Update settings
         settings = test.settings or {}
         if 'difficulty' in data:
             settings['difficulty'] = data['difficulty']
         if 'category' in data:
             settings['category'] = data['category']
+
+        
         test.settings = settings
         
         test.save()
