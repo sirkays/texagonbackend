@@ -883,6 +883,7 @@ def create_test(request):
             'course': course,
             'title': title,
             'instructions': data.get('instructions', ''),
+            'total_marks': data.get("total_marks", 100),
             'duration_minutes': max(1, int(data.get('duration', 30))),
             'visibility': 'draft',
             'settings': {
@@ -934,6 +935,10 @@ def update_test(request, test_id: int):
             test.title = data['title'].strip()
         if 'instructions' in data:
             test.instructions = data['instructions']
+
+        if 'total_marks' in data:
+            test.total_marks = data['total_marks']
+
         if 'duration' in data:
             test.duration_minutes = max(1, int(data['duration']))
 
