@@ -705,8 +705,9 @@ def _serialize_test(test: Test, include_questions: bool = False) -> Dict[str, An
     result = {
         'id': str(test.id),
         'title': getattr(test, 'title', f'Test #{test.id}'),
-        'description': getattr(test, 'description', ''),
+        'instructions': getattr(test, 'instructions', ''),
         'duration': int(getattr(test, 'duration_minutes', 30) or 30),
+        'total_marks':test.total_marks,
         'totalPoints': int(total_points),
         'difficulty': (test.settings or {}).get('difficulty', 'Medium'),
         'category': getattr(test.course, 'name', '') if hasattr(test, 'course') and test.course else '',
@@ -714,6 +715,9 @@ def _serialize_test(test: Test, include_questions: bool = False) -> Dict[str, An
         'questionsCount': questions_count,
         'createdAt': test.created_at.isoformat() if hasattr(test, 'created_at') else None,
         'updatedAt': test.updated_at.isoformat() if hasattr(test, 'updated_at') else None,
+
+        'start_at': test.start_at.isoformat() if hasattr(test, 'start_at') else None,
+        'end_at': test.end_at.isoformat() if hasattr(test, 'end_at') else None,
     }
     
     if include_questions:

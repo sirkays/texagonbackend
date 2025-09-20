@@ -6,4 +6,8 @@ urlpatterns = [
 
     # PARENT OVERVIEW
     path("api/dashboard/parent/overview/", views.parent_overview, name="parent-overview"),
+    path('api/parent/children-progress/', views.children_progress_view, name='children_progress'),
+
+    path('api/parent/children-list/', views.children_list_view, name='children_list'),
+    path('api/parent/time-periods/', views.time_periods_view, name='time_periods'),
 ]
