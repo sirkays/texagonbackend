@@ -325,7 +325,9 @@ def confirm_payement(request):
     subscription_payment.change_current_trans("success")
 
     subscription_payment.invoice.status = "paid"
+    subscription_payment.invoice.transaction_id = transaction_id
     subscription_payment.invoice.save()
+    
     
     return Response({"status":"success"}, status=status.HTTP_200_OK)
 
