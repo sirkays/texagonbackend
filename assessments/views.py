@@ -697,35 +697,85 @@ def _serialize_question(question: Question, include_correct_answers: bool = True
     return result
 
 
-def _serialize_test(test: Test, include_questions: bool = False) -> Dict[str, Any]:
-    """Serialize a test object."""
-    questions_count = test.questions.count() if hasattr(test, 'questions') else 0
-    total_points = test.questions.aggregate(total=Sum('points'))['total'] or 0
-    
-    result = {
-        'id': str(test.id),
-        'title': getattr(test, 'title', f'Test #{test.id}'),
-        'instructions': getattr(test, 'instructions', ''),
-        'duration': int(getattr(test, 'duration_minutes', 30) or 30),
-        'total_marks':test.total_marks,
-        'totalPoints': int(total_points),
-        'difficulty': (test.settings or {}).get('difficulty', 'Medium'),
-        'category': getattr(test.course, 'name', '') if hasattr(test, 'course') and test.course else '',
-        'isPublished': getattr(test, 'visibility', 'draft') == 'published',
-        'questionsCount': questions_count,
-        'createdAt': test.created_at.isoformat() if hasattr(test, 'created_at') else None,
-        'updatedAt': test.updated_at.isoformat() if hasattr(test, 'updated_at') else None,
 
-        'start_at': test.start_at.isoformat() if hasattr(test, 'start_at') else None,
-        'end_at': test.end_at.isoformat() if hasattr(test, 'end_at') else None,
+def _iso(dt):
+    """Return ISO8601 UTC string or None for a datetime-like value."""
+    if not dt:
+        return None
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, timezone.get_current_timezone())
+    # normalize to UTC
+    return dt.astimezone(dt_timezone.utc).isoformat()
+
+
+def _safe_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
+    """Serialize a test object safely (no NoneType.isoformat errors)."""
+    # Questions info (guard relation existence)
+    questions_manager = getattr(test, "questions", None)
+    if questions_manager is not None:
+        questions_count = questions_manager.count()
+        agg = questions_manager.aggregate(total=Sum("points"))
+        total_points = _safe_int(agg.get("total"), 0)
+    else:
+        questions_count = 0
+        total_points = 0
+
+    # Settings may be dict-like or None
+    settings_dict = getattr(test, "settings", None) or {}
+    difficulty = settings_dict.get("difficulty", "Medium")
+
+    # Course/category
+    course = getattr(test, "course", None)
+    category = getattr(course, "name", "") if course else ""
+
+    # Duration and totals
+    duration_minutes = getattr(test, "duration_minutes", None)
+    duration = _safe_int(duration_minutes if duration_minutes is not None else 30, 30)
+
+    total_marks = getattr(test, "total_marks", None)
+    # keep as-is if numeric/None; coerce when needed
+    try:
+        total_marks = int(total_marks) if total_marks is not None else None
+    except (TypeError, ValueError):
+        total_marks = None
+
+    # Visibility/published
+    visibility = getattr(test, "visibility", "draft")
+    is_published = (visibility == "published")
+
+    result: Dict[str, Any] = {
+        "id": str(getattr(test, "id", "")),
+        "title": getattr(test, "title", f"Test #{getattr(test, 'id', '')}"),
+        "instructions": getattr(test, "instructions", "") or "",
+        "duration": duration,
+        "total_marks": total_marks,
+        "totalPoints": total_points,
+        "difficulty": difficulty,
+        "category": category,
+        "isPublished": is_published,
+        "questionsCount": questions_count,
+
+        # created/updated
+        "createdAt": _iso(getattr(test, "created_at", None)),
+        "updatedAt": _iso(getattr(test, "updated_at", None)),
+
+        # windows (handle None safely)
+        "start_at": _iso(getattr(test, "start_at", None)),
+        "end_at": _iso(getattr(test, "end_at", None)),
     }
-    
-    if include_questions:
-        questions = list(test.questions.all().order_by('order', 'id'))
-        result['questions'] = [_serialize_question(q) for q in questions]
-    
-    return result
 
+    if include_questions and questions_manager is not None:
+        questions = list(questions_manager.all().order_by("order", "id"))
+        # assumes _serialize_question exists and is safe
+        result["questions"] = [_serialize_question(q) for q in questions]
+
+    return result
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
