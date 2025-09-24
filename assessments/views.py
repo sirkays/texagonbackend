@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
-
+from django.utils.dateparse import parse_datetime
 # Project models
 from academics.models import StudentProfile,TeacherProfile
 from assessments.models import Test, Question, Choice, TestAttempt,TestAnswer
@@ -24,8 +24,8 @@ from learning.models import Enrollment, Course
 from orgs.models import OrganizationMembership
 import logging
 from datetime import timezone as dt_timezone
-
-
+from datetime import datetime, timezone as py_tz
+from datetime import datetime as py_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -698,21 +698,63 @@ def _serialize_question(question: Question, include_correct_answers: bool = True
 
 
 
-def _iso(dt):
-    """Return ISO8601 UTC string or None for a datetime-like value."""
-    if not dt:
-        return None
-    if timezone.is_naive(dt):
-        dt = timezone.make_aware(dt, timezone.get_current_timezone())
-    # normalize to UTC
-    return dt.astimezone(dt_timezone.utc).isoformat()
-
-
-def _safe_int(value, default=0):
+def _safe_int(val, default=0):
     try:
-        return int(value)
+        return int(val)
     except (TypeError, ValueError):
         return default
+
+
+
+def _iso(value):
+    """
+    Return ISO8601 for datetimes, pass strings through unchanged, or None.
+    This prevents 'str' object has no attribute 'utcoffset' errors.
+    """
+    if value in (None, ""):
+        return None
+
+    # If DB/model field holds a string, just return it
+    if isinstance(value, str):
+        return value
+
+    # If it's a datetime, normalize to UTC and format
+    if isinstance(value, py_datetime):
+        if timezone.is_naive(value):
+            value = timezone.make_aware(value, timezone=dt_timezone.utc)
+        else:
+            value = value.astimezone(dt_timezone.utc)
+        return value.isoformat(timespec="seconds")
+
+    # Fallback: stringify anything else
+    return str(value)
+
+
+def _to_aware_utc(value):
+    """
+    Accept str|datetime|None; return aware UTC datetime or None.
+    Raises ValueError/TypeError for bad inputs.
+    """
+    if value in (None, ""):
+        return None
+
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        # Handles '...+00:00' and '...Z'
+        dt = parse_datetime(value)
+        if dt is None:
+            raise ValueError(f"Invalid datetime format: {value!r}. Use ISO8601, e.g. 2025-09-24T20:48:26Z")
+    else:
+        raise TypeError(f"Unsupported type for datetime: {type(value).__name__}")
+
+    # Normalize to aware UTC
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, timezone=py_tz.utc)
+    else:
+        dt = dt.astimezone(py_tz.utc)
+    return dt
+
 
 def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
     """Serialize a test object safely (no NoneType.isoformat errors)."""
@@ -739,7 +781,6 @@ def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
     duration = _safe_int(duration_minutes if duration_minutes is not None else 30, 30)
 
     total_marks = getattr(test, "total_marks", None)
-    # keep as-is if numeric/None; coerce when needed
     try:
         total_marks = int(total_marks) if total_marks is not None else None
     except (TypeError, ValueError):
@@ -748,7 +789,6 @@ def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
     # Visibility/published
     visibility = getattr(test, "visibility", "draft")
     is_published = (visibility == "published")
-
     result: Dict[str, Any] = {
         "id": str(getattr(test, "id", "")),
         "title": getattr(test, "title", f"Test #{getattr(test, 'id', '')}"),
@@ -772,10 +812,88 @@ def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
 
     if include_questions and questions_manager is not None:
         questions = list(questions_manager.all().order_by("order", "id"))
-        # assumes _serialize_question exists and is safe
-        result["questions"] = [_serialize_question(q) for q in questions]
+        result["questions"] = [_serialize_question(q) for q in questions]  # assumes this helper exists
 
     return result
+
+
+@api_view(["PUT", "PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def update_test(request, test_id: int):
+    """Update test details (title, instructions/description, duration, settings, start_at, end_at)."""
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            test = Test.objects.select_for_update().get(id=test_id, course__teacher=teacher)
+        except Test.DoesNotExist:
+            return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+
+        # Core fields
+        if "title" in data:
+            test.title = (data["title"] or "").strip()
+
+        # Allow either `instructions` or `description` (your client sends 'description')
+        if "instructions" in data:
+            test.instructions = data["instructions"] or ""
+        elif "description" in data:
+            test.instructions = data["description"] or ""
+
+        if "total_marks" in data:
+            try:
+                test.total_marks = int(data["total_marks"]) if data["total_marks"] is not None else None
+            except (TypeError, ValueError):
+                return Response({"detail": "total_marks must be an integer or null."},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+        if "duration" in data:
+            try:
+                test.duration_minutes = max(1, int(data["duration"]))
+            except (TypeError, ValueError):
+                return Response({"detail": "duration must be a positive integer (minutes)."},
+                                status=status.HTTP_400_BAD_REQUEST)
+        print(data)
+        if "start_at" in data:
+            test.start_at = _to_aware_utc(data["start_at"])
+        if "end_at" in data:
+            test.end_at = _to_aware_utc(data["end_at"])
+
+        # Settings (difficulty/category)
+        settings_dict = test.settings or {}
+        if "difficulty" in data:
+            settings_dict["difficulty"] = data["difficulty"]
+        if "category" in data:
+            settings_dict["category"] = data["category"]
+        test.settings = settings_dict
+
+        test.save()
+
+        serialized_test = _serialize_test(test, include_questions=True)
+        return Response(
+            {"test": serialized_test, "message": "Test updated successfully."},
+            status=status.HTTP_200_OK
+        )
+
+    except (ValueError, TypeError) as e:
+        # Likely bad datetime or type issues
+        payload = {"detail": "Invalid input.", "error": f"{type(e).__name__}: {e}"}
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        payload = {"detail": "Error updating test.", "error": f"{type(e).__name__}: {e}"}
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -861,6 +979,7 @@ def teacher_tests_list(request):
 def teacher_test_detail(request, test_id: int):
     """Get detailed information about a specific test including all questions."""
     try:
+        print(" dncjdncjdndjn")
         user = request.user
         teacher = _get_teacher_for_user(user)
         if not teacher:
@@ -873,9 +992,7 @@ def teacher_test_detail(request, test_id: int):
             )
         except Test.DoesNotExist:
             return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
-        
         serialized_test = _serialize_test(test, include_questions=True)
-        
         return Response({"test": serialized_test}, status=status.HTTP_200_OK)
         
     except Exception as e:
@@ -958,71 +1075,6 @@ def create_test(request):
     except Exception as e:
         payload = {
             "detail": "Error creating test.",
-            "error": f"{type(e).__name__}: {e}",
-        }
-        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
-            payload["traceback"] = traceback.format_exc()
-        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(["PUT", "PATCH"])
-@permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
-@transaction.atomic
-def update_test(request, test_id: int):
-    """Update test details."""
-    try:
-        user = request.user
-        teacher = _get_teacher_for_user(user)
-        if not teacher:
-            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
-
-        try:
-            test = Test.objects.get(id=test_id, course__teacher=teacher)
-        except Test.DoesNotExist:
-            return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
-        
-        data = request.data or {}
-        
-        # Update fields
-        if 'title' in data:
-            test.title = data['title'].strip()
-        if 'instructions' in data:
-            test.instructions = data['instructions']
-
-        if 'total_marks' in data:
-            test.total_marks = data['total_marks']
-
-        if 'duration' in data:
-            test.duration_minutes = max(1, int(data['duration']))
-
-        if 'start_at' in data:
-            test.start_at = data['start_at']
-        if 'end_at' in data:
-            test.start_at = data['end_at']
-
-        # Update settings
-        settings = test.settings or {}
-        if 'difficulty' in data:
-            settings['difficulty'] = data['difficulty']
-        if 'category' in data:
-            settings['category'] = data['category']
-
-        
-        test.settings = settings
-        
-        test.save()
-        
-        serialized_test = _serialize_test(test, include_questions=True)
-        
-        return Response({
-            "test": serialized_test,
-            "message": "Test updated successfully."
-        }, status=status.HTTP_200_OK)
-        
-    except Exception as e:
-        payload = {
-            "detail": "Error updating test.",
             "error": f"{type(e).__name__}: {e}",
         }
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
@@ -1292,18 +1344,16 @@ def update_question(request, test_id: int, question_id: int):
         teacher = _get_teacher_for_user(user)
         if not teacher:
             return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
-
         try:
             question = Question.objects.get(
                 id=question_id,
-                test_id=test_id,
+                test__id=test_id,
                 test__course__teacher=teacher
             )
         except Question.DoesNotExist:
             return Response({"detail": "Question not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
         
         data = request.data or {}
-        
         # Update question fields
         if 'question' in data:
             question.body = data['question'].strip()
@@ -1319,7 +1369,7 @@ def update_question(request, test_id: int, question_id: int):
         question.meta = meta
         
         question.save()
-        
+        print(question)
         # Update choices if provided
         if 'options' in data:
             # Delete existing choices
@@ -1350,9 +1400,9 @@ def update_question(request, test_id: int, question_id: int):
             meta['correct_answer'] = data['correctAnswer']
             question.meta = meta
             question.save()
-        
+        print("cdvnjfnvkfnvkfjnvbbbbb")
         serialized_question = _serialize_question(question)
-        
+        print(serialized_question)
         return Response({
             "question": serialized_question,
             "message": "Question updated successfully."
