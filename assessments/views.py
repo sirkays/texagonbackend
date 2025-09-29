@@ -859,7 +859,6 @@ def update_test(request, test_id: int):
             except (TypeError, ValueError):
                 return Response({"detail": "duration must be a positive integer (minutes)."},
                                 status=status.HTTP_400_BAD_REQUEST)
-        print(data)
         if "start_at" in data:
             test.start_at = _to_aware_utc(data["start_at"])
         if "end_at" in data:
@@ -979,7 +978,6 @@ def teacher_tests_list(request):
 def teacher_test_detail(request, test_id: int):
     """Get detailed information about a specific test including all questions."""
     try:
-        print(" dncjdncjdndjn")
         user = request.user
         teacher = _get_teacher_for_user(user)
         if not teacher:
@@ -1369,7 +1367,6 @@ def update_question(request, test_id: int, question_id: int):
         question.meta = meta
         
         question.save()
-        print(question)
         # Update choices if provided
         if 'options' in data:
             # Delete existing choices
@@ -1400,9 +1397,7 @@ def update_question(request, test_id: int, question_id: int):
             meta['correct_answer'] = data['correctAnswer']
             question.meta = meta
             question.save()
-        print("cdvnjfnvkfnvkfjnvbbbbb")
         serialized_question = _serialize_question(question)
-        print(serialized_question)
         return Response({
             "question": serialized_question,
             "message": "Question updated successfully."
