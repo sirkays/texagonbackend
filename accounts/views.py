@@ -1,4 +1,4 @@
-from datetime import timedelta, datetime
+from datetime import date, datetime, timedelta
 
 from django.conf import settings
 from django.db.models import Avg, Sum, Count, F, Q, Max
@@ -14,12 +14,13 @@ from api.retrieve_token import get_token_from_header
 from api.authentication import SessionTokenAuthentication
 
 from orgs.models import OrganizationMembership
-from academics.models import ParentProfile, StudentProfile, ParentChildLink
+from academics.models import ParentProfile, StudentProfile, ParentChildLink, Classroom
 from learning.models import Course, Enrollment, Lesson, Bookmark
 from assessments.models import Test, TestAttempt
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak
 from billing.models import SubscriptionInvoice, SubscriptionPayment
 from notifications.models import Notification
+from api.models import SessionToken
 
 
 @api_view(["GET"])
@@ -869,3 +870,193 @@ def time_periods_view(request):
     return Response({
         "timePeriods": time_periods
     })
+
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def get_parent_children(request):
+    """
+    Get all children linked to the authenticated parent user.
+    Returns detailed information about each child including courses, status, and subscription.
+    """
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response(
+            {"detail": "Invalid or missing session token."}, 
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    # Get parent profile
+    try:
+        parent_profile = ParentProfile.objects.select_related(
+            'organization', 
+            'organization_subscription',
+            'organization_subscription__plan'
+        ).get(user=user)
+    except ParentProfile.DoesNotExist:
+        return Response(
+            {"detail": "Parent profile not found."}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Get all children linked to this parent
+    child_links = ParentChildLink.objects.select_related(
+        'student',
+        'student__user',
+        'student__current_classroom',
+        'student__organization'
+    ).filter(parent=parent_profile)
+
+    children_data = []
+    for link in child_links:
+        student = link.student
+        student_user = student.user
+        
+        # Calculate age from date of birth
+        age = None
+        if student.dob:
+            today = date.today()
+            age = today.year - student.dob.year - (
+                (today.month, today.day) < (student.dob.month, student.dob.day)
+            )
+
+        # Get enrollment statistics
+        enrollments = Enrollment.objects.filter(student=student)
+        total_courses = enrollments.count()
+        completed_courses = enrollments.filter(
+            status=Enrollment.Status.COMPLETED
+        ).count()
+
+        # Get last active from session tokens
+        last_session = SessionToken.objects.filter(
+            user=student_user,
+            is_active=True
+        ).order_by('-created_at').first()
+        
+        last_active = None
+        if last_session:
+            time_diff = timezone.now() - last_session.created_at
+            if time_diff < timedelta(hours=1):
+                last_active = f"{int(time_diff.total_seconds() / 60)} minutes ago"
+            elif time_diff < timedelta(days=1):
+                last_active = f"{int(time_diff.total_seconds() / 3600)} hours ago"
+            else:
+                last_active = f"{time_diff.days} days ago"
+
+        # Determine status based on organization membership
+        is_active = student.organization.is_active
+        
+        # Get subscription info from parent's subscription
+        subscription_status = "Basic"
+        if parent_profile.organization_subscription:
+            if parent_profile.organization_subscription.status == "active":
+                subscription_status = "Premium"
+
+        child_data = {
+            "id": student.id,
+            "name": student_user.get_full_name() or student_user.email,
+            "age": age,
+            "grade": student.current_classroom.name if student.current_classroom else "Not Assigned",
+            "school": student.organization.name,
+            "avatar": student_user.avatar.url if student_user.avatar else None,
+            "email": student_user.email,
+            "status": "Active" if is_active else "Suspended",
+            "subscription": subscription_status,
+            "lastActive": last_active or "Never",
+            "joinDate": student.created_at.strftime("%Y-%m-%d"),
+            "totalCourses": total_courses,
+            "completedCourses": completed_courses,
+            "relationship": link.relationship,
+            "admissionNo": student.admission_no,
+        }
+        children_data.append(child_data)
+
+    return Response(
+        {
+            "detail": "Children retrieved successfully",
+            "children": children_data,
+            "parentSubscription": {
+                "status": parent_profile.organization_subscription.status if parent_profile.organization_subscription else "none",
+                "plan": parent_profile.organization_subscription.plan.name if parent_profile.organization_subscription else None,
+            }
+        },
+        status=status.HTTP_200_OK
+    )
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def reset_child_password(request):
+    """
+    Reset password for a child account.
+    Expects: { "childId": <student_id>, "newPassword": <password> }
+    """
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response(
+            {"detail": "Invalid or missing session token."}, 
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    # Get parent profile
+    try:
+        parent_profile = ParentProfile.objects.get(user=user)
+    except ParentProfile.DoesNotExist:
+        return Response(
+            {"detail": "Parent profile not found."}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Get request data
+    child_id = request.data.get("childId")
+    new_password = request.data.get("newPassword")
+
+    if not child_id or not new_password:
+        return Response(
+            {"detail": "childId and newPassword are required."}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Validate password length
+    if len(new_password) < 8:
+        return Response(
+            {"detail": "Password must be at least 8 characters."}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Verify the child belongs to this parent
+    try:
+        child_link = ParentChildLink.objects.select_related(
+            'student', 
+            'student__user'
+        ).get(
+            parent=parent_profile,
+            student__user__id=child_id
+        )
+    except ParentChildLink.DoesNotExist:
+        return Response(
+            {"detail": "Child not found or not linked to this parent."}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Reset the password
+    student_user = child_link.student.user
+    student_user.set_password(new_password)
+    student_user.save()
+
+    # Optionally revoke all existing session tokens for security
+    SessionToken.objects.filter(user=student_user, is_active=True).update(
+        is_active=False
+    )
+
+    return Response(
+        {
+            "detail": "Password reset successfully.",
+            "childName": student_user.get_full_name() or student_user.email,
+        },
+        status=status.HTTP_200_OK
+    )
