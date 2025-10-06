@@ -18,6 +18,31 @@ class LiveSession(TimeStampedModel):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     active = models.BooleanField(default=True)
 
+
+
+class PrivateTutoring(TimeStampedModel):
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="private_tutoring")
+    course = models.ForeignKey("learning.Course", on_delete=models.PROTECT, related_name="private_tutoring")
+    rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
+    tutoring_duration_days = models.PositiveIntegerField(default=24)
+    notes = models.CharField(max_length=225)
+    
+
+class AvailableDay(models.Model):
+    class Day(models.TextChoices):
+        MONDAY = "monday", "Monday"
+        TUESDAY = "tuesday", "Tuesday"
+        WEDNESDAY = "wednesday", "Wednesday"
+        THURSDAY = "thursday", "Thursday"
+        FRIDAY = "friday", "Friday"
+        SATURDAY = "saturday", "Saturday"
+        SUNDAY = "sunday", "Sunday"
+
+    day = models.CharField(max_length=16, choices=Day.choices)
+    private_tutoring = models.ForeignKey(PrivateTutoring, on_delete=models.PROTECT, related_name="available_days")
+
+
+
 class TutoringBooking(TimeStampedModel):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -28,8 +53,12 @@ class TutoringBooking(TimeStampedModel):
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="tutoring_bookings")
     teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
     student = models.ForeignKey("academics.StudentProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
-    scheduled_at = models.DateTimeField()
-    duration_minutes = models.PositiveIntegerField(default=60)
+    duration_hours = models.PositiveIntegerField(default=2)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     notes = models.TextField(blank=True)
+
+
+
+
+

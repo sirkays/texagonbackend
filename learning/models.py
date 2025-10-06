@@ -1,14 +1,25 @@
 from django.db import models
 from django.conf import settings
 from core.models import TimeStampedModel, NamedModel
+from live.models import TutoringBooking
 
 class Course(NamedModel):
+    USAGE_CHOICE = (
+        ('public','public'),
+        ('private','private'),
+    )
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="courses")
     subject = models.ForeignKey("academics.Subject", on_delete=models.PROTECT)
     classroom = models.ForeignKey("academics.Classroom", on_delete=models.PROTECT)
     teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="courses")
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    usage_type = models.CharField(
+        max_length=20,
+        choices=USAGE_CHOICE,
+        default='public',
+    )
+    private_tutor = models.ForeignKey(TutoringBooking, on_delete=models.CASCADE, blank=True, null=True)
 
     def __str__(self):
         return self.teacher.user.email

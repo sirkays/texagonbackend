@@ -39,10 +39,16 @@ class StudentProfile(TimeStampedModel):
     def __str__(self):
         return f"Student: {self.user.get_full_name() or self.user.username}"
 
+class Language(models.Model):
+    language_name = models.CharField(max_length=225)
+    active = models.BooleanField(default=False)
+
 class TeacherProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher_profile")
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="teachers")
     bio = models.TextField(blank=True)
+    experience = models.PositiveIntegerField(default=0)
+    languages = models.ManyToManyField(Language, blank=True)
     specialties = models.ManyToManyField(Subject, blank=True)
 
     def __str__(self):

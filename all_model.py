@@ -21,6 +21,7 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from core.models import TimeStampedModel
 from django.core.validators import MinValueValidator
 from orgs.models import OrganizationMembership
+from live.models import TutoringBooking
 
 
 # --- Model classes collected from project ---
@@ -56,10 +57,18 @@ class StudentProfile(TimeStampedModel):
 
 
 
+class Language(models.Model):
+    language_name = models.CharField(max_length=225)
+    active = models.BooleanField(default=False)
+
+
+
 class TeacherProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher_profile")
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="teachers")
     bio = models.TextField(blank=True)
+    experience = models.PositiveIntegerField(default=0)
+    languages = models.ManyToManyField(Language, blank=True)
     specialties = models.ManyToManyField(Subject, blank=True)
 
     def __str__(self):
@@ -230,6 +239,17 @@ class User(AbstractUser):
     REQUIRED_FIELDS = []  # no username, so leave empty
 
     objects = UserManager()
+
+
+
+class TeacherProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="teachers")
+    bio = models.TextField(blank=True)
+    specialties = models.ManyToManyField(Subject, blank=True)
+
+    def __str__(self):
+        return f"Teacher: {self.user.get_full_name() or self.user.username} Email: {self.user.email}"
 
 
 
@@ -850,3 +870,93 @@ class OrderItem(TimeStampedModel):
 
     class Meta:
         unique_together = ("order", "product")
+
+
+
+class Course(NamedModel):
+    USAGE_CHOICE = (
+        ('public','public'),
+        ('private','private'),
+    )
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="courses")
+    subject = models.ForeignKey("academics.Subject", on_delete=models.PROTECT)
+    classroom = models.ForeignKey("academics.Classroom", on_delete=models.PROTECT)
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="courses")
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    usage_type = models.CharField(
+        max_length=20,
+        choices=USAGE_CHOICE,
+        default='public',
+    )
+    private_tutor = models.ForeignKey(TutoringBooking, on_delete=models.CASCADE, blank=True, null=True)
+
+    def __str__(self):
+        return self.teacher.user.email
+
+    class Meta:
+        unique_together = ("organization", "subject", "classroom", "teacher")
+
+
+
+class PrivateTutoring(TimeStampedModel):
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="private_tutoring")
+    rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
+    tutoring_duration_days = models.PositiveIntegerField(default=24)
+    notes = models.CharField(max_length=225)
+
+
+
+class AvailableDay(models.Model):
+    class Day(models.TextChoices):
+        MONDAY = "monday", "Monday"
+        TUESDAY = "tuesday", "Tuesday"
+        WEDNESDAY = "wednesday", "Wednesday"
+        THURSDAY = "thursday", "Thursday"
+        FRIDAY = "friday", "Friday"
+        SATURDAY = "saturday", "Saturday"
+        SUNDAY = "sunday", "Sunday"
+
+    status = models.CharField(max_length=16, choices=Status.choices)
+    private_tutoring = models.ForeignKey(PrivateTutoring, on_delete=models.PROTECT, related_name="available_days")
+
+
+
+class TutoringBooking(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="tutoring_bookings")
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
+    duration_hours = models.PositiveIntegerField(default=2)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    notes = models.TextField(blank=True)
+
+
+
+class PrivateTutoring(TimeStampedModel):
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="private_tutoring")
+    course = models.ForeignKey("learning.Course", on_delete=models.PROTECT, related_name="private_tutoring")
+    rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
+    tutoring_duration_days = models.PositiveIntegerField(default=24)
+    notes = models.CharField(max_length=225)
+
+
+
+class AvailableDay(models.Model):
+    class Day(models.TextChoices):
+        MONDAY = "monday", "Monday"
+        TUESDAY = "tuesday", "Tuesday"
+        WEDNESDAY = "wednesday", "Wednesday"
+        THURSDAY = "thursday", "Thursday"
+        FRIDAY = "friday", "Friday"
+        SATURDAY = "saturday", "Saturday"
+        SUNDAY = "sunday", "Sunday"
+
+    day = models.CharField(max_length=16, choices=Day.choices)
+    private_tutoring = models.ForeignKey(PrivateTutoring, on_delete=models.PROTECT, related_name="available_days")

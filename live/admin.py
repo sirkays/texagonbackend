@@ -10,7 +10,7 @@ class LiveSessionAdmin(admin.ModelAdmin):
 
 @admin.register(TutoringBooking)
 class TutoringBookingAdmin(admin.ModelAdmin):
-    list_display = ("organization", "teacher", "student", "scheduled_at", "duration_minutes", "price", "status", "created_at")
-    list_filter = ("organization", "status", "scheduled_at")
+    list_display = ("organization", "teacher", "student",  "duration_hours", "price", "status", "created_at")
+    list_filter = ("organization", "status")
     search_fields = ("teacher__user__username", "student__user__username", "organization__name")
     autocomplete_fields = ("organization", "teacher", "student")
