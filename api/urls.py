@@ -13,7 +13,8 @@ from .views import (
     LiveSessionViewSet, TutoringBookingViewSet,
     ProductCategoryViewSet, ProductViewSet, OrderViewSet, OrderItemViewSet,
     SubscriptionPlanViewSet, OrganizationSubscriptionViewSet, SubscriptionInvoiceViewSet, SubscriptionPaymentViewSet,
-    NotificationViewSet,
+    NotificationViewSet,upsert_tutoring_booking, my_child_tutoring_bookings
+
 )
 
 router = DefaultRouter()
@@ -60,5 +61,9 @@ router.register(r"notifications", NotificationViewSet)
 urlpatterns = [
     path("auth/login/", login_view, name="api-login"),
     path("auth/logout/", logout_view, name="api-logout"),
+
+    path("tutoring/book/", upsert_tutoring_booking, name="upsert_tutoring_booking"),
+    path("tutoring/bookings/", my_child_tutoring_bookings, name="my_child_tutoring_bookings"),
+
     path("", include(router.urls)),
 ]

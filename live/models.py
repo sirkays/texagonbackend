@@ -24,7 +24,7 @@ class PrivateTutoring(TimeStampedModel):
     teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="private_tutoring")
     course = models.ForeignKey("learning.Course", on_delete=models.PROTECT, related_name="private_tutoring")
     rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
-    tutoring_duration_days = models.PositiveIntegerField(default=24)
+    tutoring_duration_days = models.PositiveIntegerField(default=24) # NUMBER OF DAYS THE TUTORING WILL LAST
     notes = models.CharField(max_length=225)
     
 
@@ -49,8 +49,8 @@ class TutoringBooking(TimeStampedModel):
         CONFIRMED = "confirmed", "Confirmed"
         COMPLETED = "completed", "Completed"
         CANCELLED = "cancelled", "Cancelled"
-
-    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="tutoring_bookings")
+    private_tutoring = models.ForeignKey(PrivateTutoring, on_delete=models.CASCADE, related_name="tutoring_bookings",
+    blank=True, null=True)
     teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
     student = models.ForeignKey("academics.StudentProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
     duration_hours = models.PositiveIntegerField(default=2)

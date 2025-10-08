@@ -22,6 +22,10 @@ from core.models import TimeStampedModel
 from django.core.validators import MinValueValidator
 from orgs.models import OrganizationMembership
 from live.models import TutoringBooking
+from rest_framework import serializers
+from orgs.models import Organization
+from academics.models import Classroom, StudentProfile
+from learning.models import Course
 
 
 # --- Model classes collected from project ---
@@ -960,3 +964,52 @@ class AvailableDay(models.Model):
 
     day = models.CharField(max_length=16, choices=Day.choices)
     private_tutoring = models.ForeignKey(PrivateTutoring, on_delete=models.PROTECT, related_name="available_days")
+
+
+
+class PrivateTutoring(TimeStampedModel):
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="private_tutoring")
+    course = models.ForeignKey("learning.Course", on_delete=models.PROTECT, related_name="private_tutoring")
+    rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
+    tutoring_duration_days = models.PositiveIntegerField(default=24) # NUMBER OF DAYS THE TUTORING WILL LAST
+    notes = models.CharField(max_length=225)
+
+
+
+class TutoringBooking(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+    private_tutoring = models.ForeignKey(PrivateTutoring, on_delete=models.CASCADE, related_name="tutoring_bookings",
+    blank=True, null=True)
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
+    duration_hours = models.PositiveIntegerField(default=2)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    notes = models.TextField(blank=True)
+
+
+
+class ClassroomListSerializer(ClassroomBaseSerializer):
+    students = serializers.IntegerField(source="students_count", read_only=True)
+    teachers = serializers.IntegerField(source="teachers_count", read_only=True)
+    courses  = serializers.IntegerField(source="courses_count", read_only=True)
+
+    class Meta(ClassroomBaseSerializer.Meta):
+        fields = ClassroomBaseSerializer.Meta.fields + ["students", "teachers", "courses"]
+
+
+
+class StudentMiniSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentProfile
+        fields = ["id", "admission_no", "full_name"]
+
+    def get_full_name(self, obj):
+        u = obj.user
+        return (getattr(u, "get_full_name", lambda: "")() or u.email or u.pk)

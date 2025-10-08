@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import serializers
 
 from orgs.models import (
@@ -57,7 +58,15 @@ from billing.models import (
     SubscriptionPayment,
 )
 from notifications.models import Notification
+from live.models import (
+    PrivateTutoring,
+    AvailableDay,
+    TutoringBooking,
+    LiveSession, TutoringBooking,
+)
 from .models import SessionToken
+
+
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
