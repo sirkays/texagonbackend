@@ -13,8 +13,12 @@ from .views import (
     LiveSessionViewSet, TutoringBookingViewSet,
     ProductCategoryViewSet, ProductViewSet, OrderViewSet, OrderItemViewSet,
     SubscriptionPlanViewSet, OrganizationSubscriptionViewSet, SubscriptionInvoiceViewSet, SubscriptionPaymentViewSet,
-    NotificationViewSet,upsert_tutoring_booking, my_child_tutoring_bookings
-
+    NotificationViewSet,upsert_tutoring_booking, my_child_tutoring_bookings,
+    tutoring_children,
+    tutoring_bookings,
+    tutoring_tutors,
+    tutoring_tutor_availability,
+    tutoring_stats,
 )
 
 router = DefaultRouter()
@@ -62,8 +66,14 @@ urlpatterns = [
     path("auth/login/", login_view, name="api-login"),
     path("auth/logout/", logout_view, name="api-logout"),
 
-    path("tutoring/book/", upsert_tutoring_booking, name="upsert_tutoring_booking"),
-    path("tutoring/bookings/", my_child_tutoring_bookings, name="my_child_tutoring_bookings"),
+    path("tutor/tutoring/book/", upsert_tutoring_booking, name="upsert_tutoring_booking"),
+    path("tutor/tutoring-bookings/", my_child_tutoring_bookings, name="my_child_tutoring_bookings"),
+    ####### #####
 
+    path("tutor/tutoring/children/", tutoring_children, name="tutoring_children"),
+    path("tutor/tutoring/bookings/", tutoring_bookings, name="tutoring_bookings"),
+    path("tutor/tutoring/tutors/", tutoring_tutors, name="tutoring_tutors"),
+    path("tutor/tutoring/tutors/<int:private_tutoring_id>/availability/", tutoring_tutor_availability, name="tutoring_tutor_availability"),
+    path("tutor/tutoring/stats/", tutoring_stats, name="tutoring_stats"),
     path("", include(router.urls)),
 ]

@@ -1,5 +1,6 @@
 from django.contrib import admin
-from .models import Classroom, Subject, StudentProfile, TeacherProfile, ParentProfile, ParentChildLink
+from .models import (Language, Classroom, Subject, StudentProfile, 
+    TeacherProfile, ParentProfile, ParentChildLink)
 
 @admin.register(Classroom)
 class ClassroomAdmin(admin.ModelAdmin):
@@ -55,3 +56,11 @@ class ParentChildLinkAdmin(admin.ModelAdmin):
     list_display = ("parent", "student", "relationship", "created_at")
     search_fields = ("parent__user__username", "parent__user__email", "student__user__username", "student__user__email")
     autocomplete_fields = ("parent", "student")
+
+
+
+@admin.register(Language)
+class LanguageAdmin(admin.ModelAdmin):
+    list_display = ('language_name', 'active')
+    list_filter = ('active',)
+    search_fields = ('language_name',)

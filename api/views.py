@@ -1,11 +1,12 @@
 import json
 import traceback
 from decimal import Decimal
+from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Sum, Count, F
 from django.utils import timezone
 
 from rest_framework import status, viewsets
@@ -48,6 +49,7 @@ from billing.models import (
 from notifications.models import Notification
 
 from core.utils import _get_teacher_for_user, _get_student_for_user
+
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
@@ -517,3 +519,284 @@ def my_child_tutoring_bookings(request):
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _paginate(qs, request, default_size=10, max_size=50):
+    """Simple offset pagination with page & page_size query params."""
+    try:
+        page = max(1, int(request.query_params.get("page", 1)))
+    except Exception:
+        page = 1
+    try:
+        page_size = min(max_size, max(1, int(request.query_params.get("page_size", default_size))))
+    except Exception:
+        page_size = default_size
+    start = (page - 1) * page_size
+    end = start + page_size
+    total = qs.count()
+
+    return {
+        "results": qs[start:end],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": (total + page_size - 1) // page_size if page_size else 1,
+        },
+    }
+
+
+def _teacher_card_dict(pt: PrivateTutoring):
+    """Flatten data for tutor cards in the UI."""
+    teacher = pt.teacher
+    course = pt.course
+    # Modules under the course (names only)
+    module_names = list(Module.objects.filter(course=course).values_list("name", flat=True)[:12])
+
+    # Languages (names only, if you use Language model via M2M on TeacherProfile)
+    language_names = list(teacher.languages.values_list("language_name", flat=True))
+
+    # Availability -> return day strings only (Mon..Sun expectation)
+    day_map = {
+        "monday": "Mon", "tuesday": "Tue", "wednesday": "Wed", "thursday": "Thu",
+        "friday": "Fri", "saturday": "Sat", "sunday": "Sun",
+    }
+    days = list(
+        AvailableDay.objects.filter(private_tutoring=pt)
+        .values_list("day", flat=True)
+    )
+    availability_days = [day_map.get(d, d) for d in days]
+
+    # (Optional) derived/fake metrics if you don’t store them yet
+    # You can replace these with real aggregates (ratings, total sessions, etc.)
+    rating = 4.8
+    total_sessions = TutoringBooking.objects.filter(teacher=teacher).count()
+
+    return {
+        "id": pt.id,
+        "teacher_id": teacher.id,
+        "teacher_name": teacher.user.get_full_name() or teacher.user.email,
+        "course_id": course.id,
+        "course": getattr(course, "title", str(course)),
+        "modules": module_names,
+        "rating": float(rating),
+        "experience": f"{getattr(teacher, 'experience', 0)}+ years",
+        "rate": f"₦{pt.rate_per_hour}/hour",
+        "languages": language_names,
+        "availability_days": availability_days,  # ["Mon","Wed","Fri"]
+        "verified": True,
+        "premiumTutor": False,
+        "sessionTypes": ["One-on-One"],
+        "technologies": ["Interactive Whiteboard", "Screen Sharing", "Recording"],
+        "avatar": None,  # plug your avatar URL if you store it (e.g. teacher.user.avatar.url)
+        "specialization": ", ".join(list(teacher.specialties.values_list("name", flat=True)[:5])),
+        "totalSessions": total_sessions,
+        "responseTime": "< 6 hours",
+    }
+
+
+def _booking_dict(b: TutoringBooking):
+    """Shape booking item for 'Current / Past tutoring' lists."""
+    tutor_name = b.teacher.user.get_full_name() or b.teacher.user.email
+    course_title = getattr(getattr(b, "private_tutoring", None), "course", None)
+    course_title = getattr(course_title, "title", str(course_title) if course_title else "Course")
+
+    # naive status mapping to UI labels (capitalize)
+    status_label = b.status.capitalize()
+
+    # No strict times stored in TutoringBooking model; adapt if you add schedule fields.
+    return {
+        "id": b.id,
+        "child": b.student.user.get_full_name() or b.student.user.email,
+        "tutor": tutor_name,
+        "subject": course_title,
+        "date": (b.created_at or b.created or timezone.now()).date().isoformat(),
+        "time": "—",
+        "type": "One-on-One",
+        "status": status_label,
+        "meetingLink": None,
+        "cost": f"₦{b.price}",
+        "tutorAvatar": None,
+        "notes": b.notes or "",
+        "hasRecording": False,
+        "canReschedule": b.status in [TutoringBooking.Status.PENDING, TutoringBooking.Status.CONFIRMED],
+        "paymentStatus": "Paid" if b.status in [TutoringBooking.Status.CONFIRMED, TutoringBooking.Status.COMPLETED] else "Pending",
+        "sessionType": "Premium",
+        "duration": b.duration_hours * 60,  # minutes for UI
+        "reminderSent": False,
+        "actualDuration": b.duration_hours * 60 if b.status == TutoringBooking.Status.COMPLETED else None,
+      }
+
+
+# ---------------------------
+# endpoints (READ-ONLY)
+# ---------------------------
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def tutoring_children(request):
+    """
+    List children linked to the authenticated parent (for the 'Select Child' dropdown).
+    """
+    parent = _get_parent_for_user(request.user)
+    if not parent:
+        return Response({"detail": "Parent profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+    links = (
+        ParentChildLink.objects
+        .select_related("student__user")
+        .filter(parent=parent)
+        .order_by("student__user__first_name", "student__user__last_name")
+    )
+    data = [
+        {
+            "id": link.student_id,
+            "name": link.student.user.get_full_name() or link.student.user.email,
+            "classroom": getattr(link.student.current_classroom, "name", ""),
+        }
+        for link in links
+    ]
+    return Response(data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def tutoring_bookings(request):
+    """
+    List bookings for a parent, optionally filtering by:
+      - student_id: <int>
+      - scope: 'upcoming' | 'past' (optional; default shows all)
+      - status: one of TutoringBooking.Status (optional)
+    Supports pagination via page & page_size.
+    """
+    parent = _get_parent_for_user(request.user)
+    if not parent:
+        return Response({"detail": "Parent profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+    qs = (
+        TutoringBooking.objects
+        .select_related("student__user", "teacher__user", "private_tutoring__course")
+        .filter(student__parent_links__parent=parent)
+        .order_by("-id")
+    )
+
+    student_id = request.query_params.get("student_id")
+    if student_id:
+        qs = qs.filter(student_id=student_id)
+
+    status_filter = request.query_params.get("status")
+    if status_filter:
+        valid_statuses = {c[0] for c in TutoringBooking.Status.choices}
+        if status_filter not in valid_statuses:
+            return Response({"detail": f"status must be one of {sorted(valid_statuses)}"}, status=400)
+        qs = qs.filter(status=status_filter)
+    scope = request.query_params.get("scope")  # upcoming | past
+    if scope == "upcoming":
+        qs = qs.exclude(status=TutoringBooking.Status.COMPLETED).exclude(status=TutoringBooking.Status.CANCELLED)
+    elif scope == "past":
+        qs = qs.filter(status__in=[TutoringBooking.Status.COMPLETED, TutoringBooking.Status.CANCELLED])
+
+    paged = _paginate(qs, request)
+    items = [_booking_dict(b) for b in paged["results"]]
+    return Response({"results": items, **paged["pagination"]}, status=200)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def tutoring_tutors(request):
+    """
+    List available tutors (via PrivateTutoring rows). Optional filters:
+      - course_id
+      - teacher_id
+    Supports pagination via page & page_size.
+    """
+    qs = (
+        PrivateTutoring.objects
+        .select_related("teacher__user", "course")
+        .prefetch_related("teacher__languages", "teacher__specialties", "available_days")
+        .order_by("teacher__user__first_name", "teacher__user__last_name")
+    )
+    course_id = request.query_params.get("course_id")
+    teacher_id = request.query_params.get("teacher_id")
+    if course_id:
+        qs = qs.filter(course_id=course_id)
+    if teacher_id:
+        qs = qs.filter(teacher_id=teacher_id)
+    paged = _paginate(qs, request)
+    items = [_teacher_card_dict(pt) for pt in paged["results"]]
+    return Response({"results": items, **paged["pagination"]}, status=200)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def tutoring_tutor_availability(request, private_tutoring_id: int):
+    """
+    Return day-of-week availability for a specific PrivateTutoring id.
+    """
+    try:
+        pt = PrivateTutoring.objects.get(pk=private_tutoring_id)
+    except PrivateTutoring.DoesNotExist:
+        return Response({"detail": "PrivateTutoring not found."}, status=404)
+
+    day_map = {
+        "monday": "Mon", "tuesday": "Tue", "wednesday": "Wed", "thursday": "Thu",
+        "friday": "Fri", "saturday": "Sat", "sunday": "Sun",
+    }
+    days = list(AvailableDay.objects.filter(private_tutoring=pt).values_list("day", flat=True))
+    return Response({"days": [day_map.get(d, d) for d in days]}, status=200)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def tutoring_stats(request):
+    """
+    Small dashboard numbers needed at the page bottom:
+      - total_tutoring = upcoming + past
+      - upcoming_count
+      - hours_completed (sum of completed bookings' duration_hours)
+      - average_rating (placeholder unless you store ratings)
+      - active_tutors (count of distinct PrivateTutoring rows or teachers)
+    Optional filter: student_id
+    """
+    parent = _get_parent_for_user(request.user)
+    if not parent:
+        return Response({"detail": "Parent profile not found."}, status=403)
+
+    qs = TutoringBooking.objects.filter(student__parent_links__parent=parent)
+    student_id = request.query_params.get("student_id")
+    if student_id:
+        qs = qs.filter(student_id=student_id)
+
+    upcoming = qs.exclude(status=TutoringBooking.Status.COMPLETED).exclude(status=TutoringBooking.Status.CANCELLED).count()
+    past = qs.filter(status__in=[TutoringBooking.Status.COMPLETED, TutoringBooking.Status.CANCELLED]).count()
+    total = upcoming + past
+
+    # hours completed (sum duration_hours for COMPLETED)
+    completed_minutes = sum([
+        (b.duration_hours or 0) * 60
+        for b in qs.filter(status=TutoringBooking.Status.COMPLETED)
+    ])
+    hours_completed = round(completed_minutes / 60.0, 1)
+
+    # average rating — placeholder (replace with real ratings if you store them)
+    # To keep consistent with your UI, compute from completed sessions if you later add a rating field.
+    average_rating = 4.7 if past else 0.0
+
+    active_tutors = (
+        PrivateTutoring.objects.values("teacher_id")
+        .distinct()
+        .count()
+    )
+
+    return Response({
+        "total_tutoring": total,
+        "upcoming_count": upcoming,
+        "hours_completed": hours_completed,
+        "average_rating": average_rating,
+        "active_tutors": active_tutors,
+    }, status=200)
