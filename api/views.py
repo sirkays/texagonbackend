@@ -48,7 +48,7 @@ from billing.models import (
 )
 from notifications.models import Notification
 
-from core.utils import _get_teacher_for_user, _get_student_for_user
+from core.utils import _get_teacher_for_user, _get_student_for_user,get_object_or_404_ajax
 
 
 @api_view(["POST"])
@@ -331,7 +331,11 @@ def upsert_tutoring_booking(request):
         try:
             student = StudentProfile.objects.select_related("user", "organization").get(pk=student_id)
         except StudentProfile.DoesNotExist:
-            return Response({"detail": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+            student = get_object_or_404_ajax(Student, pk=student_id)
+            if student:
+                student = StudentProfile.objects.select_related("user", "organization").get(pk=student.pk)
+            else:
+                return Response({"detail": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
 
         # Verify parent-child link
         is_linked = ParentChildLink.objects.filter(parent=parent, student=student).exists()
@@ -495,6 +499,14 @@ def my_child_tutoring_bookings(request):
             student = StudentProfile.objects.get(pk=student_id)
         except StudentProfile.DoesNotExist:
             return Response({"detail": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            student = StudentProfile.objects.get(pk=student_id)
+        except StudentProfile.DoesNotExist:
+            student = get_object_or_404_ajax(Student, pk=student_id)
+            if student is False:
+                return Response({"detail": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+            student = student.student_profile
 
         if not ParentChildLink.objects.filter(parent=parent, student=student).exists():
             return Response({"detail": "This student is not linked to your parent account."},
