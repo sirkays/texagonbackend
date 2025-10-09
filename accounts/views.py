@@ -21,6 +21,8 @@ from gamification.models import Badge, BadgeAward, PointTransaction, Streak
 from billing.models import SubscriptionInvoice, SubscriptionPayment
 from notifications.models import Notification
 from api.models import SessionToken
+from .models import AdminAccess
+from core.utils import get_object_or_404_ajax
 
 
 @api_view(["GET"])
@@ -1059,4 +1061,95 @@ def reset_child_password(request):
             "childName": student_user.get_full_name() or student_user.email,
         },
         status=status.HTTP_200_OK
+    )
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def set_admin_access_orgs(request):
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response(
+            {"detail": "Invalid or missing session token."}, 
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+    admin_access = getattr(user, "adminaccess", None)
+
+    if admin_access is None:
+        return Response(
+            {"detail": "Invalid or missing admin access."}, 
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    orgs_id = request.data.get("orgs_id")
+    if not orgs_id:
+        return Response(
+            {"detail": "Organization ID is required."}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    organization = get_object_or_404_ajax(Organization, pk=orgs_id)
+
+    if organization is False:
+        organization = get_object_or_404_ajax(Organization, slug=orgs_id)
+
+        if organization is False:
+            return Response(
+                {"detail": "Wrong organization ID."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    admin_access.selected_organization = organization
+
+    admin_access.save()
+
+    return Response(
+        {
+            "detail": f"Organization {organization.name} successfully set.",
+        },
+        status=status.HTTP_200_OK
+    )
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def fetch_admin_access_orgs(request):
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response(
+            {"detail": "Invalid or missing session token."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    try:
+        admin_access = user.adminaccess
+    except AdminAccess.DoesNotExist:
+        return Response(
+            {"detail": "Invalid or missing admin access."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    # Get all orgs tied to this admin access
+    orgs = admin_access.organizations.all().values(
+        "id", "name", "slug"  # add/remove fields depending on your model
+    )
+
+    # Add the selected organization (if any)
+    selected_org = admin_access.selected_organization
+    selected_org_data = None
+    if selected_org:
+        selected_org_data = {
+            "id": selected_org.id,
+            "name": selected_org.name,
+            "slug": getattr(selected_org, "slug", None),
+        }
+
+    return Response(
+        {
+            "organizations": list(orgs),
+            "selected_organization": selected_org_data,
+        },
+        status=status.HTTP_200_OK,
     )

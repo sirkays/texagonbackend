@@ -37,22 +37,28 @@ from .serializers import (
 # from learning.models import Course
 
 def _resolve_org(request):
-    org_id = request.query_params.get("org_id") or getattr(getattr(request.user, "primary_org", None), "id", None)
-    if not org_id:
-        return None, Response({"detail": "Organization not specified and no primary_org on user."},
-                              status=status.HTTP_400_BAD_REQUEST)
-    try:
-        org = Organization.objects.get(id=org_id, is_active=True)
-    except Organization.DoesNotExist:
-        return None, Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    # Ensure caller is a member
-    is_member = OrganizationMembership.objects.filter(
-        user=request.user, organization=org, is_active=True
-    ).exists()
-    if not is_member:
-        return None, Response({"detail": "You do not have access to this organization."},
-                              status=status.HTTP_403_FORBIDDEN)
+    admin_access = getattr(request.user, "adminaccess", None)
+    if admin_access is None or admin_access.selected_organization is None:
+        org_id = request.query_params.get("org_id") or getattr(getattr(request.user, "primary_org", None), "id", None)
+        if not org_id:
+            return None, Response({"detail": "Organization not specified and no primary_org on user."},
+                                status=status.HTTP_400_BAD_REQUEST)
+        try:
+            org = Organization.objects.get(id=org_id, is_active=True)
+        except Organization.DoesNotExist:
+            return None, Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        # Ensure caller is a member
+        is_member = OrganizationMembership.objects.filter(
+            user=request.user, organization=org, is_active=True
+        ).exists()
+        if not is_member:
+            return None, Response({"detail": "You do not have access to this organization."},
+                                status=status.HTTP_403_FORBIDDEN)
+    else:
+        org = admin_access.selected_organization
+    
     return org, None
 
 

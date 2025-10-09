@@ -13,5 +13,10 @@ urlpatterns = [
 
     path('api/parent/children/', views.get_parent_children, name='parent-children'),
     path('api/parent/reset-child-password/', views.reset_child_password, name='reset-child-password'),
-    
+
+
+    ##### ENDPOINT FOR SETING ADMIN ACCESS
+
+    path('api/set-admin/access-orgs/', views.set_admin_access_orgs, name='set_admin_access_orgs'),
+    path('api/fetch-admin/access-orgs/', views.fetch_admin_access_orgs, name='fetch_admin_access_orgs'),
 ]

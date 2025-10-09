@@ -1,5 +1,7 @@
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
@@ -42,3 +44,28 @@ class User(AbstractUser):
 
     objects = UserManager()
 
+
+
+class AdminAccess(models.Model):
+    # Only allow staff or superusers to be selectable in forms/admin:
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        limit_choices_to=Q(is_staff=True) | Q(is_superuser=True),
+    )
+    organizations = models.ManyToManyField("orgs.Organization", blank=True)
+    selected_organization = models.ForeignKey("orgs.Organization", 
+    related_name="adminaccess_all", on_delete=models.CASCADE, blank=True, null=True)
+    active = models.BooleanField(default=True)
+
+    def clean(self):
+        # Enforce at the model level (covers shell, scripts, fixtures, etc.)
+        if self.user and not (self.user.is_staff or self.user.is_superuser):
+            raise ValidationError({
+                "user": "AdminAccess can only be granted to staff or superusers."
+            })
+
+    def save(self, *args, **kwargs):
+        # Ensure clean() runs on every save
+        self.full_clean()
+        return super().save(*args, **kwargs)
