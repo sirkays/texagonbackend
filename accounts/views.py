@@ -13,7 +13,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 from api.retrieve_token import get_token_from_header
 from api.authentication import SessionTokenAuthentication
 
-from orgs.models import OrganizationMembership
+from orgs.models import OrganizationMembership, Organization
 from academics.models import ParentProfile, StudentProfile, ParentChildLink, Classroom
 from learning.models import Course, Enrollment, Lesson, Bookmark
 from assessments.models import Test, TestAttempt
@@ -1075,13 +1075,11 @@ def set_admin_access_orgs(request):
             status=status.HTTP_401_UNAUTHORIZED
         )
     admin_access = getattr(user, "adminaccess", None)
-
     if admin_access is None:
         return Response(
             {"detail": "Invalid or missing admin access."}, 
             status=status.HTTP_401_UNAUTHORIZED
         )
-
     orgs_id = request.data.get("orgs_id")
     if not orgs_id:
         return Response(
@@ -1093,7 +1091,6 @@ def set_admin_access_orgs(request):
 
     if organization is False:
         organization = get_object_or_404_ajax(Organization, slug=orgs_id)
-
         if organization is False:
             return Response(
                 {"detail": "Wrong organization ID."}, 
