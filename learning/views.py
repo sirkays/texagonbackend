@@ -109,14 +109,21 @@ def my_materials(request):
                 video_url = m.file.url if m.file else (m.url or None)
             except ValueError:
                 video_url = m.url or None
+
+            try:
+                thumb_nail = m.cover_image.url if m.cover_image else None
+            except ValueError:
+                thumb_nail = None
+
             videos.append({
                 "id": str(m.id),
                 "title": m.title,
                 "instructor": instructor,
                 "duration": "—",         # No duration on Material
                 "progress": 0,           # No progress tracking for Material
-                "thumbnail": None,       # UI falls back to placeholder
+                "thumbnail": thumb_nail, # UI falls back to placeholder
                 "videoUrl": video_url,
+                
             })
 
         # Audio
@@ -385,6 +392,8 @@ def learning_modules(request):
                 "content_type": ls.content_type,
                 "duration": _fmt_duration(ls.duration_seconds),
                 "url": _lesson_url(ls),
+                "file": ls.file.url if ls.file else None,
+                "cover_image": ls.cover_image.url if ls.cover_image else None,
                 "course": getattr(c, "name", None),
                 "subject": subject_name,
                 "instructor": instructor,
@@ -801,6 +810,10 @@ def resource_materials(request):
         # Videos
         videos: List[Dict[str, Any]] = []
         for ls in vids_qs:
+            try:
+                thumb_nail = ls.cover_image.url if ls.cover_image else None
+            except ValueError:
+                thumb_nail = None
             videos.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -811,6 +824,7 @@ def resource_materials(request):
                 "rating": float(ls.meta.get("rating", 4.7)) if isinstance(ls.meta, dict) else 4.7,
                 "category": selected_course.name,
                 "videoUrl": _safe_file_or_url(ls),
+                "thumbnail":thumb_nail,
             })
         if not videos:
             videos = [{
@@ -915,6 +929,7 @@ def _get_teacher_for_user(user) -> Optional[TeacherProfile]:
 
 def _serialize_lesson(lesson: Lesson) -> Dict[str, Any]:
     """Convert lesson model to API response format."""
+
     return {
         "id": lesson.id,
         "title": lesson.name,
@@ -927,7 +942,8 @@ def _serialize_lesson(lesson: Lesson) -> Dict[str, Any]:
         "audioUrl": lesson.url if lesson.content_type == "audio" else "",
         "textContent": lesson.meta.get("text_content", "") if lesson.meta else "",
         "active": lesson.active,
-        "meta": lesson.meta or {}
+        "meta": lesson.meta or {},
+        "cover_image": lesson.cover_image.url if lesson.cover_image else None,
     }
 
 
@@ -1370,6 +1386,7 @@ def add_lesson(request, module_id: int):
 
         # Handle file upload (if any)
         uploaded_file = None
+        cover_image = None 
         if request.FILES:
             uploaded_file = request.FILES.get("file")  # field name 'file'
             cover_image = request.FILES.get("cover_image")
@@ -1519,8 +1536,12 @@ def update_lesson(request, module_id: int, lesson_id: int):
                 guessed = ext_to_type.get(ext)
                 if guessed and guessed in [choice[0] for choice in Lesson.ContentType.choices]:
                     lesson.content_type = guessed
-
-        lesson.save()
+                    
+        remove_cover = str(data.get("remove_cover", "")).lower() in ("1", "true", "yes")
+        if remove_cover and getattr(lesson, "cover_image", None):
+            lesson.cover_image.delete(save=False)
+            lesson.cover_image = None
+            lesson.save()
 
         lesson_data = _serialize_lesson(lesson)
         return Response({"lesson": lesson_data}, status=status.HTTP_200_OK)

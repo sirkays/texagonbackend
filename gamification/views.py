@@ -352,7 +352,7 @@ def _dummy_payload() -> Dict[str, Any]:
             "competitors": 2847,
         },
         "global": [
-            {"rank": 1, "name": "Sarah Chen", "school": "Tech High School", "points": 15420,
+            {"rank": 1, "name": "Sarah Dan freak", "school": "Tech High School", "points": 15420,
              "avatar": None, "streak": 45, "badges": 12},
             {"rank": 2, "name": "Alex Rodriguez", "school": "Innovation Academy", "points": 14890,
              "avatar": None, "streak": 38, "badges": 11},
