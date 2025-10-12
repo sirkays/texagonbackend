@@ -39,7 +39,9 @@ class AchievementDefinition(TimeStampedModel):
 # Expand your Badge to carry UI + threshold info (keep existing rows compatible).
 # If you already have a second Badge class, merge them and run a migration.
 class Badge(NamedModel):
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="badges")
+    organization = models.ForeignKey(Organization,
+     on_delete=models.CASCADE, 
+     related_name="badges", blank=True, null=True)
     # keep existing file/icon if you like; we add string-based icon/color for your UI:
     icon_name = models.CharField(max_length=64, default="medal")     # e.g. 'gem', 'crown', 'trophy'
     color = models.CharField(max_length=64, default="bg-gray-400")   # Tailwind class used in UI
