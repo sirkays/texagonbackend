@@ -2,7 +2,9 @@ import csv
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import StringIO
+from typing import Literal, Tuple
 
+from django.db import transaction
 from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
@@ -26,12 +28,19 @@ from assessments.models import Submission, TestAttempt
 from billing.models import SubscriptionPayment
 from learning.models import Course, Enrollment
 from orgs.models import Organization, OrganizationMembership
+from accounts.models import User
 
 from .serializers import (
     ClassroomListSerializer,
     ClassroomWriteSerializer,
     StudentMiniSerializer,
+    StudentReadSerializer,
+    StudentWriteSerializer,
 )
+
+
+# ---------- Helpers ----------
+StatusLiteral = Literal["active", "inactive", "suspended"]
 
 # If Course creation activity is desired:
 # from learning.models import Course
@@ -389,3 +398,319 @@ def dashboard_summary(request):
         "stats": data_stats,
         "recentActivity": recent,
     })
+
+
+def _status_from_user_membership(user: User, membership: OrganizationMembership | None) -> StatusLiteral:
+    """
+    Map DB flags to the UI status chip:
+      - suspended  -> user.is_active == False
+      - inactive   -> user.is_active == True AND (no membership OR membership.is_active == False)
+      - active     -> user.is_active == True AND membership.is_active == True
+    """
+    if not user.is_active:
+        return "suspended"
+    if not membership or not membership.is_active:
+        return "inactive"
+    return "active"
+
+
+def _apply_status_to_user_membership(status_value: StatusLiteral,
+                                     user: User,
+                                     membership: OrganizationMembership) -> None:
+    """
+    Apply the UI status back onto DB flags.
+    """
+    if status_value == "suspended":
+        user.is_active = False
+        membership.is_active = False
+    elif status_value == "inactive":
+        user.is_active = True
+        membership.is_active = False
+    else:  # "active"
+        user.is_active = True
+        membership.is_active = True
+
+
+# ---------- ViewSet ----------
+class StudentsViewSet(mixins.ListModelMixin,
+                      mixins.CreateModelMixin,
+                      mixins.UpdateModelMixin,
+                      mixins.DestroyModelMixin,
+                      viewsets.GenericViewSet):
+    """
+    CRUD for students scoped to the caller's organization.
+    Auth: API Key + Session Token
+    """
+    authentication_classes = [SessionTokenAuthentication]
+    permission_classes = [HasAPIKey, IsAuthenticated]
+
+    def _org_or_error(self):
+        org, error = _resolve_org(self.request)
+        return org, error
+
+    def list(self, request, *args, **kwargs):
+        org, error = self._org_or_error()
+        if error:
+            return error
+
+        # Filters to match UI:
+        q = (request.query_params.get("q") or "").strip().lower()
+        classroom_name = request.query_params.get("classroom")
+        status_filter = request.query_params.get("status")  # active | inactive | suspended
+
+        qs = (StudentProfile.objects
+              .select_related("user", "current_classroom")
+              .filter(organization=org))
+
+        if q:
+            qs = qs.filter(
+                Q(user__first_name__icontains=q) |
+                Q(user__last_name__icontains=q) |
+                Q(user__email__icontains=q) |
+                Q(admission_no__icontains=q)
+            )
+
+        if classroom_name and classroom_name.lower() != "all":
+            qs = qs.filter(current_classroom__name=classroom_name)
+
+        # Preload memberships for status mapping
+        memberships = {
+            m.user_id: m
+            for m in OrganizationMembership.objects.filter(
+                organization=org, role=OrganizationMembership.Role.STUDENT,
+                user_id__in=qs.values_list("user_id", flat=True)
+            )
+        }
+
+        items = []
+        for sp in qs.order_by("user__first_name", "user__last_name"):
+            user = sp.user
+            membership = memberships.get(user.id)
+            status_text = _status_from_user_membership(user, membership)
+            items.append({
+                "id": sp.id,
+                "name": (user.get_full_name() or user.email or str(user.pk)),
+                "email": user.email,
+                "classroom": getattr(sp.current_classroom, "name", None),
+                "admission_no": sp.admission_no,
+                "status": status_text,
+            })
+
+        if status_filter and status_filter != "all":
+            items = [i for i in items if i["status"] == status_filter]
+
+        data = StudentReadSerializer(items, many=True).data
+        return Response(data)
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        org, error = self._org_or_error()
+        if error:
+            return error
+
+        ser = StudentWriteSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        payload = ser.validated_data
+
+        classroom_name = payload.get("classroom") or None
+        admission_no = payload.get("admissionNo") or ""
+        status_value: StatusLiteral = payload.get("status") or "active"
+
+        # Find/create classroom by name (optional)
+        classroom = None
+        if classroom_name:
+            classroom = Classroom.objects.filter(organization=org, name=classroom_name).first()
+            if not classroom:
+                return Response({"detail": f"Classroom '{classroom_name}' not found."},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+        # Find or create the user by email
+        email = payload["email"].lower().strip()
+        name = (payload["name"] or "").strip()
+        first, last = (name.split(" ", 1) + [""])[:2]
+
+        user, created = User.objects.get_or_create(
+            email=email,
+            primary_org=org,
+            defaults={"first_name": first, "last_name": last or ""}
+        )
+        if not created:
+            # If user exists, update their display name (non-destructive)
+            if first and not user.first_name:
+                user.first_name = first
+            if last and not user.last_name:
+                user.last_name = last
+            user.save(update_fields=["first_name", "last_name"])
+
+        # Create StudentProfile (or attach to org) — ensure single profile per (user, org)
+
+        sp, sp_created = StudentProfile.objects.get_or_create(
+            user=user, organization=org,
+            defaults={"current_classroom": classroom, "admission_no": admission_no}
+        )
+        if not sp_created:
+            # Update on re-create attempts
+            if classroom is not None:
+                sp.current_classroom = classroom
+            if admission_no is not None:
+                sp.admission_no = admission_no
+            sp.save()
+
+        # Ensure org membership as STUDENT
+        membership, _ = OrganizationMembership.objects.get_or_create(
+            user=user, organization=org, role=OrganizationMembership.Role.STUDENT,
+            defaults={"is_active": True}
+        )
+
+        # Apply status mapping
+        _apply_status_to_user_membership(status_value, user, membership)
+        user.save(update_fields=["is_active"])
+        membership.save(update_fields=["is_active"])
+
+        out = {
+            "id": sp.id,
+            "name": (user.get_full_name() or user.email),
+            "email": user.email,
+            "classroom": getattr(sp.current_classroom, "name", None),
+            "admission_no": sp.admission_no,
+            "status": _status_from_user_membership(user, membership),
+        }
+        return Response(StudentReadSerializer(out).data, status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    def update(self, request, pk=None, *args, **kwargs):
+        org, error = self._org_or_error()
+        if error:
+            return error
+
+        try:
+            sp = StudentProfile.objects.select_related("user").get(id=pk, organization=org)
+        except StudentProfile.DoesNotExist:
+            return Response({"detail": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        ser = StudentWriteSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        payload = ser.validated_data
+
+        # Update user basic info
+        name = (payload.get("name") or "").strip()
+        first, last = (name.split(" ", 1) + [""])[:2]
+        if first:
+            sp.user.first_name = first
+        if last != "":
+            sp.user.last_name = last
+        new_email = payload.get("email")
+        if new_email and new_email.lower() != sp.user.email.lower():
+            # prevent collision
+            if User.objects.filter(email__iexact=new_email).exclude(id=sp.user_id).exists():
+                return Response({"detail": "Email already in use by another user."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            sp.user.email = new_email.lower()
+        sp.user.save()
+
+        # Update classroom
+        classroom_name = payload.get("classroom")
+        if classroom_name is not None:
+            if classroom_name == "":
+                sp.current_classroom = None
+            else:
+                classroom = Classroom.objects.filter(organization=org, name=classroom_name).first()
+                if not classroom:
+                    return Response({"detail": f"Classroom '{classroom_name}' not found."},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                sp.current_classroom = classroom
+
+        # Update admission number
+        if "admissionNo" in payload:
+            sp.admission_no = payload.get("admissionNo") or ""
+
+        sp.save()
+
+        # Update status via membership flags
+        membership, _ = OrganizationMembership.objects.get_or_create(
+            user=sp.user, organization=org, role=OrganizationMembership.Role.STUDENT,
+            defaults={"is_active": True}
+        )
+        if "status" in payload:
+            _apply_status_to_user_membership(payload["status"], sp.user, membership)
+            sp.user.save(update_fields=["is_active"])
+            membership.save(update_fields=["is_active"])
+
+        out = {
+            "id": sp.id,
+            "name": (sp.user.get_full_name() or sp.user.email),
+            "email": sp.user.email,
+            "classroom": getattr(sp.current_classroom, "name", None),
+            "admission_no": sp.admission_no,
+            "status": _status_from_user_membership(sp.user, membership),
+        }
+        return Response(StudentReadSerializer(out).data)
+
+    @transaction.atomic
+    def destroy(self, request, pk=None, *args, **kwargs):
+        """
+        Delete is only allowed if the student is NOT enrolled in any course.
+        """
+        org, error = self._org_or_error()
+        if error:
+            return error
+
+        try:
+            sp = StudentProfile.objects.get(id=pk, organization=org)
+        except StudentProfile.DoesNotExist:
+            return Response({"detail": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        enrolled = Enrollment.objects.filter(student=sp).exists()
+        if enrolled:
+            return Response(
+                {"detail": "Cannot delete student: the student is enrolled in one or more courses."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        student = sp.user
+        sp.delete()
+        student.delete()
+        # (Optionally) also clean up membership role=STUDENT for this org if desired.
+        OrganizationMembership.objects.filter(
+            user_id=sp.user_id, organization=org, role=OrganizationMembership.Role.STUDENT
+        ).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=["GET"], url_path="export")
+    def export_csv(self, request, *args, **kwargs):
+        """
+        CSV export matching the UI's columns.
+        """
+        org, error = self._org_or_error()
+        if error:
+            return error
+
+        qs = StudentProfile.objects.select_related("user", "current_classroom").filter(organization=org)
+        memberships = {
+            m.user_id: m
+            for m in OrganizationMembership.objects.filter(
+                organization=org, role=OrganizationMembership.Role.STUDENT,
+                user_id__in=qs.values_list("user_id", flat=True)
+            )
+        }
+
+        rows = [["Name", "Email", "Admission No", "Classroom", "Status"]]
+        for sp in qs:
+            user = sp.user
+            membership = memberships.get(user.id)
+            rows.append([
+                (user.get_full_name() or user.email),
+                user.email,
+                sp.admission_no or "",
+                getattr(sp.current_classroom, "name", "") or "",
+                _status_from_user_membership(user, membership),
+            ])
+
+        # Stream as CSV response
+        import csv
+        from io import StringIO
+        sio = StringIO()
+        writer = csv.writer(sio)
+        writer.writerows(rows)
+        resp = HttpResponse(sio.getvalue(), content_type="text/csv")
+        resp["Content-Disposition"] = 'attachment; filename="students.csv"'
+        return resp

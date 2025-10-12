@@ -4,6 +4,26 @@ from orgs.models import Organization
 from academics.models import Classroom, StudentProfile
 from learning.models import Course
 
+class StudentReadSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    email = serializers.EmailField()
+    classroom = serializers.CharField(allow_null=True)
+    admissionNo = serializers.CharField(source="admission_no", allow_blank=True)
+    status = serializers.CharField()
+
+class StudentWriteSerializer(serializers.Serializer):
+    """
+    Used for create/update from the modal.
+    If 'id' is provided -> update, else -> create.
+    """
+    id = serializers.IntegerField(required=False)
+    name = serializers.CharField()
+    email = serializers.EmailField()
+    classroom = serializers.CharField(allow_blank=True, required=False)  # classroom name (e.g., "Grade 10A")
+    admissionNo = serializers.CharField(required=False, allow_blank=True)
+    status = serializers.ChoiceField(choices=["active", "inactive", "suspended"], default="active")
+
 
 class ClassroomBaseSerializer(serializers.ModelSerializer):
     class Meta:
