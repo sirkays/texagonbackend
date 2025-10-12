@@ -102,7 +102,6 @@ class ParentProfile(TimeStampedModel):
             return []
 
         plan = subscription.plan
-        print(plan, " pppp")
         billing_days = self._billing_period_days()
 
         if self.last_billed_at:

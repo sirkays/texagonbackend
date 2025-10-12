@@ -3,10 +3,13 @@ from academics.models import StudentProfile,TeacherProfile
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak  
 from django.db.models import Q, Sum, Count
 from django.utils import timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional,Literal, Tuple
 import traceback
 from decimal import Decimal
 from django.shortcuts import _get_queryset
+from accounts.models import User
+
+StatusLiteral = Literal["active", "inactive", "suspended"]
 
 # ---------------- helpers ----------------
 def _get_student_for_user(user) -> Optional[StudentProfile]:
@@ -64,3 +67,66 @@ def get_object_or_404_ajax(klass, *args, custom_message=None, **kwargs):
             return False
     
     return obj
+
+
+
+def _status_from_user_membership(user: User, membership: OrganizationMembership | None) -> StatusLiteral:
+    """
+    Map DB flags to the UI status chip:
+      - suspended  -> user.is_active == False
+      - inactive   -> user.is_active == True AND (no membership OR membership.is_active == False)
+      - active     -> user.is_active == True AND membership.is_active == True
+    """
+    if not user.is_active:
+        return "suspended"
+    if not membership or not membership.is_active:
+        return "inactive"
+    return "active"
+
+
+
+
+def _apply_status_to_user_membership(status_value: StatusLiteral,
+                                     user: User,
+                                     membership: OrganizationMembership) -> None:
+    """
+    Apply the UI status back onto DB flags.
+    """
+    if status_value == "suspended":
+        user.is_active = False
+        membership.is_active = False
+    elif status_value == "inactive":
+        user.is_active = True
+        membership.is_active = False
+    else:  # "active"
+        user.is_active = True
+        membership.is_active = True
+
+
+# If Course creation activity is desired:
+# from learning.models import Course
+
+def _resolve_org(request):
+
+    admin_access = getattr(request.user, "adminaccess", None)
+    if admin_access is None or admin_access.selected_organization is None:
+        org_id = request.query_params.get("org_id") or getattr(getattr(request.user, "primary_org", None), "id", None)
+        if not org_id:
+            return None, Response({"detail": "Organization not specified and no primary_org on user."},
+                                status=status.HTTP_400_BAD_REQUEST)
+        try:
+            org = Organization.objects.get(id=org_id, is_active=True)
+        except Organization.DoesNotExist:
+            return None, Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
+            
+        # Ensure caller is a member
+        is_member = OrganizationMembership.objects.filter(
+            user=request.user, organization=org, is_active=True
+        ).exists()
+        if not is_member:
+            return None, Response({"detail": "You do not have access to this organization."},
+                                status=status.HTTP_403_FORBIDDEN)
+    else:
+        org = admin_access.selected_organization
+    
+    return org, None

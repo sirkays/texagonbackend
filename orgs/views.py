@@ -10,20 +10,21 @@ from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.utils import timezone
 
-from rest_framework import mixins, status, viewsets
+from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import (
     action,
     api_view,
     authentication_classes,
     permission_classes,
 )
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
 
-from academics.models import Classroom, StudentProfile, TeacherProfile
+from academics.models import Classroom, StudentProfile, TeacherProfile, Subject
 from assessments.models import Submission, TestAttempt
 from billing.models import SubscriptionPayment
 from learning.models import Course, Enrollment
@@ -36,39 +37,14 @@ from .serializers import (
     StudentMiniSerializer,
     StudentReadSerializer,
     StudentWriteSerializer,
+    TeacherListSerializer,
+    TeacherWriteSerializer,
+    TeacherDetailSerializer
+
+
 )
 
-
-# ---------- Helpers ----------
-StatusLiteral = Literal["active", "inactive", "suspended"]
-
-# If Course creation activity is desired:
-# from learning.models import Course
-
-def _resolve_org(request):
-
-    admin_access = getattr(request.user, "adminaccess", None)
-    if admin_access is None or admin_access.selected_organization is None:
-        org_id = request.query_params.get("org_id") or getattr(getattr(request.user, "primary_org", None), "id", None)
-        if not org_id:
-            return None, Response({"detail": "Organization not specified and no primary_org on user."},
-                                status=status.HTTP_400_BAD_REQUEST)
-        try:
-            org = Organization.objects.get(id=org_id, is_active=True)
-        except Organization.DoesNotExist:
-            return None, Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
-            
-        # Ensure caller is a member
-        is_member = OrganizationMembership.objects.filter(
-            user=request.user, organization=org, is_active=True
-        ).exists()
-        if not is_member:
-            return None, Response({"detail": "You do not have access to this organization."},
-                                status=status.HTTP_403_FORBIDDEN)
-    else:
-        org = admin_access.selected_organization
-    
-    return org, None
+from core.utils import (StatusLiteral, _resolve_org, _status_from_user_membership,_apply_status_to_user_membership)
 
 
 class ClassroomViewSet(viewsets.ModelViewSet):
@@ -399,38 +375,6 @@ def dashboard_summary(request):
         "recentActivity": recent,
     })
 
-
-def _status_from_user_membership(user: User, membership: OrganizationMembership | None) -> StatusLiteral:
-    """
-    Map DB flags to the UI status chip:
-      - suspended  -> user.is_active == False
-      - inactive   -> user.is_active == True AND (no membership OR membership.is_active == False)
-      - active     -> user.is_active == True AND membership.is_active == True
-    """
-    if not user.is_active:
-        return "suspended"
-    if not membership or not membership.is_active:
-        return "inactive"
-    return "active"
-
-
-def _apply_status_to_user_membership(status_value: StatusLiteral,
-                                     user: User,
-                                     membership: OrganizationMembership) -> None:
-    """
-    Apply the UI status back onto DB flags.
-    """
-    if status_value == "suspended":
-        user.is_active = False
-        membership.is_active = False
-    elif status_value == "inactive":
-        user.is_active = True
-        membership.is_active = False
-    else:  # "active"
-        user.is_active = True
-        membership.is_active = True
-
-
 # ---------- ViewSet ----------
 class StudentsViewSet(mixins.ListModelMixin,
                       mixins.CreateModelMixin,
@@ -458,9 +402,11 @@ class StudentsViewSet(mixins.ListModelMixin,
         classroom_name = request.query_params.get("classroom")
         status_filter = request.query_params.get("status")  # active | inactive | suspended
 
-        qs = (StudentProfile.objects
-              .select_related("user", "current_classroom")
-              .filter(organization=org))
+        qs = (
+            StudentProfile.objects
+            .select_related("user", "current_classroom")
+            .filter(organization=org)
+        )
 
         if q:
             qs = qs.filter(
@@ -482,6 +428,18 @@ class StudentsViewSet(mixins.ListModelMixin,
             )
         }
 
+        def avatar_url(u):
+            f = getattr(u, "avatar", None)
+            if not f:
+                return None
+            try:
+                url = f.url
+                if url.startswith("http"):
+                    return url
+                return request.build_absolute_uri(url)
+            except Exception:
+                return None
+
         items = []
         for sp in qs.order_by("user__first_name", "user__last_name"):
             user = sp.user
@@ -494,6 +452,7 @@ class StudentsViewSet(mixins.ListModelMixin,
                 "classroom": getattr(sp.current_classroom, "name", None),
                 "admission_no": sp.admission_no,
                 "status": status_text,
+                "avatar": avatar_url(user),  # <-- added
             })
 
         if status_filter and status_filter != "all":
@@ -714,3 +673,236 @@ class StudentsViewSet(mixins.ListModelMixin,
         resp = HttpResponse(sio.getvalue(), content_type="text/csv")
         resp["Content-Disposition"] = 'attachment; filename="students.csv"'
         return resp
+
+
+
+
+
+
+# ---- util: get (or create) a TEACHER membership for a user within org ----
+def _get_or_create_teacher_membership(user: User, org: Organization) -> OrganizationMembership:
+    mem, _ = OrganizationMembership.objects.get_or_create(
+        user=user, organization=org, role=OrganizationMembership.Role.TEACHER,
+        defaults={"is_active": True}
+    )
+    return mem
+
+
+
+# ---- VIEWSET ----
+
+class TeacherViewSet(viewsets.ModelViewSet):
+    """
+    Endpoint: /api/teachers/
+    Auth: API Key + Session Token
+    """
+    queryset = (
+        TeacherProfile.objects.select_related("user", "organization")
+        .annotate(courses_count=Count("courses", distinct=True))
+        .all()
+    )
+    permission_classes = [HasAPIKey, IsAuthenticated]
+    authentication_classes = [SessionTokenAuthentication]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_serializer_class(self):
+        if self.action in ["create", "update", "partial_update"]:
+            return TeacherWriteSerializer
+        if self.action in ["list"]:
+            return TeacherListSerializer
+        return TeacherDetailSerializer
+
+    def _resolve(self, request):
+        # Use your provided resolver
+        org, error = _resolve_org(request)
+        return org, error
+
+    def get_queryset(self):
+        org, _err = self._resolve(self.request)
+        if not org:
+            return TeacherProfile.objects.none()
+        qs = super().get_queryset().filter(organization=org)
+
+        # --- searching and light filtering (matches your UI) ---
+        q = self.request.query_params.get("q")
+        if q:
+            qs = qs.filter(
+                Q(user__email__icontains=q) |
+                Q(user__first_name__icontains=q) |
+                Q(user__last_name__icontains=q) |
+                Q(bio__icontains=q) |
+                Q(specialties__name__icontains=q)
+            ).distinct()
+        # optional status filter ?status=active|inactive|suspended
+        status_param = self.request.query_params.get("status")
+        if status_param in {"active", "inactive", "suspended"}:
+            # filter in python due to derived nature
+            ids = []
+            for t in qs:
+                mem = OrganizationMembership.objects.filter(
+                    user=t.user, organization=org, role=OrganizationMembership.Role.TEACHER
+                ).first()
+                if _status_from_user_membership(t.user, mem) == status_param:
+                    ids.append(t.id)
+            qs = qs.filter(id__in=ids)
+        return qs
+
+    # ----- LIST -----
+    def list(self, request, *args, **kwargs):
+        org, error = self._resolve(request)
+        if error:
+            return error
+        return super().list(request, *args, **kwargs)
+
+    # ----- RETRIEVE -----
+    def retrieve(self, request, *args, **kwargs):
+        org, error = self._resolve(request)
+        if error:
+            return error
+        return super().retrieve(request, *args, **kwargs)
+
+    # ----- CREATE -----
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        org, error = self._resolve(request)
+        if error:
+            return error
+        ser = self.get_serializer(data=request.data, context={"org": org})
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        email = data["email"].lower().strip()
+        name = data.get("name") or ""
+        first, *rest = name.split(" ", 1)
+        last = rest[0] if rest else ""
+        # Get or create the user by email
+        user, _ = User.objects.get_or_create(
+            email=email,
+            defaults={"first_name": first, "last_name": last, "is_active": True}
+        )
+        # Optional user fields
+        if "phone" in data:
+            user.phone = data["phone"] or user.phone
+
+        # Optional avatar upload, even if UI didn’t include it
+        avatar = request.FILES.get("avatar")
+        if avatar:
+            user.avatar = avatar
+        user.save()
+        # Ensure teacher membership
+        membership = _get_or_create_teacher_membership(user, org)
+
+        # Apply status chip if provided
+        if "status" in data:
+            _apply_status_to_user_membership(data["status"], user, membership)
+            user.save(update_fields=["is_active"])
+            membership.save(update_fields=["is_active"])
+
+        # Create TeacherProfile (or attach if exists but in another org this would be separate rows)
+        tp, created = TeacherProfile.objects.get_or_create(
+            user=user, organization=org,
+            defaults={
+                "bio": data.get("bio", "") or "",
+                "experience": data.get("experience", 0) or 0,
+            }
+        )
+        if not created:
+            tp.bio = data.get("bio", tp.bio)
+            tp.experience = data.get("experience", tp.experience)
+            tp.save()
+
+        # Specialties (validated to exist)
+        if "specialties" in data:
+            tp.specialties.set(Subject.objects.filter(organization=org, name__in=data["specialties"]))
+
+        # Respond with detail serializer including avatarUrl
+        out = TeacherDetailSerializer(
+            TeacherProfile.objects.annotate(courses_count=Count("courses", distinct=True)).get(pk=tp.pk)
+        )
+        headers = self.get_success_headers(out.data)
+        return Response(out.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    # ----- UPDATE / PARTIAL_UPDATE -----
+    @transaction.atomic
+    def partial_update(self, request, *args, **kwargs):
+        org, error = self._resolve(request)
+        if error:
+            return error
+
+        instance: TeacherProfile = self.get_object()
+        ser = self.get_serializer(data=request.data, partial=True, context={"org": org})
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        user = instance.user
+
+        # Update user basics if present
+        if "email" in data:
+            user.email = data["email"].lower().strip()
+        if "name" in data:
+            first, *rest = data["name"].split(" ", 1)
+            user.first_name = first
+            user.last_name = rest[0] if rest else user.last_name
+        if "phone" in data:
+            user.phone = data["phone"]
+
+        # Admin can update avatar from this endpoint (multipart)
+        avatar = request.FILES.get("avatar")
+        if avatar:
+            user.avatar = avatar
+        user.save()
+
+        # Update profile
+        if "bio" in data:
+            instance.bio = data["bio"]
+        if "experience" in data:
+            instance.experience = data["experience"]
+        if "specialties" in data:
+            instance.specialties.set(Subject.objects.filter(organization=org, name__in=data["specialties"]))
+        instance.save()
+
+        # Apply status if provided
+        if "status" in data:
+            mem = _get_or_create_teacher_membership(user, org)
+            _apply_status_to_user_membership(data["status"], user, mem)
+            user.save(update_fields=["is_active"])
+            mem.save(update_fields=["is_active"])
+
+        # Out
+        out = TeacherDetailSerializer(
+            TeacherProfile.objects.annotate(courses_count=Count("courses", distinct=True)).get(pk=instance.pk)
+        )
+        return Response(out.data)
+
+    # ----- DESTROY (guard against assigned courses) -----
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        org, error = self._resolve(request)
+        if error:
+            return error
+
+        instance: TeacherProfile = self.get_object()
+        has_courses = Course.objects.filter(teacher=instance).exists()
+        if has_courses:
+            return Response(
+                {"detail": "Teacher cannot be deleted because they are assigned to one or more courses."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Safe to delete TeacherProfile; do NOT delete the User (could be member in other orgs/roles)
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # ----- ACTION: explicit avatar upload (alternative to PATCH with multipart) -----
+    @action(detail=True, methods=["POST"], url_path="avatar", parser_classes=[MultiPartParser, FormParser])
+    def upload_avatar(self, request, pk=None):
+        org, error = self._resolve(request)
+        if error:
+            return error
+        instance: TeacherProfile = self.get_object()
+        file = request.FILES.get("avatar")
+        if not file:
+            return Response({"detail": "avatar file is required."}, status=status.HTTP_400_BAD_REQUEST)
+        instance.user.avatar = file
+        instance.user.save(update_fields=["avatar"])
+        return Response({"avatarUrl": instance.user.avatar.url})
+
