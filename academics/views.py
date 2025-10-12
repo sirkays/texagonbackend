@@ -22,7 +22,7 @@ from orgs.models import Organization, OrganizationMembership
 from academics.models import StudentProfile, ParentProfile, TeacherProfile, Classroom, Subject
 from learning.models import Course, Enrollment
 from assessments.models import Test, TestAttempt, TestAnswer, Question
-from gamification.models import Badge, BadgeAward, PointTransaction, Streak
+from gamification.models import Badge, BadgeAward, PointTransaction, Streak, AchievementDefinition
 from attendance.models import AttendanceRecord, AttendanceSession
 from core.utils import _get_student_for_user, _to_int, _sum_points
 
@@ -41,191 +41,136 @@ def _completed_courses(student: StudentProfile) -> int:
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def achievements_overview(request):
-    """
-    Data for the Achievements UI (achievements.tsx).
-    Response keys:
-      - stats: { total_points, achievements_unlocked, achievements_total, badges_earned, badges_total,
-                 streak_current, streak_best }
-      - achievements: list of items like the component uses
-          { id, title, description, icon, earned, earnedDate?, points, category, progress?, total? }
-      - badges: list of items like the component uses
-          { id, name, description, icon, color, earned, progress?, total? }
-
-    Query params:
-      - debug=1 → include traceback on error
-    """
     try:
         user = request.user
         student = _get_student_for_user(user)
-
-        # If we can't resolve a student, return rich dummy data so UI still renders
         if not student:
             return Response(_dummy_payload(), status=status.HTTP_200_OK)
 
-        # ---- core aggregates ----
         org = getattr(student, "organization", None)
         total_points = _sum_points(student)
         streak_obj = getattr(student, "streak", None)
-        streak_current = getattr(streak_obj, "current_days", 0) or 0
-        streak_best = getattr(streak_obj, "longest_days", 0) or 0
+        streak_current = int(getattr(streak_obj, "current_days", 0) or 0)
+        streak_best = int(getattr(streak_obj, "longest_days", 0) or 0)
 
+        # ---------- badge side (fully DB-driven) ----------
         badges_qs = Badge.objects.all()
         if org:
             badges_qs = badges_qs.filter(organization=org)
+        badges_qs = badges_qs.order_by("points", "id")
+
+        awarded_ids = set(
+            BadgeAward.objects.filter(student=student, badge__in=badges_qs).values_list("badge_id", flat=True)
+        )
         badges_total = badges_qs.count()
-        badges_earned = BadgeAward.objects.filter(student=student).count()
+        badges_earned = len(awarded_ids)
 
-        # ---- derive some achievement progress from real data (and fill with dummies if missing) ----
+        badges = []
+        for b in badges_qs:
+            earned = (b.id in awarded_ids) or (total_points >= (b.points or 0))
+            item = {
+                "id": b.id,
+                "name": b.name,
+                "description": (b.criteria or f"Earned {b.points:,} points") if b.points else (b.criteria or ""),
+                "icon": b.icon_name or "medal",
+                "color": b.color or "bg-gray-400",
+                "earned": bool(earned),
+            }
+            if not earned and (b.points or 0) > 0:
+                item["progress"] = int(total_points)
+                item["total"] = int(b.points)
+            badges.append(item)
 
-        # 1) First Steps: earned if any progress or any attempt/bookmark exists
+        # ---------- achievements (DB-driven definitions) ----------
+        defs_qs = AchievementDefinition.objects.filter(is_active=True)
+        if org:
+            # org-specific rows first; fallback to global (org NULL) if org row missing
+            # We’ll fetch both then prefer org matches in code below.
+            defs_qs = AchievementDefinition.objects.filter(is_active=True).filter(Q(organization__isnull=True) | Q(organization=org))
+        defs_map = {}
+        for d in defs_qs.order_by("-organization"):  # org-specific overwrites globals with same code
+            defs_map.setdefault(d.code, d)
+
+        # live data we need for progress computations
         has_progress = Enrollment.objects.filter(student=student, progress_pct__gt=0).exists()
         has_attempt = TestAttempt.objects.filter(student=student).exists()
         first_steps_earned = bool(has_progress or has_attempt)
 
-        # 2) Quiz Master: attempts with score >= 90% of test total (Question sum)
         attempts = list(TestAttempt.objects.filter(student=student).select_related("test"))
         test_ids = {a.test_id for a in attempts}
-        totals_map: Dict[int, Decimal] = {
+        totals_map = {
             tid: (Question.objects.filter(test_id=tid).aggregate(t=Sum("points")).get("t") or Decimal(0))
             for tid in test_ids
         }
         ninety_or_more = 0
         for a in attempts:
-            total = float(totals_map.get(a.test_id) or 0)
-            if total > 0 and float(a.score or 0) >= 0.9 * total:
+            total = float(totals_map.get(a.test_id) or 0.0)
+            if total > 0 and float(a.score or 0) >= 0.9 * total:  # 90% threshold (keep constant, or move to JSON later)
                 ninety_or_more += 1
 
-        # 3) Streak Champion: 30-day goal
-        streak_goal = 30
-
-        # 4) Course Conqueror: 3 completed courses
         completed_courses = _completed_courses(student)
-        conqueror_goal = 3
-
-        # 5) Code Warrior: dummy “exercises” → proxy with submitted attempts count vs 10
         exercises_done = TestAttempt.objects.filter(student=student, status="submitted").count()
-        exercises_goal = 10
 
-        achievements: List[Dict[str, Any]] = [
-            {
-                "id": 1,
-                "title": "First Steps",
-                "description": "Complete your first lesson",
-                "icon": "star",
-                "earned": first_steps_earned,
-                "earnedDate": timezone.now().date().isoformat() if first_steps_earned else None,
-                "points": 50,
-                "category": "Getting Started",
-            },
-            {
-                "id": 2,
-                "title": "Code Warrior",
-                "description": "Complete 10 coding exercises",
-                "icon": "trophy",
-                "earned": exercises_done >= exercises_goal,
-                "earnedDate": timezone.now().date().isoformat() if exercises_done >= exercises_goal else None,
-                "points": 200,
-                "category": "Coding",
-                "progress": exercises_done if exercises_done < exercises_goal else exercises_goal,
-                "total": exercises_goal,
-            },
-            {
-                "id": 3,
-                "title": "Quiz Master",
-                "description": "Score 90% or higher on 5 quizzes",
-                "icon": "target",
-                "earned": ninety_or_more >= 5,
-                "earnedDate": timezone.now().date().isoformat() if ninety_or_more >= 5 else None,
-                "points": 300,
-                "category": "Assessment",
-                "progress": ninety_or_more if ninety_or_more < 5 else 5,
-                "total": 5,
-            },
-            {
-                "id": 4,
-                "title": "Streak Champion",
-                "description": "Maintain a 30-day learning streak",
-                "icon": "zap",
-                "earned": streak_current >= streak_goal,
-                "earnedDate": timezone.now().date().isoformat() if streak_current >= streak_goal else None,
-                "points": 500,
-                "category": "Consistency",
-                "progress": int(streak_current if streak_current < streak_goal else streak_goal),
-                "total": streak_goal,
-            },
-            {
-                "id": 5,
-                "title": "Course Conqueror",
-                "description": "Complete 3 full courses",
-                "icon": "award",
-                "earned": completed_courses >= conqueror_goal,
-                "earnedDate": timezone.now().date().isoformat() if completed_courses >= conqueror_goal else None,
-                "points": 750,
-                "category": "Completion",
-                "progress": int(completed_courses if completed_courses < conqueror_goal else conqueror_goal),
-                "total": conqueror_goal,
-            },
-            {
-                "id": 6,
-                "title": "Peer Helper",
-                "description": "Help 10 fellow students",
-                "icon": "medal",
-                "earned": False,  # no data source → dummy in-progress
-                "points": 400,
-                "category": "Community",
-                "progress": 3,
-                "total": 10,
-            },
-        ]
-
-        # ---- badges: compute against point thresholds (and mark earned via awards too) ----
-        # We keep the same look as the sample: Bronze/Silver/Gold/Diamond with thresholds.
-        thresholds = [
-            {"id": 1, "name": "Bronze Learner",  "icon": "medal",  "color": "bg-amber-600", "points": 1000},
-            {"id": 2, "name": "Silver Scholar",  "icon": "trophy", "color": "bg-gray-400", "points": 5000},
-            {"id": 3, "name": "Gold Graduate",   "icon": "crown",  "color": "bg-yellow-500", "points": 10000},
-            {"id": 4, "name": "Diamond Elite",   "icon": "gem",    "color": "bg-blue-500",   "points": 25000},
-        ]
-        badges: List[Dict[str, Any]] = []
-        for th in thresholds:
-            earned = total_points >= th["points"]
-            item = {
-                "id": th["id"],
-                "name": th["name"],
-                "description": f"Earned {th['points']:,} points",
-                "icon": th["icon"],
-                "color": th["color"],
-                "earned": earned,
+        # Helper to build an achievement from a def + computed progress
+        def build(defn: AchievementDefinition, earned: bool, progress: int = None, total: int = None, earned_date=None):
+            return {
+                "id": defn.id,
+                "title": defn.title,
+                "description": defn.description,
+                "icon": defn.icon or "star",
+                "earned": bool(earned),
+                "earnedDate": (earned_date or (timezone.now().date().isoformat() if earned else None)),
+                "points": int(defn.points or 0),
+                "category": defn.category or "General",
+                **({ "progress": int(progress) } if progress is not None else {}),
+                **({ "total": int(total) } if total is not None else {}),
             }
-            if not earned:
-                item["progress"] = total_points
-                item["total"] = th["points"]
-            badges.append(item)
 
-        # If you want to also surface org-defined badges as extra items (optional):
-        # Uncomment to append up to 4 organization badges with earned flag.
-        # org_badges = badges_qs.select_related()[:4]
-        # awarded_ids = set(BadgeAward.objects.filter(student=student, badge__in=org_badges).values_list("badge_id", flat=True))
-        # for b in org_badges:
-        #     badges.append({
-        #         "id": 1000 + b.id,
-        #         "name": b.name,
-        #         "description": b.criteria or "Organization badge",
-        #         "icon": "medal",
-        #         "color": "bg-purple-500",
-        #         "earned": b.id in awarded_ids,
-        #     })
+        achievements = []
+        
+        # FIRST_STEPS (no numeric target)
+        d = defs_map.get("first_steps")
+        if d:
+            achievements.append(build(d, first_steps_earned))
+
+        # CODE_WARRIOR (uses target_value)
+        d = defs_map.get("code_warrior")
+        if d:
+            goal = int(d.target_value or 0)
+            earned = (goal > 0 and exercises_done >= goal)
+            achievements.append(build(d, earned, min(exercises_done, goal) if goal else None, goal or None))
+
+        # QUIZ_MASTER (target_value is the “N quizzes ≥90%” number)
+        d = defs_map.get("quiz_master")
+        if d:
+            goal = int(d.target_value or 0)
+            earned = (goal > 0 and ninety_or_more >= goal)
+            achievements.append(build(d, earned, min(ninety_or_more, goal) if goal else None, goal or None))
+
+        # STREAK_CHAMPION (target_value is streak days)
+        d = defs_map.get("streak_champion")
+        if d:
+            goal = int(d.target_value or 0)
+            earned = (goal > 0 and streak_current >= goal)
+            achievements.append(build(d, earned, min(streak_current, goal) if goal else None, goal or None))
+
+        # COURSE_CONQUEROR (target_value is courses count)
+        d = defs_map.get("course_conqueror")
+        if d:
+            goal = int(d.target_value or 0)
+            earned = (goal > 0 and completed_courses >= goal)
+            achievements.append(build(d, earned, min(completed_courses, goal) if goal else None, goal or None))
 
         achievements_total = len(achievements)
         achievements_unlocked = sum(1 for a in achievements if a.get("earned"))
 
         payload = {
             "stats": {
-                "total_points": total_points,
-                "achievements_unlocked": achievements_unlocked,
-                "achievements_total": achievements_total,
-                "badges_earned": badges_earned,
-                "badges_total": max(badges_total, len(thresholds)),  # include threshold set
+                "total_points": int(total_points),
+                "achievements_unlocked": int(achievements_unlocked),
+                "achievements_total": int(achievements_total),
+                "badges_earned": int(badges_earned),
+                "badges_total": int(badges_total),
                 "streak_current": int(streak_current),
                 "streak_best": int(streak_best),
             },
@@ -237,9 +182,9 @@ def achievements_overview(request):
     except Exception as e:
         err = {"detail": "Failed to load achievements.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            import traceback
             err["traceback"] = traceback.format_exc()
         return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 # ---------------- dummy fallback (no student) ----------------
 def _dummy_payload() -> Dict[str, Any]:
