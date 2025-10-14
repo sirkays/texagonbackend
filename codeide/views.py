@@ -10,14 +10,17 @@ from api.authentication import SessionTokenAuthentication  # your existing sessi
 
 from core.utils import _get_student_for_user, _get_teacher_for_user
 from learning.models import Lesson
-from .models import CodeSnippet, CodeSubmission, CodeComment
+from .models import CodeSnippet, CodeSubmission, CodeComment,CodeFile
 from .serializers import (
     CodeSnippetSerializer,
     CodeSubmissionSerializer,
     TeacherUpdateSubmissionSerializer,
-    CodeCommentSerializer,
+    CodeCommentSerializer,CodeFileSerializer
 )
 from .utils import user_is_submission_student, user_teaches_lesson, user_is_teacher
+
+from rest_framework.parsers import MultiPartParser, FormParser
+from django.conf import settings
 
 
 # ---------- SNIPPETS ----------
@@ -188,3 +191,133 @@ def submission_comment_create(request, submission_id: int):
         message=msg,
     )
     return Response(CodeCommentSerializer(comment).data, status=201)
+
+
+
+
+
+MAX_UPLOAD_MB = getattr(settings, "IDE_MAX_UPLOAD_MB", 25)  # override in settings if you like
+ALLOWED_EXTENSIONS = getattr(
+    settings,
+    "IDE_ALLOWED_EXTENSIONS",
+    # keep liberal; IDE often needs these
+    {"py", "txt", "csv", "json", "xml", "yaml", "yml", "md", "html", "css", "js", "ts", "jsx", "tsx", "java", "kt", "c", "cpp", "h", "hpp", "cs", "go", "rs", "php", "sql", "sh", "ipynb", "png", "jpg", "jpeg", "gif", "svg", "pdf"}
+)
+
+def _ext_ok(name: str) -> bool:
+    import os
+    ext = os.path.splitext(name)[1].lower().lstrip(".")
+    return (not ALLOWED_EXTENSIONS) or (ext in ALLOWED_EXTENSIONS)
+
+# -------- FILES --------
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def codefile_upload(request):
+    """
+    Student: upload a file for IDE.
+    Content-Type: multipart/form-data
+      - file: (required) binary content
+      - lesson: <id|nullable>
+      - label: short description (optional)
+    Response: CodeFileSerializer (includes .url)
+    """
+    parser_classes = (MultiPartParser, FormParser)  # DRF respects view.attr too
+    for p in parser_classes:
+        pass  # attribute marker; not used programmatically
+
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Student profile not found."}, status=403)
+
+    up = request.FILES.get("file")
+    if not up:
+        return Response({"detail": "file field is required (multipart/form-data)."}, status=400)
+
+    # size check
+    if up.size > MAX_UPLOAD_MB * 1024 * 1024:
+        return Response({"detail": f"File too large. Limit is {MAX_UPLOAD_MB} MB."}, status=413)
+
+    if not _ext_ok(up.name):
+        return Response({"detail": "File type not allowed."}, status=400)
+
+    # lesson (optional)
+    lesson = None
+    lesson_id = request.data.get("lesson")
+    if lesson_id:
+        lesson = get_object_or_404(Lesson, id=lesson_id)
+
+    obj = CodeFile.objects.create(
+        student=student,
+        lesson=lesson,
+        label=(request.data.get("label") or "").strip()[:255],
+        file=up,
+        original_name=up.name[:255],
+        content_type=getattr(up, "content_type", "") or "",
+        size_bytes=up.size or 0,
+    )
+    return Response(CodeFileSerializer(obj, context={"request": request}).data, status=201)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def codefile_list(request):
+    """
+    Student: list own files (optional: filter by lesson).
+    Teachers: if ?lesson=<id> and user teaches that lesson, will list those students' files? -> NO.
+    Only the authenticated student can see their own files. Teachers can only view by direct id if teaches the lesson.
+    Query: ?lesson=<id>
+    """
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Student profile not found."}, status=403)
+
+    qs = CodeFile.objects.filter(student=student)
+    lesson_id = request.query_params.get("lesson")
+    if lesson_id:
+        qs = qs.filter(lesson_id=lesson_id)
+    return Response(CodeFileSerializer(qs, many=True, context={"request": request}).data)
+
+
+# ide/views.py
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def codefile_detail(request, file_id: int):
+    """
+    Student: fetch own file metadata.
+    Teacher: can view metadata if they teach the attached lesson (if any).
+    """
+    obj = get_object_or_404(CodeFile, id=file_id)
+
+    # owner student can view
+    student = _get_student_for_user(request.user)
+    if student and obj.student_id == student.id:
+        return Response(CodeFileSerializer(obj, context={"request": request}).data)
+
+    # teacher can read only if the file is tied to a lesson they teach
+    if obj.lesson and user_teaches_lesson(request.user, obj.lesson):
+        return Response(CodeFileSerializer(obj, context={"request": request}).data)
+
+    return Response({"detail": "Not allowed."}, status=403)
+
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def codefile_delete(request, file_id: int):
+    """
+    Student: delete own file (removes both DB row and stored file).
+    Teachers: cannot delete student files.
+    """
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Student profile not found."}, status=403)
+
+    obj = get_object_or_404(CodeFile, id=file_id, student=student)
+
+    # delete removes file from storage as well
+    obj.file.delete(save=False)
+    obj.delete()
+    return Response(status=204)

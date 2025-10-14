@@ -2,8 +2,10 @@
 from academics.models import StudentProfile, TeacherProfile
 
 def user_is_submission_student(user, submission) -> bool:
-    sp = submission.student
-    return sp and sp.user_id == user.id
+    if not submission:
+        return False
+    sp = getattr(submission, "student", None)
+    return bool(sp and sp.user_id == user.id)
 
 def user_teaches_lesson(user, lesson) -> bool:
     # lesson.module.course.teacher is a TeacherProfile

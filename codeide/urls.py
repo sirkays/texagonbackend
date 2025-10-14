@@ -15,4 +15,9 @@ urlpatterns = [
 
     # comments
     path("api/ide/submissions/<int:submission_id>/comments/", views.submission_comment_create, name="ide_submission_comment_create"),  # POST (student/teacher)
+    
+    path("api/ide/files/", views.codefile_list, name="ide_codefile_list"),
+    path("api/ide/files/upload/", views.codefile_upload, name="ide_codefile_upload"),
+    path("api/ide/files/<int:file_id>/", views.codefile_detail, name="ide_codefile_detail"),
+    path("api/ide/files/<int:file_id>/delete/", views.codefile_delete, name="ide_codefile_delete"),
 ]

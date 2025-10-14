@@ -1,4 +1,6 @@
-# app: ide (or wherever you keep learning-related APIs)
+# ide/models.py
+
+import os
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -69,3 +71,47 @@ class CodeComment(TimeStampedModel):
 
     class Meta:
         ordering = ["created_at"]
+
+
+
+
+
+def codefile_upload_to(instance, filename: str) -> str:
+    # keep original filename; store under per-student folder
+    # e.g. codefiles/42/2025/10/14/my_script.py
+    from datetime import datetime
+    today = datetime.utcnow()
+    safe_name = os.path.basename(filename)
+    return f"codefiles/{instance.student_id}/{today:%Y/%m/%d}/{safe_name}"
+
+class CodeFile(TimeStampedModel):
+    """
+    Binary/text file a student can upload for use in the code IDE.
+    """
+    student = models.ForeignKey(
+        StudentProfile, on_delete=models.CASCADE, related_name="code_files"
+    )
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.SET_NULL, null=True, blank=True, related_name="code_files"
+    )
+    # optional reference text/title; IDE can show this
+    label = models.CharField(max_length=255, blank=True)
+    file = models.FileField(upload_to=codefile_upload_to, max_length=512)
+    original_name = models.CharField(max_length=255)  # client filename
+    content_type = models.CharField(max_length=127, blank=True)
+    size_bytes = models.BigIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["lesson", "student"])]
+
+    def __str__(self):
+        return f"[CodeFile] student={self.student_id} name={self.original_name}"
+
+    @property
+    def url(self) -> str:
+        # usable by the IDE via MEDIA_URL/S3 URL
+        try:
+            return self.file.url
+        except Exception:
+            return ""

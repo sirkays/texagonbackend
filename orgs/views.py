@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from io import StringIO
 from typing import Literal, Tuple
-
+import traceback
 from django.db import transaction
 from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
@@ -24,7 +24,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
 
-from academics.models import Classroom, StudentProfile, TeacherProfile, Subject
+from academics.models import Classroom, StudentProfile, TeacherProfile, Subject, ParentProfile, ParentChildLink 
 from assessments.models import Submission, TestAttempt
 from billing.models import SubscriptionPayment
 from learning.models import Course, Enrollment
@@ -39,12 +39,19 @@ from .serializers import (
     StudentWriteSerializer,
     TeacherListSerializer,
     TeacherWriteSerializer,
-    TeacherDetailSerializer
+    TeacherDetailSerializer,
+    ParentWriteSerializer,
+    ParentDetailSerializer,
+    ParentListSerializer
+
 
 
 )
 
-from core.utils import (StatusLiteral, _resolve_org, _status_from_user_membership,_apply_status_to_user_membership)
+from core.utils import (StatusLiteral, _resolve_org, 
+    _status_from_user_membership,_apply_status_to_user_membership,
+    _avatar_url_for,_get_or_create_parent_membership,_is_admin
+)
 
 
 class ClassroomViewSet(viewsets.ModelViewSet):
@@ -777,6 +784,7 @@ class TeacherViewSet(viewsets.ModelViewSet):
         # Get or create the user by email
         user, _ = User.objects.get_or_create(
             email=email,
+            primary_org=org,
             defaults={"first_name": first, "last_name": last, "is_active": True}
         )
         # Optional user fields
@@ -889,7 +897,9 @@ class TeacherViewSet(viewsets.ModelViewSet):
             )
 
         # Safe to delete TeacherProfile; do NOT delete the User (could be member in other orgs/roles)
+        user = instance.user
         instance.delete()
+        user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # ----- ACTION: explicit avatar upload (alternative to PATCH with multipart) -----
@@ -906,3 +916,264 @@ class TeacherViewSet(viewsets.ModelViewSet):
         instance.user.save(update_fields=["avatar"])
         return Response({"avatarUrl": instance.user.avatar.url})
 
+
+
+
+class ParentViewSet(viewsets.ModelViewSet):
+    """
+    CRUD for ParentProfile within the caller's organization.
+    Auth: API Key + Session Token (same as your sample).
+    - list/retrieve return avatar_url
+    - admin may update User.avatar via multipart
+    - delete blocked if parent has children links
+    - search via ?q=
+    Extra actions:
+      - POST /parents/{id}/link-child/ {student_id}
+      - POST /parents/{id}/unlink-child/ {student_id}
+      - POST /parents/{id}/set-status/ {"status": "active|inactive|suspended"}
+      - POST /parents/{id}/generate-invoices/
+    """
+
+    authentication_classes = [SessionTokenAuthentication]
+    permission_classes = [HasAPIKey, IsAuthenticated]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    # ❗ DRF requires either serializer_class or get_serializer_class()
+    serializer_class = ParentWriteSerializer
+
+    # ------------- utils -------------
+
+    def _print_exception(self, e):
+        print("\n[ERROR] Exception in ParentViewSet:")
+        print(f"Type: {type(e).__name__}")
+        print(f"Message: {e}")
+        traceback.print_exc()
+
+    def _ensure_org_or_respond(self):
+        """
+        Ensure self._org is set (from _resolve_org). If _resolve_org returned a Response,
+        return it so the caller can short-circuit.
+        """
+        try:
+            if getattr(self, "_org", None) is None:
+                org, error = _resolve_org(self.request)
+                if error:
+                    return None, error
+                self._org = org
+            return self._org, None
+        except Exception as e:
+            self._print_exception(e)
+            return None, Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # ------------- queryset / serializers -------------
+
+    def get_queryset(self):
+        try:
+            org, error = _resolve_org(self.request)
+            self._org = org
+            if error:
+                # list/retrieve will short-circuit and return the error Response
+                return ParentProfile.objects.none()
+
+            q = (
+                ParentProfile.objects
+                .filter(organization=org)
+                .select_related("user", "organization_subscription")
+                .annotate(children_count=Count("children_links", distinct=True))
+            )
+
+            term = (self.request.query_params.get("q") or "").strip()
+            if term:
+                q = q.filter(
+                    Q(user__email__icontains=term)
+                    | Q(user__first_name__icontains=term)
+                    | Q(user__last_name__icontains=term)
+                    | Q(address__icontains=term)
+                    | Q(user__phone__icontains=term)
+                )
+
+            return q.order_by("-created_at")
+        except Exception as e:
+            self._print_exception(e)
+            return ParentProfile.objects.none()
+
+    def get_serializer_class(self):
+        # Choose serializers by action
+        if self.action in ["list"]:
+            return ParentListSerializer
+        if self.action in ["retrieve"]:
+            return ParentDetailSerializer
+        # default for create/update
+        return ParentWriteSerializer
+
+    def get_serializer_context(self):
+        # Provide org + creating to write serializer
+        ctx = super().get_serializer_context()
+        try:
+            ctx["org"] = getattr(self, "_org", None)
+            if self.action in ["create"]:
+                ctx["creating"] = True
+        except Exception as e:
+            self._print_exception(e)
+        return ctx
+
+    # ------------- CRUD -------------
+
+    def list(self, request, *args, **kwargs):
+        try:
+            org, error = self._ensure_org_or_respond()
+            if error:
+                return error
+            return super().list(request, *args, **kwargs)
+        except Exception as e:
+            self._print_exception(e)
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def retrieve(self, request, *args, **kwargs):
+        try:
+            org, error = self._ensure_org_or_respond()
+            if error:
+                return error
+            return super().retrieve(request, *args, **kwargs)
+        except Exception as e:
+            self._print_exception(e)
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def create(self, request, *args, **kwargs):
+        try:
+            org, error = self._ensure_org_or_respond()
+            if error:
+                return error
+
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            # Save -> ParentProfile
+            parent: ParentProfile = serializer.save()
+
+            # ❗ set primary_org on the related User
+            user = parent.user
+            if user.primary_org_id != getattr(org, "id", None):
+                user.primary_org = org
+                user.save(update_fields=["primary_org"])
+
+            # Return detail payload
+            detail = ParentDetailSerializer(parent, context={"request": request}).data
+            return Response(detail, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            self._print_exception(e)
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def update(self, request, *args, **kwargs):
+        try:
+            org, error = self._ensure_org_or_respond()
+            if error:
+                return error
+            partial = kwargs.pop("partial", False)
+            instance = self.get_object()
+            serializer = self.get_serializer(instance, data=request.data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            instance = serializer.save()
+            data = ParentDetailSerializer(instance, context={"request": request}).data
+            return Response(data, status=status.HTTP_200_OK)
+        except Exception as e:
+            self._print_exception(e)
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            org, error = self._ensure_org_or_respond()
+            if error:
+                return error
+            instance: ParentProfile = self.get_object()
+            if instance.children_links.exists():
+                return Response(
+                    {"detail": "Cannot delete parent while children are linked."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            with transaction.atomic():
+                parent = instance.user
+                instance.delete()
+                parent.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
+            self._print_exception(e)
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # ------------- Extra actions -------------
+
+    @action(detail=True, methods=["post"])
+    def link_child(self, request, pk=None):
+        try:
+            org, error = self._ensure_org_or_respond()
+            if error:
+                return error
+            parent = self.get_object()
+            student_id = request.data.get("student_id")
+            if not student_id:
+                return Response({"detail": "student_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            student = StudentProfile.objects.filter(id=student_id, organization=org).first()
+            if not student:
+                return Response({"detail": "Student not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+            ParentChildLink.objects.get_or_create(parent=parent, student=student)
+            data = ParentDetailSerializer(parent, context={"request": request}).data
+            return Response(data, status=status.HTTP_200_OK)
+        except Exception as e:
+            self._print_exception(e)
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=["post"])
+    def unlink_child(self, request, pk=None):
+        try:
+            org, error = self._ensure_org_or_respond()
+            if error:
+                return error
+            parent = self.get_object()
+            student_id = request.data.get("student_id")
+            if not student_id:
+                return Response({"detail": "student_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            ParentChildLink.objects.filter(parent=parent, student_id=student_id).delete()
+            data = ParentDetailSerializer(parent, context={"request": request}).data
+            return Response(data, status=status.HTTP_200_OK)
+        except Exception as e:
+            self._print_exception(e)
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=["post"])
+    def set_status(self, request, pk=None):
+        try:
+            org, error = self._ensure_org_or_respond()
+            if error:
+                return error
+            parent = self.get_object()
+            status_value = request.data.get("status")
+            if status_value not in ("active", "inactive", "suspended"):
+                return Response({"detail": "Invalid status."}, status=status.HTTP_400_BAD_REQUEST)
+
+            membership = _get_or_create_parent_membership(parent.user, org)
+            _apply_status_to_user_membership(status_value, parent.user, membership)
+            parent.user.save(update_fields=["is_active"])
+            membership.save(update_fields=["is_active"])
+
+            data = ParentDetailSerializer(parent, context={"request": request}).data
+            return Response(data, status=status.HTTP_200_OK)
+        except Exception as e:
+            self._print_exception(e)
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=["post"])
+    def generate_invoices(self, request, pk=None):
+        try:
+            org, error = self._ensure_org_or_respond()
+            if error:
+                return error
+            parent: ParentProfile = self.get_object()
+            created = parent.generate_subscription_invoices()
+            return Response(
+                {"created": len(created), "invoice_ids": [inv.id for inv in created]},
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            self._print_exception(e)
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1,6 +1,29 @@
 # app: ide
 from rest_framework import serializers
-from .models import CodeSnippet, CodeSubmission, CodeComment
+from .models import CodeSnippet, CodeSubmission, CodeComment,CodeFile
+
+class CodeFileSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = CodeFile
+        fields = [
+            "id", "created_at", "updated_at",
+            "student", "lesson", "label",
+            "original_name", "content_type", "size_bytes",
+            "url",
+        ]
+        read_only_fields = [
+            "id", "created_at", "updated_at", "student",
+            "original_name", "content_type", "size_bytes", "url",
+        ]
+
+    def get_url(self, obj):
+        request = self.context.get("request")
+        file_url = obj.url  # this gives "/media/...."
+        if request is not None:
+            return request.build_absolute_uri(file_url)
+        return file_url
 
 
 class CodeSnippetSerializer(serializers.ModelSerializer):

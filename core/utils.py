@@ -1,4 +1,4 @@
-from orgs.models import OrganizationMembership
+from orgs.models import OrganizationMembership,Organization
 from academics.models import StudentProfile,TeacherProfile
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak  
 from django.db.models import Q, Sum, Count
@@ -10,6 +10,36 @@ from django.shortcuts import _get_queryset
 from accounts.models import User
 
 StatusLiteral = Literal["active", "inactive", "suspended"]
+
+
+
+def _avatar_url_for(user: User, request) -> str | None:
+    if not getattr(user, "avatar", None):
+        return None
+    try:
+        return request.build_absolute_uri(user.avatar.url)
+    except Exception:
+        return getattr(user.avatar, "url", None)
+
+
+def _get_or_create_parent_membership(user: User, org: Organization) -> OrganizationMembership:
+    membership, _ = OrganizationMembership.objects.get_or_create(
+        user=user,
+        organization=org,
+        role=OrganizationMembership.Role.PARENT,
+        defaults={"is_active": True},
+    )
+    return membership
+
+
+def _is_admin(request) -> bool:
+    # Treat staff/superuser or AdminAccess as "admin" for elevated operations like avatar updates
+    if getattr(request.user, "is_staff", False) or getattr(request.user, "is_superuser", False):
+        return True
+    return bool(getattr(request.user, "adminaccess", None))
+
+
+
 
 # ---------------- helpers ----------------
 def _get_student_for_user(user) -> Optional[StudentProfile]:
