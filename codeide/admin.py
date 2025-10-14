@@ -4,7 +4,7 @@ from django.db import models
 from django.utils.html import format_html
 from django.utils.text import Truncator
 
-from .models import CodeSnippet, CodeSubmission, CodeComment
+from .models import CodeSnippet, CodeSubmission, CodeComment,CodeFile
 
 
 # ---------- Inlines ----------
@@ -171,3 +171,5 @@ class CodeCommentAdmin(MonospaceTextMixin, admin.ModelAdmin):
     @admin.display(description="Message")
     def message_preview(self, obj):
         return Truncator(obj.message).chars(60)
+
+admin.site.register(CodeFile) 
