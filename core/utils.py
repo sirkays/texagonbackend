@@ -1,5 +1,5 @@
 from orgs.models import OrganizationMembership,Organization
-from academics.models import StudentProfile,TeacherProfile
+from academics.models import StudentProfile,TeacherProfile,Classroom, Subject
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak  
 from django.db.models import Q, Sum, Count
 from django.utils import timezone
@@ -8,6 +8,7 @@ import traceback
 from decimal import Decimal
 from django.shortcuts import _get_queryset
 from accounts.models import User
+from learning.models import Course, Module, Enrollment
 
 StatusLiteral = Literal["active", "inactive", "suspended"]
 
@@ -159,3 +160,95 @@ def _resolve_org(request):
         org = admin_access.selected_organization
     
     return org, None
+
+
+
+
+
+# ---------- helpers ----------
+
+def _is_org_admin_or_teacher(request, org) -> bool:
+    """
+    Admins (staff/superuser) or members of org with role ADMIN/OWNER/TEACHER.
+    """
+    u = request.user
+    if getattr(u, "is_staff", False) or getattr(u, "is_superuser", False):
+        return True
+    return OrganizationMembership.objects.filter(
+        user=u,
+        organization=org,
+        role__in=[
+            OrganizationMembership.Role.OWNER,
+            OrganizationMembership.Role.ADMIN,
+            OrganizationMembership.Role.TEACHER,
+        ],
+        is_active=True,
+    ).exists()
+
+
+def _course_to_card_dict(c) -> dict:
+    """Shape a Course queryset row (with annotations) to the UI card object."""
+    teacher_name = (
+        getattr(getattr(c, "teacher", None), "user", None).get_full_name()
+        or getattr(getattr(c, "teacher", None), "user", None).email
+        or ""
+    )
+    subject_name = getattr(c.subject, "name", "")
+    classroom_name = getattr(c.classroom, "name", "")
+
+    avg_progress = c.avg_progress or Decimal("0")
+    # Normalize progress to plain int percentage for UI
+    try:
+        progress_int = int(round(Decimal(avg_progress)))
+    except Exception:
+        progress_int = 0
+
+    return {
+        "id": c.id,
+        "name": c.name,
+        "subject": subject_name,
+        "teacher": teacher_name,
+        "classroom": classroom_name,
+        "students": c.students_count or 0,
+        "modules": c.modules_count or 0,
+        "status": "active" if c.is_active else "inactive",
+        "progress": progress_int,
+    }
+
+
+def _get_ids_from_payload(data, org):
+    """
+    Accepts either IDs or names for subject/classroom/teacher; returns validated model IDs.
+    Frontend can send {subject_id, classroom_id, teacher_id} (preferred) OR
+    {subject, classroom, teacher} as display names.
+    """
+    # Prefer explicit *_id if present
+    subject_id = data.get("subject_id")
+    classroom_id = data.get("classroom_id")
+    teacher_id = data.get("teacher_id")
+
+    if not subject_id:
+        subject_name = data.get("subject")
+        if subject_name:
+            subj = Subject.objects.filter(organization=org, name=subject_name).first()
+            subject_id = getattr(subj, "id", None)
+
+    if not classroom_id:
+        classroom_name = data.get("classroom")
+        if classroom_name:
+            room = Classroom.objects.filter(organization=org, name=classroom_name).first()
+            classroom_id = getattr(room, "id", None)
+
+    if not teacher_id:
+        teacher_name = data.get("teacher")
+        if teacher_name:
+            # Try "Full Name" first, fallback to user.email equals
+            qs = TeacherProfile.objects.filter(organization=org).select_related("user")
+            teacher = qs.filter(
+                Q(user__first_name__isnull=False, user__last_name__isnull=False) &
+                Q(user__first_name__icontains=teacher_name.split(" ")[0]) &
+                Q(user__last_name__icontains=teacher_name.split(" ")[-1])
+            ).first() or qs.filter(user__email__iexact=teacher_name).first()
+            teacher_id = getattr(teacher, "id", None)
+
+    return subject_id, classroom_id, teacher_id

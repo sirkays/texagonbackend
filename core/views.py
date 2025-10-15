@@ -15,19 +15,8 @@ from academics.models import StudentProfile
 from learning.models import (
     Module, Lesson, Course, Enrollment,
 )
+from core.utils import _get_student_for_user
 
-# --- Reuse this helper everywhere ---
-def _get_student_for_user(user) -> Optional[StudentProfile]:
-    mem = (OrganizationMembership.objects
-           .filter(user=user, is_active=True)
-           .select_related("organization")
-           .order_by("-id")
-           .first())
-    if mem:
-        sp = StudentProfile.objects.filter(user=user, organization=mem.organization).first()
-        if sp:
-            return sp
-    return StudentProfile.objects.filter(user=user).order_by("-id").first()
 
 
 @api_view(["GET"])

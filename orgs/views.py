@@ -6,7 +6,7 @@ from io import StringIO
 from typing import Any, Literal, Tuple
 
 from django.db import transaction
-from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Sum, Value
+from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Sum, Value,Avg
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.utils import timezone
@@ -33,12 +33,13 @@ from academics.models import (
     ParentProfile,
     ParentChildLink,
 )
+
 from assessments.models import Submission, TestAttempt
 from billing.models import SubscriptionPayment
 from learning.models import Course, Enrollment
 from orgs.models import Organization, OrganizationMembership
 from accounts.models import User
-
+from rest_framework import status
 from .serializers import (
     ClassroomListSerializer,
     ClassroomWriteSerializer,
@@ -64,7 +65,312 @@ from core.utils import (
     _avatar_url_for,
     _get_or_create_parent_membership,
     _is_admin,
+    _is_org_admin_or_teacher,
+    _get_ids_from_payload,
+    _course_to_card_dict,
+    
 )
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def courses_list(request):
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        search = (request.query_params.get("search") or "").strip()
+        page = max(int(request.query_params.get("page") or 1), 1)
+        page_size = min(max(int(request.query_params.get("page_size") or 20), 1), 100)
+        status_filter = (request.query_params.get("status") or "").strip().lower()
+
+        qs = (Course.objects
+              .filter(organization=org)
+              .select_related("subject", "classroom", "teacher__user")
+              .annotate(
+                  students_count=Count("enrollments", distinct=True),
+                  modules_count=Count("modules", distinct=True),
+                  avg_progress=Avg("enrollments__progress_pct"),
+              ))
+
+        if search:
+            qs = qs.filter(
+                Q(name__icontains=search) |
+                Q(subject__name__icontains=search) |
+                Q(teacher__user__first_name__icontains=search) |
+                Q(teacher__user__last_name__icontains=search) |
+                Q(teacher__user__email__icontains=search)
+            )
+
+        if status_filter in {"active", "inactive"}:
+            qs = qs.filter(is_active=(status_filter == "active"))
+
+        total = qs.count()
+        start = (page - 1) * page_size
+        rows = list(qs.order_by("-id")[start:start + page_size])
+
+        data = [_course_to_card_dict(c) for c in rows]
+        return Response({
+            "results": data,
+            "pagination": {"page": page, "page_size": page_size, "total": total}
+        })
+    except Exception as e:
+        print("Error in courses_list:", e)
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def courses_stats_header(request):
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        active_courses = Course.objects.filter(organization=org, is_active=True).count()
+        total_enrollments = Enrollment.objects.filter(course__organization=org).count()
+
+        return Response({
+            "active_courses": active_courses,
+            "total_enrollments": total_enrollments,
+        })
+    except Exception as e:
+        print("Error in courses_stats_header:", e)
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def course_detail(request, course_id: int):
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        c = (Course.objects
+             .filter(id=course_id, organization=org)
+             .select_related("subject", "classroom", "teacher__user")
+             .annotate(
+                 students_count=Count("enrollments", distinct=True),
+                 modules_count=Count("modules", distinct=True),
+                 avg_progress=Avg("enrollments__progress_pct"),
+             ).first())
+
+        if not c:
+            return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response(_course_to_card_dict(c))
+    except Exception as e:
+        print("Error in course_detail:", e)
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def course_create(request):
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data or {}
+        name = (data.get("name") or "").strip()
+        if not name:
+            return Response({"detail": "name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        subject_id, classroom_id, teacher_id = _get_ids_from_payload(data, org)
+        if not subject_id or not classroom_id or not teacher_id:
+            return Response({"detail": "subject, classroom and teacher are required."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        exists = Course.objects.filter(
+            organization=org,
+            subject_id=subject_id,
+            classroom_id=classroom_id,
+            teacher_id=teacher_id
+        ).exists()
+        if exists:
+            return Response({"detail": "A course with this subject, classroom and teacher already exists."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        c = Course.objects.create(
+            organization=org,
+            name=name,
+            subject_id=subject_id,
+            classroom_id=classroom_id,
+            teacher_id=teacher_id,
+            description=data.get("description", ""),
+            is_active=bool(data.get("is_active", True)),
+            usage_type=data.get("usage_type", "public"),
+        )
+
+        c = (Course.objects
+             .filter(pk=c.pk)
+             .select_related("subject", "classroom", "teacher__user")
+             .annotate(
+                 students_count=Count("enrollments", distinct=True),
+                 modules_count=Count("modules", distinct=True),
+                 avg_progress=Avg("enrollments__progress_pct"),
+             ).first())
+
+        return Response(_course_to_card_dict(c), status=status.HTTP_201_CREATED)
+    except Exception as e:
+        print("Error in course_create:", e)
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH", "PUT"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def course_update(request, course_id: int):
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        c = Course.objects.filter(id=course_id, organization=org).first()
+        if not c:
+            return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+
+        name = data.get("name")
+        if name is not None:
+            c.name = name.strip()
+
+        if any(k in data for k in ["subject_id", "subject", "classroom_id", "classroom", "teacher_id", "teacher"]):
+            subject_id, classroom_id, teacher_id = _get_ids_from_payload(data, org)
+            c.subject_id = subject_id or c.subject_id
+            c.classroom_id = classroom_id or c.classroom_id
+            c.teacher_id = teacher_id or c.teacher_id
+
+            dup = Course.objects.filter(
+                organization=org,
+                subject_id=c.subject_id,
+                classroom_id=c.classroom_id,
+                teacher_id=c.teacher_id
+            ).exclude(pk=c.pk).exists()
+            if dup:
+                return Response({"detail": "A course with this subject, classroom and teacher already exists."},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+        if "description" in data:
+            c.description = data.get("description") or ""
+        if "is_active" in data:
+            c.is_active = bool(data.get("is_active"))
+        if "usage_type" in data:
+            c.usage_type = data.get("usage_type") or c.usage_type
+
+        c.save()
+
+        c = (Course.objects
+             .filter(pk=c.pk)
+             .select_related("subject", "classroom", "teacher__user")
+             .annotate(
+                 students_count=Count("enrollments", distinct=True),
+                 modules_count=Count("modules", distinct=True),
+                 avg_progress=Avg("enrollments__progress_pct"),
+             ).first())
+
+        return Response(_course_to_card_dict(c))
+    except Exception as e:
+        print("Error in course_update:", e)
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def course_delete(request, course_id: int):
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        c = Course.objects.filter(id=course_id, organization=org).first()
+        if not c:
+            return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        name = c.name
+        if c.enrollments.all().count() == 0:
+            c.delete()
+        else:
+            return Response({"detail": "Course cannot be deleted, already enrolled."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({"detail": f"{name} deleted."}, status=status.HTTP_200_OK)
+    except Exception as e:
+        print("Error in course_delete:", e)
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def course_form_options(request):
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        subjects = list(Subject.objects.filter(organization=org).values("id", "name"))
+        classrooms = list(Classroom.objects.filter(organization=org).values("id", "name"))
+        teachers = [{
+            "id": t.id,
+            "name": (t.user.get_full_name() or t.user.email),
+            "email": t.user.email,
+        } for t in TeacherProfile.objects.filter(organization=org).select_related("user")]
+
+        return Response({
+            "subjects": subjects,
+            "classrooms": classrooms,
+            "teachers": teachers,
+        })
+    except Exception as e:
+        print("Error in course_form_options:", e)
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 
 
