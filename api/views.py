@@ -48,7 +48,7 @@ from billing.models import (
 )
 from notifications.models import Notification
 
-from core.utils import _get_teacher_for_user, _get_student_for_user,get_object_or_404_ajax
+from core.utils import _get_teacher_for_user, _get_student_for_user,get_object_or_404_ajax,_resolve_org
 
 
 @api_view(["POST"])
@@ -112,15 +112,31 @@ class AcademicSessionViewSet(APIKeySessionViewSet):
 class ClassroomViewSet(APIKeySessionViewSet):
     queryset = Classroom.objects.all()
     serializer_class = ClassroomSerializer
-    
+
+
     def get_queryset(self):
-        qs = Classroom.objects.all()
-        org = self.request.query_params.get("organization")
-        if org is not None:                       # treat empty string as “no match”
-            if org == "":
-                return qs.none()
-            return qs.filter(organization_id=org)
-        return qs
+        # Call your existing org resolver
+        org, error_response = _resolve_org(self.request)
+        if error_response is not None:
+            # Store it to handle later in the list() or retrieve() method
+            # because get_queryset() must always return a queryset
+            self._org_error = error_response
+            return Classroom.objects.none()
+
+        self._org_error = None
+        return Classroom.objects.filter(organization=org)
+
+    def list(self, request, *args, **kwargs):
+        # Handle the case where _resolve_org returned an error Response
+        if hasattr(self, "_org_error") and self._org_error is not None:
+            return self._org_error
+        return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        if hasattr(self, "_org_error") and self._org_error is not None:
+            return self._org_error
+        return super().retrieve(request, *args, **kwargs)
+
 
 class SubjectViewSet(APIKeySessionViewSet):
     queryset = Subject.objects.all()

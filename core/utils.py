@@ -61,7 +61,6 @@ def _get_teacher_for_user(user) -> Optional[TeacherProfile]:
            .select_related("organization")
            .order_by("-id")
            .first())
-    print(mem)
     if mem:
         sp = TeacherProfile.objects.filter(user=user, organization=mem.organization).first()
         if sp:
