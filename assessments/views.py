@@ -386,7 +386,7 @@ def available_tests(request):
 
         # Sort tests: scheduled first by start time, else newest first
         if _has_field(Test, "start_at"):
-            tests.sort(key=lambda t: (getattr(t, "start_at", None) or timezone.datetime.max.replace(tzinfo=dt_timezone.utc), -t.id))
+            tests.sort(key=lambda t: (getattr(t, "start_at", None) or timezone.datetime.max.replace(tzinfo=py_tz.utc), -t.id))
         else:
             tests.sort(key=lambda t: -t.id)
 
@@ -780,11 +780,11 @@ def _iso(value):
         return value
 
     # If it's a datetime, normalize to UTC and format
-    if isinstance(value, py_datetime):
+    if isinstance(value, datetime):
         if timezone.is_naive(value):
-            value = timezone.make_aware(value, timezone=dt_timezone.utc)
+            value = timezone.make_aware(value, timezone=py_tz.utc)
         else:
-            value = value.astimezone(dt_timezone.utc)
+            value = value.astimezone(py_tz.utc)
         return value.isoformat(timespec="seconds")
 
     # Fallback: stringify anything else
