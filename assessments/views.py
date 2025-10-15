@@ -103,13 +103,16 @@ def _choice_order(c: Choice) -> int:
 
 
 def _map_qtype(q: Question, choice_count: int, choice_texts: List[str]) -> str:
-    """Normalize to: multiple-choice | true-false | short-answer | essay"""
+    """Normalize to: single-choice | true-false | short-answer | essay"""
     if _has_field(Question, "qtype") and getattr(q, "qtype", None):
         raw = str(getattr(q, "qtype")).lower().replace("_", "-")
         mapping = {
             "mcq": "multiple-choice",
             "multiple-choice": "multiple-choice",
             "multiple_choice": "multiple-choice",
+            "scq":"single-choice",
+            "single-choice": "single-choice",
+            "single_choice": "single-choice",
             "tf": "true-false",
             "true-false": "true-false",
             "true_false": "true-false",
@@ -127,7 +130,7 @@ def _map_qtype(q: Question, choice_count: int, choice_texts: List[str]) -> str:
         if set(low) == {"true", "false"}:
             return "true-false"
     if choice_count >= 2:
-        return "multiple-choice"
+        return "single-choice"
     # No choices provided:
     return "short-answer"
 
@@ -713,7 +716,7 @@ def _serialize_question(question: Question, include_correct_answers: bool = True
     
     # Map question types to frontend format
     qtype_mapping = {
-        'scq': 'multiple-choice',
+        'scq': 'single-choice',
         'mcq': 'multiple-choice', 
         'tf': 'true-false',
         'true_false': 'true-false',
@@ -722,7 +725,7 @@ def _serialize_question(question: Question, include_correct_answers: bool = True
     }
     
     qtype = getattr(question, 'qtype', 'scq')
-    frontend_type = qtype_mapping.get(qtype, 'multiple-choice')
+    frontend_type = qtype_mapping.get(qtype, 'single-choice')
     
     # Get question text
     question_text = getattr(question, 'body', '') or getattr(question, 'text', '') or str(question)
@@ -743,7 +746,7 @@ def _serialize_question(question: Question, include_correct_answers: bool = True
             correct_choice = next((choice for choice in choices if getattr(choice, 'is_correct', False)), None)
             if correct_choice:
                 result['correctAnswer'] = getattr(correct_choice, 'text', '').lower() == 'true'
-        elif frontend_type == 'multiple-choice':
+        elif frontend_type == 'single-choice':
             # For multiple choice, get index of correct answer
             correct_choices = [i for i, choice in enumerate(choices) if getattr(choice, 'is_correct', False)]
             if correct_choices:
@@ -1292,7 +1295,7 @@ def add_question(request, test_id: int):
     
     Expected JSON body:
     {
-        "type": "multiple-choice",
+        "type": "single-choice",
         "question": "What is 2+2?",
         "options": ["3", "4", "5", "6"],
         "correctAnswer": 1,
@@ -1319,12 +1322,12 @@ def add_question(request, test_id: int):
         if not question_text:
             return Response({"detail": "Question text is required."}, status=status.HTTP_400_BAD_REQUEST)
         
-        question_type = data.get('type', 'multiple-choice')
+        question_type = data.get('type', 'single-choice')
         points = max(1, int(data.get('points', 1)))
         
         # Map frontend types to backend types
         type_mapping = {
-            'multiple-choice': 'scq',
+            'single-choice': 'scq',
             'true-false': 'tf',
             'short-answer': 'short',
             'essay': 'essay'
@@ -1352,13 +1355,13 @@ def add_question(request, test_id: int):
         options = data.get('options', [])
         correct_answer = data.get('correctAnswer')
         
-        if options and question_type in ['multiple-choice', 'true-false']:
+        if options and question_type in ['single-choice', 'true-false']:
             for i, option_text in enumerate(options):
                 is_correct = False
                 if question_type == 'true-false':
                     is_correct = (option_text.lower() == 'true' and correct_answer is True) or \
                                 (option_text.lower() == 'false' and correct_answer is False)
-                elif question_type == 'multiple-choice' and isinstance(correct_answer, int):
+                elif question_type == 'single-choice' and isinstance(correct_answer, int):
                     is_correct = (i == correct_answer)
                 
                 Choice.objects.create(
@@ -1432,14 +1435,14 @@ def update_question(request, test_id: int, question_id: int):
             
             options = data.get('options', [])
             correct_answer = data.get('correctAnswer')
-            question_type = data.get('type', 'multiple-choice')
+            question_type = data.get('type', 'single-choice')
             
             for i, option_text in enumerate(options):
                 is_correct = False
                 if question_type == 'true-false':
                     is_correct = (option_text.lower() == 'true' and correct_answer is True) or \
                                 (option_text.lower() == 'false' and correct_answer is False)
-                elif question_type == 'multiple-choice' and isinstance(correct_answer, int):
+                elif question_type == 'single-choice' and isinstance(correct_answer, int):
                     is_correct = (i == correct_answer)
                 
                 Choice.objects.create(
