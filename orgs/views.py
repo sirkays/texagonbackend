@@ -1,9 +1,10 @@
 import csv
+import traceback
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import StringIO
-from typing import Literal, Tuple
-import traceback
+from typing import Any, Literal, Tuple
+
 from django.db import transaction
 from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
@@ -24,7 +25,14 @@ from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
 
-from academics.models import Classroom, StudentProfile, TeacherProfile, Subject, ParentProfile, ParentChildLink 
+from academics.models import (
+    Classroom,
+    StudentProfile,
+    TeacherProfile,
+    Subject,
+    ParentProfile,
+    ParentChildLink,
+)
 from assessments.models import Submission, TestAttempt
 from billing.models import SubscriptionPayment
 from learning.models import Course, Enrollment
@@ -42,16 +50,158 @@ from .serializers import (
     TeacherDetailSerializer,
     ParentWriteSerializer,
     ParentDetailSerializer,
-    ParentListSerializer
-
-
+    ParentListSerializer,
+    SubjectWriteSerializer,
+    SubjectListItemSerializer
 
 )
 
-from core.utils import (StatusLiteral, _resolve_org, 
-    _status_from_user_membership,_apply_status_to_user_membership,
-    _avatar_url_for,_get_or_create_parent_membership,_is_admin
+from core.utils import (
+    StatusLiteral,
+    _resolve_org,
+    _status_from_user_membership,
+    _apply_status_to_user_membership,
+    _avatar_url_for,
+    _get_or_create_parent_membership,
+    _is_admin,
 )
+
+
+
+# ----------------------------
+# ViewSet
+# ----------------------------
+
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+class SubjectViewSet(viewsets.ViewSet):
+    """
+    Endpoints:
+      - GET    /api/subjects/           -> list (search with ?q=)
+      - POST   /api/subjects/           -> create {name, code}
+      - GET    /api/subjects/{id}/      -> detail (with counts)
+      - PATCH  /api/subjects/{id}/      -> partial update
+      - DELETE /api/subjects/{id}/      -> delete
+
+    Auth:
+      - API Key:     via HasAPIKey (e.g., header `X-API-Key: <key>`)
+      - Session key: via SessionTokenAuthentication (e.g., header `Authorization: Session <sessionToken>`)
+    """
+
+    def _base_queryset(self, org):
+        """
+        Annotate per-subject counters within the resolved organization:
+          - courses:  count of courses tied to the subject
+          - teachers: distinct teacher profiles across those courses
+          - students: distinct students across enrollments in those courses
+        """
+        return (
+            Subject.objects
+            .filter(organization=org)
+            .annotate(
+                courses=Count("course", filter=Q(course__organization=org), distinct=True),
+                teachers=Count("course__teacher", filter=Q(course__organization=org), distinct=True),
+                students=Count("course__enrollments__student", filter=Q(course__organization=org), distinct=True),
+            )
+            .order_by("name")
+        )
+
+    # -------- list --------
+    def list(self, request, *args, **kwargs):
+        org, org_error = _resolve_org(request)
+        if org_error:
+            return org_error
+
+        q = (request.query_params.get("q") or "").strip()
+        qs = self._base_queryset(org)
+        if q:
+            qs = qs.filter(Q(name__icontains=q) | Q(code__icontains=q))
+
+        data = SubjectListItemSerializer(qs, many=True).data
+        return Response(data)
+
+    # -------- create --------
+    def create(self, request, *args, **kwargs):
+        org, org_error = _resolve_org(request)
+        if org_error:
+            return org_error
+
+        serializer = SubjectWriteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Enforce uniqueness within organization (name)
+        name = serializer.validated_data["name"]
+        if Subject.objects.filter(organization=org, name__iexact=name).exists():
+            return Response({"detail": "Subject with this name already exists in the organization."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        subject = Subject.objects.create(
+            organization=org,
+            name=serializer.validated_data["name"],
+            code=serializer.validated_data.get("code", ""),
+        )
+
+        # Return as list-item shape (with counters defaulting to 0)
+        subject_qs = self._base_queryset(org).filter(pk=subject.pk)
+        data = SubjectListItemSerializer(subject_qs.first()).data
+        return Response(data, status=status.HTTP_201_CREATED)
+
+    # -------- retrieve --------
+    def retrieve(self, request, pk=None, *args, **kwargs):
+        org, org_error = _resolve_org(request)
+        if org_error:
+            return org_error
+
+        subject = self._base_queryset(org).filter(pk=pk).first()
+        if not subject:
+            return Response({"detail": "Subject not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response(SubjectListItemSerializer(subject).data)
+
+    # -------- partial update --------
+    def partial_update(self, request, pk=None, *args, **kwargs):
+        org, org_error = _resolve_org(request)
+        if org_error:
+            return org_error
+
+        subject = Subject.objects.filter(organization=org, pk=pk).first()
+        if not subject:
+            return Response({"detail": "Subject not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = SubjectWriteSerializer(subject, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # If name is being changed, maintain org-level uniqueness
+        new_name = serializer.validated_data.get("name")
+        if new_name and Subject.objects.filter(organization=org, name__iexact=new_name).exclude(pk=pk).exists():
+            return Response({"detail": "Another subject with this name already exists in the organization."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        serializer.save()
+        # Return the annotated version for the UI cards
+        subject_qs = self._base_queryset(org).filter(pk=pk)
+        return Response(SubjectListItemSerializer(subject_qs.first()).data)
+
+    # -------- delete --------
+    def destroy(self, request, pk=None, *args, **kwargs):
+        org, org_error = _resolve_org(request)
+        if org_error:
+            return org_error
+
+        subject = Subject.objects.filter(organization=org, pk=pk).first()
+        if not subject:
+            return Response({"detail": "Subject not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        has_courses = Course.objects.filter(organization=org, subject=subject).exists()
+        if has_courses:
+            return Response({"detail": "Cannot delete a subject that has courses."},
+            status=status.HTTP_409_CONFLICT)
+
+        subject.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 
 class ClassroomViewSet(viewsets.ModelViewSet):

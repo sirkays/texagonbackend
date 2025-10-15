@@ -10,7 +10,24 @@ from core.utils import (
 )
 from django.db import transaction
 from accounts.models import User
-# ---------- serializers ----------
+
+class SubjectWriteSerializer(serializers.ModelSerializer):
+    """Minimal write serializer (model has only name/code)."""
+    class Meta:
+        model = Subject
+        fields = ["id", "name", "code"]
+
+
+class SubjectListItemSerializer(serializers.ModelSerializer):
+    """Read serializer with the counters your cards need."""
+    courses = serializers.IntegerField(read_only=True)
+    teachers = serializers.IntegerField(read_only=True)
+    students = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Subject
+        fields = ["id", "name", "code", "courses", "teachers", "students"]
+
 
 class ParentListSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(read_only=True)
