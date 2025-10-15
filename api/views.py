@@ -112,6 +112,15 @@ class AcademicSessionViewSet(APIKeySessionViewSet):
 class ClassroomViewSet(APIKeySessionViewSet):
     queryset = Classroom.objects.all()
     serializer_class = ClassroomSerializer
+    
+    def get_queryset(self):
+        qs = Classroom.objects.all()
+        org = self.request.query_params.get("organization")
+        if org is not None:                       # treat empty string as “no match”
+            if org == "":
+                return qs.none()
+            return qs.filter(organization_id=org)
+        return qs
 
 class SubjectViewSet(APIKeySessionViewSet):
     queryset = Subject.objects.all()

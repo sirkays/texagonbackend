@@ -97,6 +97,7 @@ class Material(TimeStampedModel):
     title = models.CharField(max_length=255)
     kind = models.CharField(max_length=16, choices=Kind.choices)
     file = models.FileField(upload_to="materials/files/", blank=True, null=True)
+    cover_image = models.ImageField(upload_to="materials/covers/", blank=True, null=True)
     url = models.URLField(blank=True)
     tags = models.JSONField(default=list, blank=True)
     is_public = models.BooleanField(default=False)

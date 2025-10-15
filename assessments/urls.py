@@ -20,4 +20,8 @@ urlpatterns = [
     
     # Helper endpoints
     path('api/teacher/courses/', views.teacher_courses, name='teacher_courses'),
+
+
+    ##### TEST ATTEMPTS #################
+    path('api/student/test-attempts/', views.my_test_attempts, name='my_test_attempts'),
 ]

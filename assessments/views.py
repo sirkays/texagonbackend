@@ -1,31 +1,30 @@
-# api/views.py
 from typing import Any, DefaultDict, Dict, List, Optional
-from django.db import IntegrityError
-from django.db.utils import DataError
-import traceback
 from collections import defaultdict
 from decimal import Decimal
+import logging
+import traceback
+from datetime import datetime, timezone as py_tz
+
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
-from django.utils import timezone
-from datetime import datetime
+from django.db.utils import DataError
+from django.utils import timezone, dateparse
+
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
-from django.utils.dateparse import parse_datetime
-# Project models
-from academics.models import StudentProfile,TeacherProfile
-from assessments.models import Test, Question, Choice, TestAttempt,TestAnswer
+from academics.models import StudentProfile, TeacherProfile
+from assessments.models import Test, Question, Choice, TestAttempt, TestAnswer
 from learning.models import Enrollment, Course
 from orgs.models import OrganizationMembership
-import logging
-from datetime import timezone as dt_timezone
-from datetime import datetime, timezone as py_tz
-from datetime import datetime as py_datetime
+from core.utils import _get_student_for_user
+
+from .serializers import TestAttemptSerializer
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,20 +34,6 @@ def _has_field(model, field: str) -> bool:
         return True
     except Exception:
         return False
-
-
-def _get_student_for_user(user) -> Optional[StudentProfile]:
-    """Prefer the active organization; fallback to any student profile for the user."""
-    mem = (OrganizationMembership.objects
-           .filter(user=user, is_active=True)
-           .select_related("organization")
-           .order_by("-id")
-           .first())
-    if mem:
-        sp = StudentProfile.objects.filter(user=user, organization=mem.organization).first()
-        if sp:
-            return sp
-    return StudentProfile.objects.filter(user=user).order_by("-id").first()
 
 
 def _difficulty_from_test(t: Test, q_count: int) -> str:
@@ -145,6 +130,77 @@ def _map_qtype(q: Question, choice_count: int, choice_texts: List[str]) -> str:
         return "multiple-choice"
     # No choices provided:
     return "short-answer"
+
+
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])  # requires: Authorization: Api-Key <your_api_key>
+@authentication_classes([SessionTokenAuthentication])  # requires: Authorization: SessionToken <session_token>
+def my_test_attempts(request):
+    """
+    Fetch TestAttempt rows for the authenticated student.
+
+    Optional query params:
+      - test_id: int
+      - status: str (e.g. in_progress|submitted|graded)
+      - active=true|false  # if true, only attempts whose Test is currently open:
+                           # (start_at <= now or null) AND (end_at >= now or null)
+      - page: int (default 1)
+      - page_size: int (default 20, max 100)
+    """
+    # Must be a student
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Only students can access their test attempts."},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    qs = TestAttempt.objects.select_related("test").filter(student=student)
+
+    # Filters
+    test_id = request.query_params.get("test_id")
+    if test_id:
+        qs = qs.filter(test_id=test_id)
+
+    status_param = request.query_params.get("status")
+    if status_param:
+        qs = qs.filter(status=status_param)
+
+    # Active window filter (uses test.start_at/end_at)
+    if request.query_params.get("active", "").lower() == "true":
+        now = timezone.now()
+        qs = qs.filter(
+            (Q(test__start_at__isnull=True) | Q(test__start_at__lte=now)) &
+            (Q(test__end_at__isnull=True) | Q(test__end_at__gte=now))
+        )
+
+    qs = qs.order_by("-created_at")
+
+    # Simple pagination
+    try:
+        page = max(int(request.query_params.get("page", 1)), 1)
+    except ValueError:
+        page = 1
+    try:
+        page_size = min(max(int(request.query_params.get("page_size", 20)), 1), 100)
+    except ValueError:
+        page_size = 20
+
+    start = (page - 1) * page_size
+    end = start + page_size
+    total = qs.count()
+
+    serializer = TestAttemptSerializer(qs[start:end], many=True)
+    return Response(
+        {
+            "count": total,
+            "page": page,
+            "page_size": page_size,
+            "results": serializer.data,
+        },
+        status=status.HTTP_200_OK,
+    )
 
 
 
@@ -289,10 +345,13 @@ def available_tests(request):
 
         # Optional: exclude past tests if scheduled
         include_past = request.query_params.get("include_past") in {"1", "true", "True"}
+
         if _has_field(Test, "start_at") and not include_past:
             now = timezone.now()
-            qs = qs.filter(Q(start_at__isnull=True) | Q(start_at__gte=now))
-
+            qs = qs.filter(
+                (Q(start_at__isnull=True) | Q(start_at__gte=now)) &
+                (Q(end_at__isnull=True) | Q(end_at__lte=now))
+            )
         # Collect test ids
         tests = list(qs.select_related("course"))
         test_ids = [t.id for t in tests]
