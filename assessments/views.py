@@ -310,6 +310,10 @@ def available_tests_old(request):
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+from django.db.models import Q, Count, Exists, OuterRef
+from django.utils import timezone
+# ...your other imports
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -336,7 +340,10 @@ def available_tests(request):
         if not course_ids:
             return Response({"tests": []}, status=status.HTTP_200_OK)
 
+        # Base queryset: tests in the student's courses and with schedule set
         qs = Test.objects.filter(course_id__in=course_ids, start_at__isnull=False, end_at__isnull=False)
+
+        # Optional filter by one course
         course_filter = request.query_params.get("course")
         if course_filter:
             try:
@@ -352,6 +359,19 @@ def available_tests(request):
                 (Q(start_at__isnull=True) | Q(start_at__lte=now)) &
                 (Q(end_at__isnull=True) | Q(end_at__gte=now))
             )
+
+        # ---------- NEW: exclude no-question tests & tests already taken ----------
+        # Count questions and require at least 1
+        qs = qs.annotate(qcount=Count("questions", distinct=True)).filter(qcount__gt=0)
+
+        # Consider a test "taken" if the student has any attempt (you can narrow to submitted/graded if you prefer)
+        student_attempts = TestAttempt.objects.filter(
+            test_id=OuterRef("pk"),
+            student=student,
+        )
+        qs = qs.annotate(has_attempt=Exists(student_attempts)).filter(has_attempt=False)
+        # -------------------------------------------------------------------------
+
         # Collect test ids
         tests = list(qs.select_related("course"))
         test_ids = [t.id for t in tests]
@@ -360,30 +380,27 @@ def available_tests(request):
 
         # -------- Fetch questions & choices in bulk (avoid N+1) --------
         questions = list(Question.objects.filter(test_id__in=test_ids))
-        # Group questions by test_id
         questions_by_test: DefaultDict[int, List[Question]] = defaultdict(list)
         for q in questions:
             questions_by_test[q.test_id].append(q)
 
-        # Fetch choices once and group by question_id
         choice_qids = [q.id for q in questions]
         choices_map: DefaultDict[int, List[Choice]] = defaultdict(list)
         if choice_qids:
             for c in Choice.objects.filter(question_id__in=choice_qids):
                 choices_map[c.question_id].append(c)
 
-        # Natural ordering
         for tid in questions_by_test:
             questions_by_test[tid].sort(key=lambda q: (_question_order(q), q.id))
         for qid in choices_map:
             choices_map[qid].sort(key=lambda c: (_choice_order(c), c.id))
 
-        # Whether to include correct answers (admin/debug use only)
         include_answers = request.query_params.get("include_answers") in {"1", "true", "True"}
 
         # Sort tests: scheduled first by start time, else newest first
         if _has_field(Test, "start_at"):
-            tests.sort(key=lambda t: (getattr(t, "start_at", None) or timezone.datetime.max.replace(tzinfo=py_tz.utc), -t.id))
+            far_future = datetime.max.replace(tzinfo=py_tz.utc)
+            tests.sort(key=lambda t: (getattr(t, "start_at", None) or far_future, -t.id))
         else:
             tests.sort(key=lambda t: -t.id)
 
@@ -393,7 +410,6 @@ def available_tests(request):
             test_qs = questions_by_test.get(t.id, [])
             q_count = len(test_qs)
 
-            # Human id (slug or fallback)
             if _has_field(Test, "slug") and getattr(t, "slug", None):
                 id_str = t.slug
             else:
@@ -406,7 +422,6 @@ def available_tests(request):
                 cname = getattr(getattr(t, "course", None), "name", None)
                 description = f"Assessment for {cname}" if cname else "Assessment"
 
-            # Build question objects
             questions_out: List[Dict[str, Any]] = []
             for q in test_qs:
                 q_choices = choices_map.get(q.id, [])
@@ -417,28 +432,24 @@ def available_tests(request):
 
                 q_out: Dict[str, Any] = {
                     "id": q.id,
-                    "type": qtype_norm,                               # "multiple-choice" | "true-false" | "short-answer" | "essay"
+                    "type": qtype_norm,
                     "question": _question_text(q),
                     "points": int(getattr(q, "points", 0) or 0),
-                    "choices": choice_objs,                           # [{id, text}] - use id when submitting
-                    "options": choice_texts,                          # convenience for UI radios
+                    "choices": choice_objs,
+                    "options": choice_texts,
                 }
 
-                if include_answers:
-                    # Safe reveal of correct choices when explicitly requested
-                    # (Do NOT enable for student calls)
-                    if _has_field(Choice, "is_correct"):
-                        correct_ids = [c.id for c in q_choices if getattr(c, "is_correct", False)]
-                        # For single-answer MCQ/TF, expose index of the first correct option too
-                        if correct_ids:
-                            q_out["correct_choice_ids"] = correct_ids
-                            try:
-                                first_id = correct_ids[0]
-                                idx = next((i for i, co in enumerate(choice_objs) if co["id"] == first_id), None)
-                                if idx is not None:
-                                    q_out["correct_index"] = idx
-                            except Exception:
-                                pass
+                if include_answers and _has_field(Choice, "is_correct"):
+                    correct_ids = [c.id for c in q_choices if getattr(c, "is_correct", False)]
+                    if correct_ids:
+                        q_out["correct_choice_ids"] = correct_ids
+                        try:
+                            first_id = correct_ids[0]
+                            idx = next((i for i, co in enumerate(choice_objs) if co["id"] == first_id), None)
+                            if idx is not None:
+                                q_out["correct_index"] = idx
+                        except Exception:
+                            pass
 
                 questions_out.append(q_out)
 
@@ -455,7 +466,7 @@ def available_tests(request):
                 "course": getattr(getattr(t, "course", None), "name", None),
                 "startsAt": getattr(t, "start_at", None).isoformat() if _has_field(Test, "start_at") and getattr(t, "start_at", None) else None,
                 "endsAt": getattr(t, "end_at", None).isoformat() if _has_field(Test, "end_at") and getattr(t, "end_at", None) else None,
-                "items": questions_out,      # <-- all questions with options
+                "items": questions_out,
             })
 
         return Response({"tests": items}, status=status.HTTP_200_OK)
@@ -466,9 +477,9 @@ def available_tests(request):
             "error": f"{type(e).__name__}: {e}",
         }
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            import traceback
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 
 
