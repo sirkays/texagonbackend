@@ -155,4 +155,17 @@ if os.environ.get("LOCAL") == "0":
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
+
+DOMAIN_EMAIL = os.environ.get("DOMAIN_EMAIL")
+SEND_EMAIL = os.environ.get("SEND_EMAIL")
+EMAIL_HOST = os.environ.get("EMAIL_HOST")
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD")
+#EMAIL_HOST = 'ikpeazuchambers.com'
+#EMAIL_HOST_USER = 'quebe@ikpeazuchambers.com'
+#EMAIL_HOST_PASSWORD = ''
+EMAIL_PORT = os.environ.get("EMAIL_PORT")
+EMAIL_USE_TLS = True
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL")
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

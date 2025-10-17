@@ -19,6 +19,8 @@ from .views import (
     tutoring_tutors,
     tutoring_tutor_availability,
     tutoring_stats,
+    password_reset_request_view,
+    password_reset_confirm_view
 )
 
 router = DefaultRouter()
@@ -69,6 +71,9 @@ urlpatterns = [
     path("tutor/tutoring/book/", upsert_tutoring_booking, name="upsert_tutoring_booking"),
     path("tutor/tutoring-bookings/", my_child_tutoring_bookings, name="my_child_tutoring_bookings"),
     ####### #####
+
+    path("auth/reset-password/", password_reset_confirm_view, name="api-reset-pwd"),
+    path("auth/confirm-password/", password_reset_request_view, name="api-confirm-pwd"),
 
     path("tutor/tutoring/children/", tutoring_children, name="tutoring_children"),
     path("tutor/tutoring/bookings/", tutoring_bookings, name="tutoring_bookings"),

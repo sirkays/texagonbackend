@@ -6,7 +6,7 @@ from io import StringIO
 from typing import Any, Literal, Tuple
 
 from django.db import transaction
-from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Sum, Value,Avg
+from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Sum, Value,Avg,DecimalField
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.utils import timezone
@@ -35,7 +35,7 @@ from academics.models import (
 )
 
 from assessments.models import Submission, TestAttempt
-from billing.models import SubscriptionPayment
+from billing.models import SubscriptionPayment,SubscriptionPlan, OrganizationSubscription, SubscriptionInvoice
 from learning.models import Course, Enrollment,Lesson, Module
 from orgs.models import Organization, OrganizationMembership
 from accounts.models import User
@@ -73,7 +73,268 @@ from core.utils import (
     
 )
 
+from calendar import monthrange
 
+
+# ---------- helpers specific to this view ----------
+
+def _member_display_name(membership: OrganizationMembership) -> str:
+    if not membership:
+        return ""
+    u = membership.user
+    full = (getattr(u, "get_full_name", lambda: "")() or "").strip()
+    return full or u.email or f"user-{u.pk}"
+
+
+def _month_bounds(dt=None):
+    now = dt or timezone.now()
+    y, m = now.year, now.month
+    first = timezone.make_aware(datetime(y, m, 1, 0, 0, 0))
+    last_day = monthrange(y, m)[1]
+    last = timezone.make_aware(datetime(y, m, last_day, 23, 59, 59))
+    return first, last
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def billing_dashboard(request):
+    """
+    GET /api/admin/billing/dashboard
+
+    Headers:
+      Authorization: Api-Key <YOUR_API_KEY>
+      X-Session-Token: <session_token>
+
+    Query:
+      invoices_page (int, default 1)
+      invoices_page_size (int, default 10, max 50)
+      invoices_search (str)
+    """
+    try:
+        # ---------- Resolve org & permission ----------
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        # ---------- Local helpers ----------
+        DEC_OUT = DecimalField(max_digits=18, decimal_places=2)
+
+        def dec_sum(qs, field_name: str) -> Decimal:
+            """Safe Decimal SUM with Coalesce and explicit output_field."""
+            return (
+                qs.aggregate(total=Coalesce(Sum(field_name), Value(0), output_field=DEC_OUT))["total"]
+                or Decimal("0")
+            )
+
+        def member_display_name(membership: OrganizationMembership | None) -> str:
+            if not membership:
+                return ""
+            u = membership.user
+            full = (getattr(u, "get_full_name", lambda: "")() or "").strip()
+            return full or u.email or f"user-{u.pk}"
+
+        def month_bounds(dt=None):
+            now = dt or timezone.now()
+            y, m = now.year, now.month
+            first = timezone.make_aware(datetime(y, m, 1, 0, 0, 0))
+            last_day = monthrange(y, m)[1]
+            last = timezone.make_aware(datetime(y, m, last_day, 23, 59, 59))
+            return first, last
+
+        # ---------- Base querysets ----------
+        inv_qs = SubscriptionInvoice.objects.filter(subscription__organization=org)
+
+        # ---------- Stats ----------
+        start_m, end_m = month_bounds()
+
+        monthly_paid_amt = dec_sum(
+            inv_qs.filter(
+                status=SubscriptionInvoice.Status.PAID,
+                issued_at__gte=start_m,
+                issued_at__lte=end_m,
+            ),
+            "amount",
+        )
+
+        active_subscriptions = OrganizationSubscription.objects.filter(
+            organization=org,
+            status=OrganizationSubscription.Status.ACTIVE,
+        ).count()
+
+        pending_qs = inv_qs.filter(
+            Q(status=SubscriptionInvoice.Status.OPEN) | Q(status=SubscriptionInvoice.Status.ACTIVE)
+        )
+        pending_count = pending_qs.count()
+        pending_total = dec_sum(pending_qs, "amount")
+
+        # Collection rate over last 60 days
+        since = timezone.now() - timezone.timedelta(days=60)
+        window = inv_qs.filter(issued_at__gte=since)
+        paid_w = window.filter(status=SubscriptionInvoice.Status.PAID)
+        due_w = window.exclude(status=SubscriptionInvoice.Status.VOID)
+
+        paid_amt = dec_sum(paid_w, "amount")
+        due_amt = dec_sum(due_w, "amount")
+        amount_pct = float(paid_amt / due_amt) if due_amt else 0.0
+
+        paid_cnt = paid_w.count()
+        due_cnt = due_w.count()
+        count_pct = float(paid_cnt / due_cnt) if due_cnt else 0.0
+
+        # Prefer the first seen currency; fallback NGN
+        currency = inv_qs.values_list("currency", flat=True).order_by().first() or "NGN"
+
+        stats = {
+            "monthly_revenue_amount": f"{monthly_paid_amt:.2f}",
+            "monthly_revenue_currency": currency,
+            "active_subscriptions": active_subscriptions,
+            "pending_invoices_count": pending_count,
+            "pending_invoices_total": f"{pending_total:.2f}",
+            "collection_rate": {
+                "amount_pct": round(amount_pct, 4),
+                "count_pct": round(count_pct, 4),
+            },
+        }
+
+        # ---------- Plans + active counts ----------
+        plans = (
+            SubscriptionPlan.objects
+            .filter(subscriptions__organization=org)
+            .distinct()
+            .annotate(
+                active_subscriptions=Count(
+                    "subscriptions",
+                    filter=Q(subscriptions__status=OrganizationSubscription.Status.ACTIVE),
+                    distinct=True,
+                )
+            )
+            .values("id", "name", "price", "billing_period", "student_limit", "active_subscriptions")
+        )
+        plans_payload = [
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "price": f'{p["price"]:.2f}',
+                "billing_period": p["billing_period"],
+                "student_limit": p["student_limit"],
+                "active_subscriptions": p["active_subscriptions"],
+            }
+            for p in plans
+        ]
+
+        # ---------- Recent invoices (search + pagination) ----------
+        page = max(int(request.query_params.get("invoices_page") or 1), 1)
+        page_size = min(max(int(request.query_params.get("invoices_page_size") or 10), 1), 50)
+        search = (request.query_params.get("invoices_search") or "").strip()
+
+        recent_qs = inv_qs.select_related("organization_membership__user").order_by("-issued_at", "-id")
+        if search:
+            recent_qs = recent_qs.filter(
+                Q(number__icontains=search) |
+                Q(organization_membership__user__email__icontains=search) |
+                Q(organization_membership__user__first_name__icontains=search) |
+                Q(organization_membership__user__last_name__icontains=search)
+            )
+
+        total = recent_qs.count()
+        start = (page - 1) * page_size
+        rows = list(recent_qs[start:start + page_size])
+
+        recent_payload = [
+            {
+                "id": inv.id,
+                "number": inv.number,
+                "parent": member_display_name(inv.organization_membership),
+                "amount": f"{inv.amount:.2f}",
+                "currency": inv.currency,
+                "status": inv.status,
+                "issuedAt": inv.issued_at.isoformat() if inv.issued_at else None,
+                "dueAt": inv.due_at.isoformat() if inv.due_at else None,
+            }
+            for inv in rows
+        ]
+
+        return Response({
+            "stats": stats,
+            "plans": plans_payload,
+            "recent_invoices": recent_payload,
+            "pagination": {"page": page, "page_size": page_size, "total": total},
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def invoice_detail(request, invoice_id: int):
+    """
+    GET /api/admin/billing/invoices/<invoice_id>
+
+    Headers:
+      Authorization: Api-Key <YOUR_API_KEY>
+      X-Session-Token: <session_token>
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        inv = (
+            SubscriptionInvoice.objects
+            .select_related("subscription__plan", "subscription__organization", "organization_membership__user")
+            .filter(subscription__organization=org, id=invoice_id)
+            .first()
+        )
+        if not inv:
+            return Response({"detail": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        plan = getattr(inv.subscription, "plan", None)
+        payload = {
+            "id": inv.id,
+            "number": inv.number,
+            "parent": _member_display_name(inv.organization_membership),
+            "amount": f"{inv.amount:.2f}",
+            "currency": inv.currency,
+            "status": inv.status,
+            "issuedAt": inv.issued_at.isoformat() if inv.issued_at else None,
+            "dueAt": inv.due_at.isoformat() if inv.due_at else None,
+            "items": [
+                {
+                    "title": f"{plan.name if plan else 'Plan'} Subscription",
+                    "description": "Monthly billing period",
+                    "amount": f"{inv.amount:.2f}",
+                }
+            ],
+            "payment_info": None,
+        }
+
+        latest_payment = inv.payments.order_by("-paid_at").first() if hasattr(inv, "payments") else None
+        if latest_payment:
+            payload["payment_info"] = {
+                "paid_at": latest_payment.paid_at.isoformat() if latest_payment.paid_at else None,
+                "transaction_id": latest_payment.transaction_id,
+                "method": latest_payment.method,
+                "status": latest_payment.status,
+            }
+
+        return Response(payload)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 

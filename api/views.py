@@ -49,6 +49,168 @@ from billing.models import (
 from notifications.models import Notification
 
 from core.utils import _get_teacher_for_user, _get_student_for_user,get_object_or_404_ajax,_resolve_org
+from django.urls import reverse
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
+
+
+
+
+
+def _issue_password_reset_token(user, hours_valid=1, ip=None):
+    """
+    Create a short-lived SessionToken specifically for password resets.
+    """
+    return SessionToken.create_for_user(
+        user,
+        hours_valid=hours_valid,
+        ip=ip,
+        purpose="password_reset",  # tagged for later validation
+    )
+
+
+def _send_password_reset_email(user, reset_token, request):
+    """
+    Minimal email sender. Replace with your templating / email backend as needed.
+    """
+    # Build a link your frontend can handle. Adjust domain/origin and path to taste.
+    # If you have a dedicated frontend URL, use it here.
+    origin = getattr(settings, "FRONTEND_ORIGIN", "").rstrip("/") or request.build_absolute_uri("/").rstrip("/")
+    reset_path = "/reset-password"  # e.g., your frontend route
+    reset_url = f"{origin}{reset_path}?token={reset_token.key}"
+
+    subject = "Reset your password"
+    # If you have a template, use it; otherwise send a simple text message
+    message = (
+        f"Hi,\n\nWe received a request to reset your password.\n\n"
+        f"Use this link to set a new one (valid until {reset_token.expires_at.isoformat()}):\n{reset_url}\n\n"
+        f"If you didn’t request this, you can ignore this email."
+    )
+
+    # Fail silently to avoid leaking existence; log as needed.
+    send_mail(
+        subject,
+        message,
+        getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        [user.email],
+        fail_silently=True,
+    )
+    print("mail_sent....")
+
+
+def _find_active_token(key, purpose="password_reset"):
+    """
+    Look up an active, unexpired SessionToken by key and purpose.
+    """
+    now = timezone.now()
+    try:
+        st = SessionToken.objects.select_related("user").get(
+            key=key,
+            is_active=True,
+            expires_at__gt=now,
+        )
+    except SessionToken.DoesNotExist:
+        return None
+
+    # Enforce purpose tagging if present
+    if st.meta.get("purpose") != purpose:
+        return None
+    return st
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([])  # no auth; guarded by API key and generic response
+def password_reset_request_view(request):
+    """
+    Start password reset by email.
+    Body:
+      - email: required
+      - hours_valid: optional (default 1)
+    Always returns 200 for privacy (no user enumeration).
+    """
+    email = (request.data.get("email") or "").strip().lower()
+    hours_valid = int(request.data.get("hours_valid") or 1)
+    if not email:
+        return Response({"detail": "email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Try to find user by email (case-insensitive)
+    try:
+        user = User.objects.get(email__iexact=email, is_active=True)
+        print(user, " acccount...")
+    except User.DoesNotExist:
+        # Return generic success to avoid user enumeration
+        return Response({"detail": "If an account exists, a reset link has been sent."})
+
+    # Issue short-lived reset token and email it
+    st = _issue_password_reset_token(user, hours_valid=hours_valid, ip=request.META.get("REMOTE_ADDR"))
+    _send_password_reset_email(user, st, request)
+
+    return Response({"detail": "If an account exists, a reset link has been sent."})
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([])  # guarded by API key; token is in body
+def password_reset_confirm_view(request):
+    """
+    Confirm password reset using the reset token.
+    Body:
+      - resetToken (alias: token)
+      - new_password
+      - re_new_password
+      - issue_session_hours (optional) -> if provided, returns a fresh login sessionToken
+    """
+    token = request.data.get("resetToken") or request.data.get("token") or ""
+    new_password = request.data.get("new_password") or ""
+    re_new_password = request.data.get("re_new_password") or ""
+    issue_hours = request.data.get("issue_session_hours")
+
+    if not token:
+        return Response({"detail": "resetToken is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if not new_password or not re_new_password:
+        return Response({"detail": "new_password and re_new_password are required."}, status=status.HTTP_400_BAD_REQUEST)
+    if new_password != re_new_password:
+        return Response({"detail": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
+
+    st = _find_active_token(token, purpose="password_reset")
+    if not st:
+        return Response({"detail": "Invalid or expired token."}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = st.user
+    # Optionally enforce password validators here if you use them.
+
+    user.set_password(new_password)
+    user.save(update_fields=["password"])
+
+    # Revoke the reset token
+    st.revoke()
+
+    response_data = {"detail": "Password has been reset successfully."}
+
+    # Optionally: revoke all existing regular session tokens for security
+    # SessionToken.objects.filter(user=user, is_active=True).exclude(pk=st.pk).update(is_active=False)
+
+    # Optionally issue a fresh login session token so the user is signed in immediately
+    if issue_hours:
+        try:
+            hours = int(issue_hours)
+            new_st = SessionToken.create_for_user(
+                user,
+                hours_valid=hours,
+                ip=request.META.get("REMOTE_ADDR"),
+                purpose="session",  # mark as a normal session
+            )
+            response_data.update({
+                "sessionToken": new_st.key,
+                "expiresAt": new_st.expires_at.isoformat(),
+                "userId": user.id,
+            })
+        except Exception:
+            # ignore issuance errors; password reset already succeeded
+            pass
+
+    return Response(response_data, status=status.HTTP_200_OK)
 
 
 @api_view(["POST"])
