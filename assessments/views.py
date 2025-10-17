@@ -337,8 +337,6 @@ def available_tests(request):
             return Response({"tests": []}, status=status.HTTP_200_OK)
 
         qs = Test.objects.filter(course_id__in=course_ids, start_at__isnull=False, end_at__isnull=False)
-
-        # Optional: filter by course
         course_filter = request.query_params.get("course")
         if course_filter:
             try:
@@ -348,12 +346,11 @@ def available_tests(request):
 
         # Optional: exclude past tests if scheduled
         include_past = request.query_params.get("include_past") in {"1", "true", "True"}
-
         if _has_field(Test, "start_at") and not include_past:
             now = timezone.now()
             qs = qs.filter(
-                (Q(start_at__isnull=True) | Q(start_at__gte=now)) &
-                (Q(end_at__isnull=True) | Q(end_at__lte=now))
+                (Q(start_at__isnull=True) | Q(start_at__lte=now)) &
+                (Q(end_at__isnull=True) | Q(end_at__gte=now))
             )
         # Collect test ids
         tests = list(qs.select_related("course"))

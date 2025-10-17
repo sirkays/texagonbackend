@@ -36,7 +36,7 @@ from academics.models import (
 
 from assessments.models import Submission, TestAttempt
 from billing.models import SubscriptionPayment
-from learning.models import Course, Enrollment
+from learning.models import Course, Enrollment,Lesson
 from orgs.models import Organization, OrganizationMembership
 from accounts.models import User
 from rest_framework import status
@@ -68,9 +68,204 @@ from core.utils import (
     _is_org_admin_or_teacher,
     _get_ids_from_payload,
     _course_to_card_dict,
+    _module_to_card_dict,
+    _lesson_to_modal_row
     
 )
 
+
+
+
+
+# ---------- endpoints ----------
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def modules_list(request):
+    """
+    GET /api/admin/modules
+    Auth:
+      - Authorization: Api-Key <YOUR_API_KEY>
+      - X-Session-Key: <session_key>
+
+    Query Params:
+      - search: str (matches module name, course name, category name)
+      - course_id: int                     # filter by one course
+      - course_ids: comma-separated ints   # filter by many courses, e.g. "1,2,3"
+      - course: str                        # filter by course name (icontains)
+      - difficulty: BEGINNER|INTERMEDIATE|ADVANCED
+      - status: active|inactive
+      - page: int (default 1)
+      - page_size: int (default 20, max 100)
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        search = (request.query_params.get("search") or "").strip()
+        difficulty = (request.query_params.get("difficulty") or "").strip().upper()
+        status_filter = (request.query_params.get("status") or "").strip().lower()
+
+        # ---- COURSE FILTERS ----
+        course_id = request.query_params.get("course_id")
+        course_ids_raw = (request.query_params.get("course_ids") or "").strip()
+        course_name_q = (request.query_params.get("course") or "").strip()
+
+        # pagination
+        page = max(int(request.query_params.get("page") or 1), 1)
+        page_size = min(max(int(request.query_params.get("page_size") or 20), 1), 100)
+
+        qs = (
+            Module.objects
+            .filter(course__organization=org)
+            .select_related("course", "category")
+            .annotate(
+                lessons_count=Count("lessons", distinct=True),
+                duration_minutes=Coalesce("estimated_duration_in_minutes", Value(0), output_field=IntegerField()),
+            )
+        )
+
+        # text search
+        if search:
+            qs = qs.filter(
+                Q(name__icontains=search) |
+                Q(course__name__icontains=search) |
+                Q(category__name__icontains=search)
+            )
+
+        # filter by a single course id
+        if course_id:
+            try:
+                qs = qs.filter(course_id=int(course_id))
+            except ValueError:
+                pass
+
+        # filter by many course ids
+        if course_ids_raw:
+            try:
+                ids = [int(x) for x in course_ids_raw.split(",") if x.strip().isdigit()]
+                if ids:
+                    qs = qs.filter(course_id__in=ids)
+            except Exception:
+                pass
+
+        # filter by course name
+        if course_name_q:
+            qs = qs.filter(course__name__icontains=course_name_q)
+
+        # difficulty + status
+        if difficulty in {"BEGINNER", "INTERMEDIATE", "ADVANCED"}:
+            qs = qs.filter(difficulty=difficulty)
+        if status_filter in {"active", "inactive"}:
+            qs = qs.filter(active=(status_filter == "active"))
+
+        total = qs.count()
+        start = (page - 1) * page_size
+        rows = list(qs.order_by("course__name", "order")[start:start + page_size])
+
+        def _module_to_card_dict(m):
+            return {
+                "id": m.id,
+                "name": m.name,
+                "course": getattr(m.course, "name", ""),
+                "order": m.order,
+                "difficulty": m.difficulty,
+                "lessons": m.lessons_count or 0,
+                "duration": int(m.duration_minutes or 0),
+                "category": getattr(m.category, "name", "") if m.category_id else "",
+                "active": bool(m.active),
+            }
+
+        data = [_module_to_card_dict(m) for m in rows]
+
+        # Optional: return a compact list of available courses (for a filter dropdown)
+        courses_filter = (
+            Module.objects
+            .filter(course__organization=org)
+            .values("course_id", "course__name")
+            .distinct()
+            .order_by("course__name")
+        )
+        courses_list = [
+            {"id": c["course_id"], "name": c["course__name"]}
+            for c in courses_filter
+        ]
+
+        return Response({
+            "results": data,
+            "pagination": {"page": page, "page_size": page_size, "total": total},
+            "filters": {"courses": courses_list},
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response(
+            {"detail": "An unexpected error occurred.", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def module_lessons(request, module_id: int):
+    """
+    GET /api/admin/modules/<module_id>/lessons
+    Auth:
+      - Header: Authorization: Api-Key <YOUR_API_KEY>
+      - Header: X-Session-Key: <session_key>
+
+    Returns lessons for the given module, shaped for your modal.
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Ensure the module belongs to the caller's org
+        module = (
+            Module.objects
+            .select_related("course")
+            .filter(id=module_id, course__organization=org)
+            .first()
+        )
+        if not module:
+            return Response({"detail": "Module not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        lessons_qs = (
+            Lesson.objects
+            .filter(module=module)
+            .order_by("order", "id")
+        )
+
+        lessons = [_lesson_to_modal_row(l, idx) for idx, l in enumerate(lessons_qs, start=1)]
+
+        # Extra header info used by your modal header
+        payload = {
+            "module": {
+                "id": module.id,
+                "name": module.name,
+                "order": module.order,
+                "difficulty": module.difficulty,
+                "lessons": len(lessons),
+            },
+            "lessons": lessons,
+        }
+        return Response(payload)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response(
+            {"detail": "An unexpected error occurred.", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(["GET"])

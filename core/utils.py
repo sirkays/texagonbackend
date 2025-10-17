@@ -8,10 +8,45 @@ import traceback
 from decimal import Decimal
 from django.shortcuts import _get_queryset
 from accounts.models import User
-from learning.models import Course, Module, Enrollment
+from learning.models import Course, Module, Enrollment,Lesson
 
 StatusLiteral = Literal["active", "inactive", "suspended"]
 
+
+# ---------- helpers ----------
+
+def _module_to_card_dict(m: Module) -> dict:
+    """
+    Shape a Module row to the UI card object used in your Modules grid.
+    """
+    return {
+        "id": m.id,
+        "name": m.name,
+        "course": getattr(m.course, "name", ""),
+        "order": m.order,
+        "difficulty": m.difficulty,  # "BEGINNER" | "INTERMEDIATE" | "ADVANCED"
+        "lessons": m.lessons_count or 0,
+        "duration": int(m.duration_minutes or 0),  # minutes
+        "category": getattr(m.category, "name", "") if m.category_id else "",
+        "active": bool(m.active),
+    }
+
+
+def _lesson_to_modal_row(l: Lesson, idx: int) -> dict:
+    """
+    Shape a Lesson row for the Lessons modal.
+    (Your modal currently hardcodes 'completed', so we default to False.)
+    """
+    # Convert seconds to whole minutes, safe for None
+    duration_min = int((l.duration_seconds or 0) // 60)
+    return {
+        "id": l.id,
+        "title": l.name,
+        "duration": duration_min,
+        "type": l.content_type,  # "video" | "audio" | "pdf" | "doc" | "link"
+        "completed": False,      # you can wire real progress later if available
+        "order": l.order,
+    }
 
 
 def _avatar_url_for(user: User, request) -> str | None:
