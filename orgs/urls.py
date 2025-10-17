@@ -1,7 +1,8 @@
 from django.urls import path
 from .views import (dashboard_summary,courses_list,courses_stats_header,course_form_options,
     course_create,course_detail,course_update,course_delete,
-     ClassroomViewSet,StudentsViewSet,TeacherViewSet, ParentViewSet,SubjectViewSet
+     ClassroomViewSet,StudentsViewSet,TeacherViewSet, ParentViewSet,SubjectViewSet,
+     modules_list, module_lessons
 )
 from rest_framework.routers import DefaultRouter
 
@@ -22,6 +23,9 @@ urlpatterns = [
     path("api/admin/courses/<int:course_id>/", course_detail, name="course-detail"),
     path("api/admin/courses/<int:course_id>/update/", course_update, name="course-update"),
     path("api/admin/courses/<int:course_id>/delete/", course_delete, name="course-delete"),
+
+    path("api/admin/module/list/", modules_list, name="module-admin-list"),
+    path("api/admin/module/lessons/<int:module_id>/", module_lessons, name="module-admin-lesson"),
 ]
 
 # append, don't overwrite

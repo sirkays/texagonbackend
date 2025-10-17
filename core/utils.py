@@ -8,7 +8,7 @@ import traceback
 from decimal import Decimal
 from django.shortcuts import _get_queryset
 from accounts.models import User
-from learning.models import Course, Module, Enrollment,Lesson
+from learning.models import Course, Module, Enrollment,Lesson,Module
 
 StatusLiteral = Literal["active", "inactive", "suspended"]
 

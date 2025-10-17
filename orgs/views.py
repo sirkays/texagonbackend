@@ -36,7 +36,7 @@ from academics.models import (
 
 from assessments.models import Submission, TestAttempt
 from billing.models import SubscriptionPayment
-from learning.models import Course, Enrollment,Lesson
+from learning.models import Course, Enrollment,Lesson, Module
 from orgs.models import Organization, OrganizationMembership
 from accounts.models import User
 from rest_framework import status
@@ -221,14 +221,15 @@ def module_lessons(request, module_id: int):
 
     Returns lessons for the given module, shaped for your modal.
     """
+    print("dm fk mflk mfkl mlvk mlk")
     try:
         org, err = _resolve_org(request)
         if err:
             return err
-
+        print(" dmvkdmvkfmvfkm")
         if not _is_org_admin_or_teacher(request, org):
             return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
-
+        print(org, " org")
         # Ensure the module belongs to the caller's org
         module = (
             Module.objects
@@ -238,7 +239,7 @@ def module_lessons(request, module_id: int):
         )
         if not module:
             return Response({"detail": "Module not found."}, status=status.HTTP_404_NOT_FOUND)
-
+        print(module, " mmmmmmmm")
         lessons_qs = (
             Lesson.objects
             .filter(module=module)
@@ -246,7 +247,7 @@ def module_lessons(request, module_id: int):
         )
 
         lessons = [_lesson_to_modal_row(l, idx) for idx, l in enumerate(lessons_qs, start=1)]
-
+        print(lessons, " llllllllllllllllllllll")
         # Extra header info used by your modal header
         payload = {
             "module": {
@@ -258,10 +259,12 @@ def module_lessons(request, module_id: int):
             },
             "lessons": lessons,
         }
+        print(payload)
         return Response(payload)
 
     except Exception as e:
         traceback.print_exc()
+        print(e)
         return Response(
             {"detail": "An unexpected error occurred.", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
