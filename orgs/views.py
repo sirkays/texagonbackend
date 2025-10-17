@@ -33,7 +33,7 @@ from academics.models import (
     ParentProfile,
     ParentChildLink,
 )
-
+from gamification.models import Badge, BadgeAward, PointTransaction, Streak, AchievementDefinition  # noqa
 from assessments.models import Submission, TestAttempt
 from billing.models import SubscriptionPayment,SubscriptionPlan, OrganizationSubscription, SubscriptionInvoice
 from learning.models import Course, Enrollment,Lesson, Module
@@ -69,7 +69,13 @@ from core.utils import (
     _get_ids_from_payload,
     _course_to_card_dict,
     _module_to_card_dict,
-    _lesson_to_modal_row
+    _lesson_to_modal_row,
+    _ach_to_dict,
+    _badge_to_dict,
+    _json_or_dict,
+    _int,
+    _member_display_name,
+    _month_bounds,
     
 )
 
@@ -93,6 +99,360 @@ def _month_bounds(dt=None):
     last_day = monthrange(y, m)[1]
     last = timezone.make_aware(datetime(y, m, last_day, 23, 59, 59))
     return first, last
+
+# ----------------------------------------
+# Summary (stat cards)
+# ----------------------------------------
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def gamification_summary(request):
+    """
+    GET /api/admin/gamification/summary
+
+    Headers:
+      Authorization: Api-Key <YOUR_API_KEY>
+      X-Session-Token: <session_token>
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Total points awarded (sum of PointTransaction.points scoped to org students)
+        org_students = StudentProfile.objects.filter(organization=org)
+        total_points = (
+            PointTransaction.objects
+            .filter(student__in=org_students)
+            .aggregate(t=Coalesce(Sum("points"), 0))
+            .get("t", 0)
+        )
+
+        # Total badges earned
+        badges_earned = (
+            BadgeAward.objects
+            .filter(student__in=org_students)
+            .count()
+        )
+
+        # Active streaks (current_days > 0)
+        active_streaks = (
+            Streak.objects
+            .filter(student__in=org_students, current_days__gt=0)
+            .count()
+        )
+
+        # "Avg engagement" example: % of students with activity (streak updated) in last 7 days
+        seven_days_ago = timezone.now().date() - timezone.timedelta(days=7)
+        engaged = (
+            Streak.objects
+            .filter(student__in=org_students, last_activity__gte=seven_days_ago)
+            .count()
+        )
+        total_students = max(1, org_students.count())
+        avg_engagement_pct = int(round(100 * engaged / total_students))
+
+        payload = {
+            "totalPointsAwarded": int(total_points),
+            "badgesEarned": int(badges_earned),
+            "activeStreaks": int(active_streaks),
+            "avgEngagement": avg_engagement_pct,
+        }
+        return Response(payload)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# ----------------------------------------
+# Badges: list/create and update
+# ----------------------------------------
+
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def badges_view(request):
+    """
+    GET  /api/admin/gamification/badges
+    POST /api/admin/gamification/badges
+
+    Headers:
+      Authorization: Api-Key <YOUR_API_KEY>
+      X-Session-Token: <session_token>
+
+    Body (POST):
+      {
+        "name": "Helping Hand",
+        "icon_name": "medal",
+        "color": "bg-emerald-500",
+        "points": 60,
+        "criteria": "...",
+        "rules": {...}  # optional JSON
+      }
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if request.method == "GET":
+            if not _is_org_admin_or_teacher(request, org):
+                return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+            qs = Badge.objects.filter(organization=org).order_by("-id")
+            return Response([_badge_to_dict(b) for b in qs])
+
+        # POST (create)
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data or {}
+        b = Badge.objects.create(
+            organization=org,
+            name=data.get("name", "").strip(),
+            icon_name=data.get("icon_name", "medal").strip(),
+            color=data.get("color", "bg-gray-500").strip(),
+            points=_int(data.get("points", 0)),
+            criteria=data.get("criteria", "").strip(),
+            rules=_json_or_dict(data.get("rules") or {}),
+        )
+        return Response(_badge_to_dict(b), status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def badge_detail(request, badge_id: int):
+    """
+    PATCH /api/admin/gamification/badges/<badge_id>
+
+    Headers:
+      Authorization: Api-Key <YOUR_API_KEY>
+      X-Session-Token: <session_token>
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        b = Badge.objects.filter(organization=org, id=badge_id).first()
+        if not b:
+            return Response({"detail": "Badge not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        if "name" in data:
+            b.name = (data.get("name") or "").strip()
+        if "icon_name" in data:
+            b.icon_name = (data.get("icon_name") or "").strip()
+        if "color" in data:
+            b.color = (data.get("color") or "").strip()
+        if "points" in data:
+            b.points = _int(data.get("points"))
+        if "criteria" in data:
+            b.criteria = (data.get("criteria") or "").strip()
+        if "rules" in data:
+            b.rules = _json_or_dict(data.get("rules"))
+
+        b.save()
+        return Response(_badge_to_dict(b))
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# ----------------------------------------
+# Achievements: list/create and update
+# ----------------------------------------
+
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def achievements_view(request):
+    """
+    GET  /api/admin/gamification/achievements
+    POST /api/admin/gamification/achievements
+
+    Body (POST):
+      {
+        "code": "streak_champion",
+        "title": "Streak Champion",
+        "description": "Maintain a 30-day learning streak",
+        "icon": "zap",
+        "category": "Consistency",
+        "target_value": 30,
+        "points": 200,
+        "is_active": true
+      }
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if request.method == "GET":
+            if not _is_org_admin_or_teacher(request, org):
+                return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+            qs = AchievementDefinition.objects.filter(
+                Q(organization=org) | Q(organization__isnull=True)
+            ).order_by("code")
+            return Response([_ach_to_dict(a) for a in qs])
+
+        # POST
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data or {}
+        a = AchievementDefinition.objects.create(
+            organization=org,
+            code=data.get("code", "").strip(),
+            title=data.get("title", "").strip(),
+            description=data.get("description", "").strip(),
+            icon=data.get("icon", "star").strip(),
+            category=data.get("category", "General").strip(),
+            target_value=(None if data.get("target_value") in ("", None) else _int(data.get("target_value"))),
+            points=_int(data.get("points", 0)),
+            is_active=bool(data.get("is_active", True)),
+        )
+        return Response(_ach_to_dict(a), status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def achievement_detail(request, achievement_id: int):
+    """
+    PATCH /api/admin/gamification/achievements/<achievement_id>
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        a = AchievementDefinition.objects.filter(
+            (Q(organization=org) | Q(organization__isnull=True)),
+            id=achievement_id,
+        ).first()
+        if not a:
+            return Response({"detail": "Achievement not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        if "code" in data:
+            a.code = (data.get("code") or "").strip()
+        if "title" in data:
+            a.title = (data.get("title") or "").strip()
+        if "description" in data:
+            a.description = (data.get("description") or "").strip()
+        if "icon" in data:
+            a.icon = (data.get("icon") or "").strip()
+        if "category" in data:
+            a.category = (data.get("category") or "").strip()
+        if "target_value" in data:
+            raw = data.get("target_value")
+            a.target_value = None if raw in ("", None) else _int(raw)
+        if "points" in data:
+            a.points = _int(data.get("points"))
+        if "is_active" in data:
+            a.is_active = bool(data.get("is_active"))
+
+        a.save()
+        return Response(_ach_to_dict(a))
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# ----------------------------------------
+# Leaderboard
+# ----------------------------------------
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def gamification_leaderboard(request):
+    """
+    GET /api/admin/gamification/leaderboard
+
+    Returns: [{rank, student, points, badges, streak}]
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        students = StudentProfile.objects.filter(organization=org)
+
+        # Sum of points per student
+        points_by_student = (
+            PointTransaction.objects
+            .filter(student__in=students)
+            .values("student_id")
+            .annotate(points=Coalesce(Sum("points"), 0))
+        )
+        points_map = {row["student_id"]: int(row["points"]) for row in points_by_student}
+
+        # Badge counts
+        badge_counts = (
+            BadgeAward.objects
+            .filter(student__in=students)
+            .values("student_id")
+            .annotate(c=Count("id"))
+        )
+        badges_map = {row["student_id"]: int(row["c"]) for row in badge_counts}
+
+        # Streaks
+        streaks = Streak.objects.filter(student__in=students)
+        streak_map = {s.student_id: int(s.current_days or 0) for s in streaks}
+
+        # Compose + sort
+        rows = []
+        for s in students.select_related("user"):
+            student_name = (s.user.get_full_name() or s.user.email or f"Student {s.id}")
+            rows.append({
+                "studentId": s.id,
+                "student": student_name,
+                "points": points_map.get(s.id, 0),
+                "badges": badges_map.get(s.id, 0),
+                "streak": streak_map.get(s.id, 0),
+            })
+
+        rows.sort(key=lambda r: (-r["points"], -r["badges"], -r["streak"], r["student"]))
+        # Add rank
+        for idx, r in enumerate(rows, start=1):
+            r["rank"] = idx
+
+        return Response(rows[:50])  # cap to top 50
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])

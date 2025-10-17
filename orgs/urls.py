@@ -2,7 +2,11 @@ from django.urls import path
 from .views import (dashboard_summary,courses_list,courses_stats_header,course_form_options,
     course_create,course_detail,course_update,course_delete,
      ClassroomViewSet,StudentsViewSet,TeacherViewSet, ParentViewSet,SubjectViewSet,
-     modules_list, module_lessons,billing_dashboard, invoice_detail
+     modules_list, module_lessons,billing_dashboard, invoice_detail,
+         gamification_summary,
+    badges_view, badge_detail,
+    achievements_view, achievement_detail,
+    gamification_leaderboard,
 )
 from rest_framework.routers import DefaultRouter
 
@@ -29,6 +33,13 @@ urlpatterns = [
 
     path("api/admin/billing/dashboard", billing_dashboard, name="billing_dashboard"),
     path("api/admin/billing/invoices/<int:invoice_id>", invoice_detail, name="invoice_detail"),
+
+    path("api/admin/gamification/summary", gamification_summary),
+    path("api/admin/gamification/badges", badges_view),
+    path("api/admin/gamification/badges/<int:badge_id>", badge_detail),
+    path("api/admin/gamification/achievements", achievements_view),
+    path("api/admin/gamification/achievements/<int:achievement_id>", achievement_detail),
+    path("api/admin/gamification/leaderboard", gamification_leaderboard),
 ]
 
 # append, don't overwrite

@@ -1,6 +1,6 @@
 from orgs.models import OrganizationMembership,Organization
 from academics.models import StudentProfile,TeacherProfile,Classroom, Subject
-from gamification.models import Badge, BadgeAward, PointTransaction, Streak  
+from gamification.models import Badge, BadgeAward, PointTransaction, Streak,AchievementDefinition
 from django.db.models import Q, Sum, Count
 from django.utils import timezone
 from typing import Any, Dict, List, Optional,Literal, Tuple
@@ -9,9 +9,29 @@ from decimal import Decimal
 from django.shortcuts import _get_queryset
 from accounts.models import User
 from learning.models import Course, Module, Enrollment,Lesson,Module
+from calendar import monthrange
 
 StatusLiteral = Literal["active", "inactive", "suspended"]
 
+
+
+# ---------- helpers specific to this view ----------
+
+def _member_display_name(membership: OrganizationMembership) -> str:
+    if not membership:
+        return ""
+    u = membership.user
+    full = (getattr(u, "get_full_name", lambda: "")() or "").strip()
+    return full or u.email or f"user-{u.pk}"
+
+
+def _month_bounds(dt=None):
+    now = dt or timezone.now()
+    y, m = now.year, now.month
+    first = timezone.make_aware(datetime(y, m, 1, 0, 0, 0))
+    last_day = monthrange(y, m)[1]
+    last = timezone.make_aware(datetime(y, m, last_day, 23, 59, 59))
+    return first, last
 
 # ---------- helpers ----------
 
@@ -287,3 +307,49 @@ def _get_ids_from_payload(data, org):
             teacher_id = getattr(teacher, "id", None)
 
     return subject_id, classroom_id, teacher_id
+
+
+
+
+
+# ----------------------------------------
+# Helpers
+# ----------------------------------------
+
+def _int(v, default=0):
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+def _json_or_dict(value) -> dict:
+    if isinstance(value, dict):
+        return value
+    try:
+        return json.loads(value or "{}")
+    except Exception:
+        return {}
+
+def _badge_to_dict(b: Badge) -> dict:
+    return {
+        "id": b.id,
+        "name": b.name,
+        "icon_name": b.icon_name,
+        "color": b.color,
+        "points": b.points,
+        "criteria": b.criteria or "",
+        "rules": b.rules or {},
+    }
+
+def _ach_to_dict(a: AchievementDefinition) -> dict:
+    return {
+        "id": a.id,
+        "code": a.code,
+        "title": a.title,
+        "description": a.description or "",
+        "icon": a.icon,
+        "category": a.category,
+        "target_value": a.target_value,
+        "points": a.points,
+        "is_active": bool(a.is_active),
+    }

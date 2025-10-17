@@ -30,6 +30,17 @@ from learning.models import Course
 from learning.models import Lesson
 from academics.models import StudentProfile, TeacherProfile
 from .models import CodeSnippet, CodeSubmission, CodeComment
+from assessments.models import TestAttempt, Test
+import os
+from .models import CodeSnippet, CodeSubmission, CodeComment,CodeFile
+from academics.models import Classroom, StudentProfile,TeacherProfile,Subject,ParentProfile, ParentChildLink
+from orgs.models import Organization, OrganizationMembership
+from core.utils import (
+    StatusLiteral, _resolve_org, _status_from_user_membership,_apply_status_to_user_membership,
+    _avatar_url_for,_get_or_create_parent_membership,_is_admin
+)
+from django.db import transaction
+from accounts.models import User
 
 
 # --- Model classes collected from project ---
@@ -130,7 +141,6 @@ class ParentProfile(TimeStampedModel):
             return []
 
         plan = subscription.plan
-        print(plan, " pppp")
         billing_days = self._billing_period_days()
 
         if self.last_billed_at:
@@ -273,6 +283,117 @@ class AdminAccess(models.Model):
         # Ensure clean() runs on every save
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+
+class ParentProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="parent_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="parents")
+    organization_subscription = models.ForeignKey(
+        OrganizationSubscription,
+        on_delete=models.CASCADE,
+        related_name="parent_subs",
+        blank=True,
+        null=True,
+    )
+    address = models.TextField(blank=True)
+
+    # use TimeStampedModel.created_at (no new field needed)
+    last_billed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Parent: {self.user.get_full_name() or self.user.username}"
+
+    def _billing_period_days(self):
+        """Return billing period in days (int). default to 30 if parsing fails."""
+        plan = getattr(self.organization_subscription, "plan", None)
+        if not plan:
+            return 30
+        try:
+            return int(plan.billing_period)
+        except Exception:
+            return 30
+
+    def _invoice_number_for(self, issued_at):
+        """Generate a unique invoice number — change format if desired."""
+        ts = int(time.time())
+        token = secrets.token_hex(4)
+        sub_id = self.organization_subscription.id if self.organization_subscription else "none"
+        return f"PINV-{sub_id}-{self.id}-{ts}-{token}"
+
+    def generate_subscription_invoices(self, now=None):
+        now = now or timezone.now()
+
+        subscription = self.organization_subscription
+        if not subscription:
+            return []
+
+        if subscription.status != OrganizationSubscription.Status.ACTIVE:
+            return []
+
+        plan = subscription.plan
+        print(plan, " pppp")
+        billing_days = self._billing_period_days()
+
+        if self.last_billed_at:
+            next_due = self.last_billed_at + timedelta(days=billing_days)
+        else:
+            next_due = getattr(self, "created_at", None) or now
+
+        if timezone.is_naive(next_due):
+            next_due = timezone.make_aware(next_due)
+
+        created_invoices = []
+        max_iterations = 24
+        iterations = 0
+        
+        """
+        sub_end_datetime = None
+        if subscription.end_date:
+            sub_end_datetime = timezone.make_aware(
+                datetime.datetime.combine(subscription.end_date, datetime.time.max)
+            )
+
+        """
+        # Prepare/get parent membership once (we'll attach it to all created invoices)
+        # Option: create membership automatically if not present.
+        membership, _ = OrganizationMembership.objects.get_or_create(
+            user=self.user,
+            organization=self.organization,
+            role=OrganizationMembership.Role.PARENT,
+            defaults={"is_active": True}
+        )
+        # Note: get_or_create honors the unique_together ("user","organization","role")
+        print(iterations, " iterations ",max_iterations)
+        while iterations < max_iterations and next_due <= now:
+            #if sub_end_datetime and next_due > sub_end_datetime:
+                #break
+
+            issued_at = next_due
+            amount = Decimal(getattr(plan, "price", 0) or 0)
+
+            inv = SubscriptionInvoice(
+                organization_membership=membership,   # attach parent membership
+                subscription=subscription,
+                number=self._invoice_number_for(issued_at),
+                amount=amount,
+                currency=getattr(subscription, "currency", "NGN") if hasattr(subscription, "currency") else "NGN",
+                issued_at=issued_at,
+                due_at=issued_at + timedelta(days=billing_days),
+                status=SubscriptionInvoice.Status.ACTIVE,
+                meta={"generated_for": "parent_profile", "parent_profile_id": self.id},
+            )
+
+            with transaction.atomic():
+                inv.save()                    # validation will now accept parent role
+                created_invoices.append(inv)
+                self.last_billed_at = issued_at
+                self.save(update_fields=["last_billed_at"])
+
+            next_due = next_due + timedelta(days=billing_days)
+            iterations += 1
+
+        return created_invoices
 
 
 
@@ -1133,3 +1254,540 @@ class Badge(NamedModel):
     color = models.TextField(blank=True)
     points = models.PositiveIntegerField(default=0)
     rules = models.JSONField(default=dict, blank=True)
+
+
+
+class TestMiniSerializer(serializers.ModelSerializer):
+    course_id = serializers.IntegerField(source="course_id", read_only=True)
+    course_name = serializers.CharField(source="course.name", read_only=True)
+
+    class Meta:
+        model = Test
+        fields = [
+            "id",
+            "title",
+            "duration_minutes",
+            "total_marks",
+            "visibility",
+            "start_at",
+            "end_at",
+            "course_id",
+            "course_name",
+        ]
+        read_only_fields = fields
+
+
+
+class TestAttemptSerializer(serializers.ModelSerializer):
+    # Compact info about the test (read-only)
+    test = TestMiniSerializer(read_only=True)
+
+    # Also expose test_id directly for convenience
+    test_id = serializers.IntegerField(source="test.id", read_only=True)
+
+    # Useful computed flags/fields
+    is_submitted = serializers.SerializerMethodField()
+    is_graded = serializers.SerializerMethodField()
+    is_open_now = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TestAttempt
+        fields = [
+            "id",
+            "test_id",
+            "test",
+            "student",        # will render the student id; mark write-only if you never want to expose it
+            "started_at",
+            "submitted_at",
+            "score",
+            "status",
+            "answers",        # JSON of answers; keep if you want to show what the student picked
+            "is_submitted",
+            "is_graded",
+            "is_open_now",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "test_id",
+            "test",
+            "student",
+            "started_at",
+            "submitted_at",
+            "score",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_is_submitted(self, obj):
+        return bool(obj.submitted_at) or obj.status in {"submitted", "graded"}
+
+    def get_is_graded(self, obj):
+        return obj.status == "graded"
+
+    def get_is_open_now(self, obj):
+        """
+        Mirrors the filter you used in the endpoint:
+        (start_at is null or <= now) AND (end_at is null or >= now)
+        """
+        now = timezone.now()
+        t = obj.test
+        start_ok = (t.start_at is None) or (t.start_at <= now)
+        end_ok = (t.end_at is None) or (t.end_at >= now)
+        return start_ok and end_ok
+
+
+
+class CodeFile(TimeStampedModel):
+    """
+    Binary/text file a student can upload for use in the code IDE.
+    """
+    student = models.ForeignKey(
+        StudentProfile, on_delete=models.CASCADE, related_name="code_files"
+    )
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.SET_NULL, null=True, blank=True, related_name="code_files"
+    )
+    # optional reference text/title; IDE can show this
+    label = models.CharField(max_length=255, blank=True)
+    file = models.FileField(upload_to=codefile_upload_to, max_length=512)
+    original_name = models.CharField(max_length=255)  # client filename
+    content_type = models.CharField(max_length=127, blank=True)
+    size_bytes = models.BigIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["lesson", "student"])]
+
+    def __str__(self):
+        return f"[CodeFile] student={self.student_id} name={self.original_name}"
+
+    @property
+    def url(self) -> str:
+        # usable by the IDE via MEDIA_URL/S3 URL
+        try:
+            return self.file.url
+        except Exception:
+            return ""
+
+
+
+class CodeFileSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = CodeFile
+        fields = [
+            "id", "created_at", "updated_at",
+            "student", "lesson", "label",
+            "original_name", "content_type", "size_bytes",
+            "url",
+        ]
+        read_only_fields = [
+            "id", "created_at", "updated_at", "student",
+            "original_name", "content_type", "size_bytes", "url",
+        ]
+
+    def get_url(self, obj):
+        request = self.context.get("request")
+        file_url = obj.url  # this gives "/media/...."
+        if request is not None:
+            return request.build_absolute_uri(file_url)
+        return file_url
+
+
+
+class AchievementDefinition(TimeStampedModel):
+    """
+    DB-driven configuration for each achievement tile in the UI.
+    code: a stable key your backend uses to compute progress.
+    target_value: the numeric goal (e.g. 30 days streak, 3 courses, 10 exercises, 5 quizzes @≥90%).
+    points: how many points the student gets for unlocking this achievement (UI display + award logic if you add).
+    """
+    class Code(models.TextChoices):
+        FIRST_STEPS       = "first_steps", "First Steps"
+        CODE_WARRIOR      = "code_warrior", "Code Warrior"
+        QUIZ_MASTER       = "quiz_master", "Quiz Master"
+        STREAK_CHAMPION   = "streak_champion", "Streak Champion"
+        COURSE_CONQUEROR  = "course_conqueror", "Course Conqueror"
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="achievement_defs", null=True, blank=True)
+    code = models.CharField(max_length=64, choices=Code.choices, unique=True)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    icon = models.CharField(max_length=64, default="star")      # e.g. 'trophy', 'target', 'zap'
+    category = models.CharField(max_length=64, default="General")
+    target_value = models.PositiveIntegerField(null=True, blank=True)  # the numeric goal; NULL for achievements without a numeric target
+    points = models.PositiveIntegerField(default=0)             # points shown for this achievement
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["code"]
+
+    def __str__(self):
+        return f"{self.code} ({self.title})"
+
+
+
+class Badge(NamedModel):
+    organization = models.ForeignKey(Organization,
+     on_delete=models.CASCADE, 
+     related_name="badges", blank=True, null=True)
+    # keep existing file/icon if you like; we add string-based icon/color for your UI:
+    icon_name = models.CharField(max_length=64, default="medal")     # e.g. 'gem', 'crown', 'trophy'
+    color = models.CharField(max_length=64, default="bg-gray-400")   # Tailwind class used in UI
+    points = models.PositiveIntegerField(default=0)                   # points threshold (for progress bar)
+    criteria = models.TextField(blank=True)
+    rules = models.JSONField(default=dict, blank=True)               # optional, if you want rule JSON
+
+    class Meta:
+        verbose_name = "Badge"
+        verbose_name_plural = "Badges"
+        indexes = [models.Index(fields=["organization", "points"])]
+
+    def __str__(self):
+        return self.name
+
+
+
+class BadgeAward(TimeStampedModel):
+    badge = models.ForeignKey(Badge, on_delete=models.CASCADE, related_name="awards")
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="badge_awards")
+    awarded_at = models.DateTimeField(auto_now_add=True)
+    reason = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        unique_together = ("badge", "student")
+        indexes = [models.Index(fields=["student", "badge"])]
+
+
+
+class Material(TimeStampedModel):
+    class Kind(models.TextChoices):
+        VIDEO = "video", "Video"
+        AUDIO = "audio", "Audio"
+        PDF = "pdf", "PDF"
+        DOC = "doc", "Document"
+        IMAGE = "image", "Image"
+        OTHER = "other", "Other"
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="materials")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="materials")
+    title = models.CharField(max_length=255)
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    file = models.FileField(upload_to="materials/files/", blank=True, null=True)
+    cover_image = models.ImageField(upload_to="materials/covers/", blank=True, null=True)
+    url = models.URLField(blank=True)
+    tags = models.JSONField(default=list, blank=True)
+    is_public = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.title
+
+
+
+class SubjectListItemSerializer(serializers.ModelSerializer):
+    """Read serializer with the counters your cards need."""
+    courses = serializers.IntegerField(read_only=True)
+    teachers = serializers.IntegerField(read_only=True)
+    students = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Subject
+        fields = ["id", "name", "code", "courses", "teachers", "students"]
+
+
+
+class ParentListSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
+    children_count = serializers.IntegerField(read_only=True)
+    subscription_status = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField(help_text="active | inactive | suspended")
+
+    class Meta:
+        model = ParentProfile
+        fields = [
+            "id", "name", "email", "phone",
+            "children_count", "subscription_status",
+            "avatar_url", "status",
+            "address", "created_at", "updated_at",
+        ]
+
+    def get_name(self, obj):
+        u = obj.user
+        return (getattr(u, "get_full_name", lambda: "")() or u.email or str(u.pk))
+
+    def get_email(self, obj):
+        return obj.user.email
+
+    def get_phone(self, obj):
+        return obj.user.phone
+
+    def get_subscription_status(self, obj):
+        sub = obj.organization_subscription
+        return getattr(sub, "status", None)
+
+    def get_avatar_url(self, obj):
+        return _avatar_url_for(obj.user, self.context["request"])
+
+    def get_status(self, obj) -> StatusLiteral:
+        membership = OrganizationMembership.objects.filter(
+            user=obj.user, organization=obj.organization, role=OrganizationMembership.Role.PARENT
+        ).first()
+        return _status_from_user_membership(obj.user, membership)
+
+
+
+class ParentDetailSerializer(ParentListSerializer):
+    children = serializers.SerializerMethodField()
+
+    class Meta(ParentListSerializer.Meta):
+        fields = ParentListSerializer.Meta.fields + ["children"]
+
+    def get_children(self, obj):
+        # Use mini serializer with full name
+        qs = StudentProfile.objects.select_related("user").filter(parent_links__parent=obj).distinct()
+        return StudentMiniSerializer(qs, many=True).data
+
+
+
+class ParentWriteSerializer(serializers.Serializer):
+    """
+    Used for create/update.
+    Allows admin to update avatar on the related User.
+    """
+    # User fields
+    name = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False)  # required on create
+    phone = serializers.CharField(required=False, allow_blank=True)
+    # ParentProfile fields
+    address = serializers.CharField(required=False, allow_blank=True)
+    organization_subscription_id = serializers.IntegerField(required=False, allow_null=True)
+    # UI status chip (optional)
+    status = serializers.ChoiceField(choices=["active", "inactive", "suspended"], required=False)
+    # Avatar (admin only)
+    avatar = serializers.ImageField(required=False, allow_null=True)
+
+    def _is_creating(self) -> bool:
+        """
+        True only for actual POST creates (no instance bound).
+        This avoids misfires during GET/OPTIONS/schema, etc.
+        """
+        req = self.context.get("request")
+        if req and req.method.upper() == "POST" and self.instance is None:
+            return True
+        # keep supporting your existing flag, but don't rely on it
+        return bool(self.context.get("creating", False))
+
+    def validate(self, attrs):
+        # only enforce 'email' when creating
+        if self._is_creating() and not attrs.get("email"):
+            raise serializers.ValidationError({"email": "Email is required."})
+
+        # only enforce avatar rule if an avatar was provided
+        request = self.context.get("request")
+        if "avatar" in attrs and attrs["avatar"] is not None:
+            if not _is_admin(request):
+                raise serializers.ValidationError({"avatar": "Only admins can update avatar."})
+        return attrs
+
+    def create(self, validated_data):
+        request = self.context["request"]
+        org: Organization = self.context["org"]
+
+        email = validated_data["email"].lower().strip()
+        name = validated_data.get("name", "")
+        phone = validated_data.get("phone", "")
+        address = validated_data.get("address", "")
+        avatar: UploadedFile | None = validated_data.get("avatar")
+        status_value: StatusLiteral | None = validated_data.get("status")
+
+        org_sub_id = validated_data.get("organization_subscription_id")
+        org_sub = None
+        if org_sub_id:
+            org_sub = OrganizationSubscription.objects.filter(id=org_sub_id, organization=org).first()
+
+        with transaction.atomic():
+            # Create or attach user
+            user, created = User.objects.get_or_create(email=email, defaults={"is_active": True})
+            # Fill in names if given
+            if name:
+                # naive "split" to first_name/last_name if you use Django's standard fields
+                try:
+                    first, *rest = name.strip().split()
+                    user.first_name = first
+                    user.last_name = " ".join(rest)
+                except Exception:
+                    pass
+            if phone:
+                user.phone = phone
+            if avatar and _is_admin(request):
+                user.avatar = avatar
+            user.save()
+
+            # membership
+            membership = _get_or_create_parent_membership(user, org)
+
+            # status mapping (if UI provided)
+            if status_value:
+                _apply_status_to_user_membership(status_value, user, membership)
+                user.save(update_fields=["is_active"])
+                membership.save(update_fields=["is_active"])
+
+            parent = ParentProfile.objects.create(
+                user=user,
+                organization=org,
+                organization_subscription=org_sub,
+                address=address,
+            )
+        return parent
+
+    def update(self, instance: ParentProfile, validated_data):
+        request = self.context["request"]
+        org: Organization = self.context["org"]
+
+        name = validated_data.get("name", None)
+        phone = validated_data.get("phone", None)
+        address = validated_data.get("address", None)
+        org_sub_id = validated_data.get("organization_subscription_id", None)
+        avatar: UploadedFile | None = validated_data.get("avatar", None)
+        status_value: StatusLiteral | None = validated_data.get("status")
+
+        with transaction.atomic():
+            user = instance.user
+            if name is not None:
+                try:
+                    first, *rest = name.strip().split()
+                    user.first_name = first
+                    user.last_name = " ".join(rest)
+                except Exception:
+                    pass
+            if phone is not None:
+                user.phone = phone
+            if avatar is not None:
+                if not _is_admin(request):
+                    raise serializers.ValidationError({"avatar": "Only admins can update avatar."})
+                user.avatar = avatar
+            user.save()
+
+            membership = _get_or_create_parent_membership(user, org)
+            if status_value:
+                _apply_status_to_user_membership(status_value, user, membership)
+                user.save(update_fields=["is_active"])
+                membership.save(update_fields=["is_active"])
+
+            if org_sub_id is not None:
+                if org_sub_id:
+                    org_sub = OrganizationSubscription.objects.filter(id=org_sub_id, organization=org).first()
+                    instance.organization_subscription = org_sub
+                else:
+                    instance.organization_subscription = None
+
+            if address is not None:
+                instance.address = address
+
+            instance.save()
+
+        return instance
+
+
+
+class StudentReadSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    email = serializers.EmailField()
+    classroom = serializers.CharField(allow_null=True)
+    admissionNo = serializers.CharField(source="admission_no", allow_blank=True)
+    status = serializers.CharField()
+    avatar = serializers.CharField(allow_null=True, required=False)
+
+
+
+class StudentWriteSerializer(serializers.Serializer):
+    """
+    Used for create/update from the modal.
+    If 'id' is provided -> update, else -> create.
+    """
+    id = serializers.IntegerField(required=False)
+    name = serializers.CharField()
+    email = serializers.EmailField()
+    classroom = serializers.CharField(allow_blank=True, required=False)  # classroom name (e.g., "Grade 10A")
+    admissionNo = serializers.CharField(required=False, allow_blank=True)
+    status = serializers.ChoiceField(choices=["active", "inactive", "suspended"], default="active")
+
+
+
+class TeacherListSerializer(serializers.ModelSerializer):
+    # flat UI fields
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.SerializerMethodField()
+    email = serializers.EmailField(source="user.email", read_only=True)
+    experience = serializers.IntegerField()
+    bio = serializers.CharField()
+    specialties = serializers.SerializerMethodField()
+    courses = serializers.IntegerField(source="courses_count", read_only=True)
+    avatarUrl = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TeacherProfile
+        fields = ["id", "name", "email", "experience", "bio", "specialties", "courses", "avatarUrl", "status"]
+
+    def get_name(self, obj):
+        u = obj.user
+        return (u.get_full_name() or u.email or str(u.pk))
+
+    def get_specialties(self, obj):
+        return list(obj.specialties.values_list("name", flat=True))
+
+    def get_avatarUrl(self, obj):
+        u = obj.user
+        return u.avatar.url if getattr(u, "avatar", None) else ""
+
+    def get_status(self, obj):
+        org = obj.organization
+        mem = OrganizationMembership.objects.filter(
+            user=obj.user, organization=org, role=OrganizationMembership.Role.TEACHER
+        ).first()
+        return _status_from_user_membership(obj.user, mem)
+
+
+
+class TeacherWriteSerializer(serializers.Serializer):
+    """
+    Input serializer for create/update.
+    Accepts optional avatar upload (multipart) and optional status chip.
+    """
+    # User fields
+    name = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=True)
+    phone = serializers.CharField(required=False, allow_blank=True)
+    # Profile fields
+    bio = serializers.CharField(required=False, allow_blank=True)
+    experience = serializers.IntegerField(required=True, min_value=0)
+    specialties = serializers.ListField(
+        child=serializers.CharField(), required=False
+    )
+    # status chip (active/inactive/suspended)
+    status = serializers.ChoiceField(choices=["active", "inactive", "suspended"], required=False)
+    # avatar upload (admin can update even if UI didn’t show an input)
+    avatar = serializers.ImageField(required=False, allow_null=True)
+
+    def validate_specialties(self, value):
+        # Free text from UI -> must exist in Subject for this org
+        org: Organization = self.context["org"]
+        names = [v.strip() for v in value if v.strip()]
+        existing = set(Subject.objects.filter(organization=org, name__in=names).values_list("name", flat=True))
+        missing = [n for n in names if n not in existing]
+        if missing:
+            raise serializers.ValidationError(
+                f"Unknown specialties for this organization: {', '.join(missing)}"
+            )
+        return names
