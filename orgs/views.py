@@ -77,32 +77,11 @@ from core.utils import (
     _member_display_name,
     _month_bounds,
     
+    
 )
 
 from calendar import monthrange
 
-
-# ---------- helpers specific to this view ----------
-
-def _member_display_name(membership: OrganizationMembership) -> str:
-    if not membership:
-        return ""
-    u = membership.user
-    full = (getattr(u, "get_full_name", lambda: "")() or "").strip()
-    return full or u.email or f"user-{u.pk}"
-
-
-def _month_bounds(dt=None):
-    now = dt or timezone.now()
-    y, m = now.year, now.month
-    first = timezone.make_aware(datetime(y, m, 1, 0, 0, 0))
-    last_day = monthrange(y, m)[1]
-    last = timezone.make_aware(datetime(y, m, last_day, 23, 59, 59))
-    return first, last
-
-# ----------------------------------------
-# Summary (stat cards)
-# ----------------------------------------
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -168,6 +147,7 @@ def gamification_summary(request):
         traceback.print_exc()
         return Response({"detail": "Unexpected error", "error": str(e)},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 # ----------------------------------------
 # Badges: list/create and update

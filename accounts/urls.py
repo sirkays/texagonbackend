@@ -19,4 +19,6 @@ urlpatterns = [
 
     path('api/set-admin/access-orgs/', views.set_admin_access_orgs, name='set_admin_access_orgs'),
     path('api/fetch-admin/access-orgs/', views.fetch_admin_access_orgs, name='fetch_admin_access_orgs'),
+
+    path('api/teacher/overview/', views.teacher_dashboard_overview, name='teacher_dashboard_overview'),
 ]

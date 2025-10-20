@@ -137,10 +137,9 @@ def password_reset_request_view(request):
     # Try to find user by email (case-insensitive)
     try:
         user = User.objects.get(email__iexact=email, is_active=True)
-        print(user, " acccount...")
     except User.DoesNotExist:
         # Return generic success to avoid user enumeration
-        return Response({"detail": "If an account exists, a reset link has been sent."})
+        return Response({"detail": "Account not found."}, status=status.HTTP_404_NOT_FOUND)
 
     # Issue short-lived reset token and email it
     st = _issue_password_reset_token(user, hours_valid=hours_valid, ip=request.META.get("REMOTE_ADDR"))

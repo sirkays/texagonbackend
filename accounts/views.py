@@ -1,7 +1,10 @@
 from datetime import date, datetime, timedelta
-
 from django.conf import settings
-from django.db.models import Avg, Sum, Count, F, Q, Max
+from django.db import models
+from django.db.models import (
+    Avg, Sum, Count, Min, Max, F, Q, Case, When, FloatField, DecimalField
+)
+from decimal import Decimal
 from django.shortcuts import render
 from django.utils import timezone
 
@@ -10,19 +13,23 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework_api_key.permissions import HasAPIKey
 
-from api.retrieve_token import get_token_from_header
 from api.authentication import SessionTokenAuthentication
+from api.models import SessionToken
+from api.retrieve_token import get_token_from_header
 
 from orgs.models import OrganizationMembership, Organization
-from academics.models import ParentProfile, StudentProfile, ParentChildLink, Classroom
-from learning.models import Course, Enrollment, Lesson, Bookmark
+from academics.models import (
+    ParentProfile, StudentProfile, ParentChildLink, Classroom, TeacherProfile
+)
+from learning.models import Course, Enrollment, Lesson, Bookmark, Material
 from assessments.models import Test, TestAttempt
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak
 from billing.models import SubscriptionInvoice, SubscriptionPayment
 from notifications.models import Notification
-from api.models import SessionToken
+
 from .models import AdminAccess
-from core.utils import get_object_or_404_ajax
+from core.utils import _month_bounds, _resolve_org, get_object_or_404_ajax
+
 
 
 @api_view(["GET"])
@@ -99,6 +106,85 @@ def _level_for_xp(xp: int):
         "xp_to_next": to_next,
         "progress_to_next_pct": pct,
     }
+
+
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def teacher_dashboard_overview(request):
+    try:
+        user = request.user
+        org, err = _resolve_org(request)
+        if err:
+            return err
+        teacher = get_object_or_404_ajax(TeacherProfile, user=user, organization=org)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_400_BAD_REQUEST)
+        now = timezone.now()
+        current_first, current_last = _month_bounds(now)
+        prev_last = current_first - timedelta(seconds=1)
+        prev_first, _ = _month_bounds(prev_last)
+        stats = []
+        current_students = Enrollment.objects.filter(course__teacher=teacher).values('student').distinct().count()
+        prev_students = Enrollment.objects.filter(course__teacher=teacher, created_at__lt=current_first).values('student').distinct().count()
+        growth_students = current_students - prev_students
+        change_students = f"+{growth_students}" if growth_students > 0 else str(growth_students)
+        stats.append({"title": "Total Students", "value": str(current_students), "change": change_students})
+        current_courses = Course.objects.filter(teacher=teacher, is_active=True).count()
+        new_courses = Course.objects.filter(teacher=teacher, is_active=True, created_at__range=(current_first, current_last)).count()
+        change_courses = f"+{new_courses}"
+        stats.append({"title": "Active Courses", "value": str(current_courses), "change": change_courses})
+        current_tests = Test.objects.filter(course__teacher=teacher).count()
+        new_tests = Test.objects.filter(course__teacher=teacher, created_at__range=(current_first, current_last)).count()
+        change_tests = f"+{new_tests}"
+        stats.append({"title": "CBT Tests Created", "value": str(current_tests), "change": change_tests})
+        current_materials = Material.objects.filter(owner=user).count()
+        new_materials = Material.objects.filter(owner=user, created_at__range=(current_first, current_last)).count()
+        change_materials = f"+{new_materials}"
+        stats.append({"title": "Materials Uploaded", "value": str(current_materials), "change": change_materials})
+        recent_days = now - timedelta(days=7)
+        activities = []
+        for mat in Material.objects.filter(owner=user, created_at__gte=recent_days).order_by('-created_at')[:5]:
+            activities.append({"type": "upload", "title": mat.title, "action": "uploaded successfully", "time": mat.created_at.isoformat()})
+        enroll_qs = Enrollment.objects.filter(course__teacher=teacher, created_at__gte=recent_days).values('course_id').annotate(count=Count('id'), last_time=Max('created_at')).order_by('-last_time')
+        for row in enroll_qs[:5]:
+            course = Course.objects.filter(id=row['course_id']).first()
+            if course:
+                activities.append({"type": "course", "title": course.name, "action": f"new enrollment: {row['count']} students", "time": row['last_time'].isoformat()})
+        attempt_qs = TestAttempt.objects.filter(test__course__teacher=teacher, submitted_at__gte=recent_days).values('test_id').annotate(count=Count('id'), last_time=Max('submitted_at')).order_by('-last_time')
+        for row in attempt_qs[:5]:
+            test = Test.objects.filter(id=row['test_id']).first()
+            if test:
+                activities.append({"type": "test", "title": test.title, "action": f"completed by {row['count']} students", "time": row['last_time'].isoformat()})
+        activities.sort(key=lambda x: x['time'], reverse=True)
+        recent_activity = activities[:3]
+        course_completion_rate = Enrollment.objects.filter(course__teacher=teacher).aggregate(avg=Avg('progress_pct'))['avg'] or 0
+        course_completion_rate = int(course_completion_rate)
+        student_satisfaction = 4.8
+        pass_rate = TestAttempt.objects.filter(test__course__teacher=teacher).aggregate(pass_rate=Avg(Case(When(score__gte=F('test__total_marks') * Decimal('0.5'), then=1.0), default=0.0, output_field=FloatField())))['pass_rate'] or 0
+        test_pass_rate = int(pass_rate * 100)
+        performance = {"course_completion_rate": course_completion_rate, "student_satisfaction": student_satisfaction, "test_pass_rate": test_pass_rate}
+        top_qs = Course.objects.filter(teacher=teacher).annotate(students=Count('enrollments', distinct=True), progress=Avg('enrollments__progress_pct')).order_by('-students')[:3]
+        top_courses = []
+        for c in top_qs:
+            top_courses.append({"title": c.name, "students": c.students, "rating": 4.8, "revenue": None, "progress": int(c.progress or 0)})
+        recent_mats = Material.objects.filter(owner=user).order_by('-created_at')[:3]
+        recent_materials = []
+        for m in recent_mats:
+            size_mb = m.file.size / (1024 * 1024) if m.file and hasattr(m.file, 'size') else 0
+            size_str = f"{size_mb:.1f} MB" if size_mb else "0 MB"
+            views = 0
+            recent_materials.append({"title": m.title, "type": m.kind.capitalize(), "size": size_str, "views": views if m.kind in ['video', 'audio'] else None, "downloads": views if m.kind not in ['video', 'audio'] else None})
+        payload = {"stats": stats, "recent_activity": recent_activity, "performance": performance, "top_courses": top_courses, "recent_materials": recent_materials}
+        return Response(payload, status=status.HTTP_200_OK)
+    except Exception as e:
+        print(e)
+    return Response({}, status=status.HTTP_401_UNAUTHORIZED)
+
+
 
 
 @api_view(["GET"])
