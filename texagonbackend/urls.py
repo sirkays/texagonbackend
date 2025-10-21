@@ -17,6 +17,7 @@ urlpatterns = [
     path('billing/', include('billing.urls')),
     path('orgs/', include('orgs.urls')),
     path('code-ide/', include('codeide.urls')),
+    path('store/api/', include('store.urls')),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

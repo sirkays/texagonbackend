@@ -11,7 +11,7 @@ from rest_framework.response import Response
 
 from rest_framework_api_key.permissions import HasAPIKey
 
-from .auth import SessionTokenAuthentication  # your custom class
+from api.authentication import SessionTokenAuthentication  # your custom class
 
 # Models
 from store.models import (
@@ -23,7 +23,8 @@ from store.models import (
     ReturnAuthorization, ReturnItem,
     ShippingCarrier, ShippingMethod,
 )
-from accounts.models import User, SessionToken  # session token with fields: key, user, is_active, revoke()
+from accounts.models import User
+from api.models import SessionToken 
 
 # ---------- helpers ----------
 
@@ -79,6 +80,7 @@ def _product_to_dict(p: Product, request=None) -> dict:
         "rating_count": p.rating_count,
         "image": image_url,
         "bnpl_enabled": getattr(p, "bnpl_enabled", True),
+        "description":p.description
     }
 
 def _cart_to_dict(cart: Cart) -> dict:

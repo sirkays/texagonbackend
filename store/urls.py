@@ -40,4 +40,18 @@ urlpatterns = [
 
     # digital entitlements
     path("me/entitlements", views.entitlements_list),
+
+    # Customer-facing
+    path("orders/<uuid:order_id>/shipments/", views.order_shipments_list, name="order-shipments-list"),
+    path("shipments/<uuid:shipment_id>/", views.shipment_detail, name="shipment-detail"),
+    path("shipments/track/", views.track_by_number, name="shipment-track-by-number"),
+
+    # Staff/Ops
+    path("orders/<uuid:order_id>/shipments/create/", views.shipment_create, name="shipment-create"),
+    path("shipments/<uuid:shipment_id>/set-tracking/", views.shipment_set_tracking, name="shipment-set-tracking"),
+    path("shipments/<uuid:shipment_id>/status/", views.shipment_update_status, name="shipment-update-status"),
+    path("shipments/<uuid:shipment_id>/events/", views.shipment_add_event, name="shipment-add-event"),
+
+    # Webhook (carrier updates)
+    path("webhooks/tracking/", views.tracking_webhook, name="tracking-webhook"),
 ]
