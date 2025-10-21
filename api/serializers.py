@@ -44,13 +44,9 @@ from gamification.models import (
 from live.models import (
     LiveSession,
     TutoringBooking,
+    PrivateTutoring, AvailableDay
 )
-from store.models import (
-    ProductCategory,
-    Product,
-    Order,
-    OrderItem,
-)
+
 from billing.models import (
     SubscriptionPlan,
     OrganizationSubscription,
@@ -249,29 +245,6 @@ class TutoringBookingSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class ProductCategorySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProductCategory
-        fields = "__all__"
-
-
-class ProductSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Product
-        fields = "__all__"
-
-
-class OrderSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Order
-        fields = "__all__"
-
-
-class OrderItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = OrderItem
-        fields = "__all__"
-
 
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
     class Meta:
@@ -308,3 +281,47 @@ class SessionTokenSerializer(serializers.ModelSerializer):
         model = SessionToken
         fields = ["key", "created_at", "expires_at", "is_active", "meta"]
         read_only_fields = ["key", "created_at", "expires_at", "is_active", "meta"]
+
+
+
+
+class AvailableDaySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AvailableDay
+        fields = ['day']  # Only include 'day' since private_tutoring is handled in create
+        extra_kwargs = {
+            'day': {'required': True}
+        }
+
+class PrivateTutoringSerializer(serializers.ModelSerializer):
+    available_days = AvailableDaySerializer(many=True, required=False)
+
+    class Meta:
+        model = PrivateTutoring
+        fields = '__all__'
+
+    def create(self, validated_data):
+        days_data = validated_data.pop('available_days', [])
+        pt = PrivateTutoring.objects.create(**validated_data)
+        for day_data in days_data:
+            AvailableDay.objects.create(private_tutoring=pt, **day_data)
+        return pt
+
+class TutoringBookingTeacherSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    course_name = serializers.SerializerMethodField()
+
+    def get_student_name(self, obj):
+        return obj.student.user.get_full_name() or obj.student.user.email
+
+    def get_course_name(self, obj):
+        return obj.private_tutoring.course.name if obj.private_tutoring else ''
+
+    class Meta:
+        model = TutoringBooking
+        fields = [
+            'id', 'private_tutoring', 'teacher', 'student', 'student_name',
+            'duration_hours', 'price', 'status', 'notes', 'completed_date',
+            'course_name', 'created_at'
+        ]
+

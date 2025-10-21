@@ -26,10 +26,9 @@ from .serializers import (
     TestSerializer, QuestionSerializer, ChoiceSerializer, TestAttemptSerializer, AssignmentSerializer, SubmissionSerializer,
     AttendanceSessionSerializer, AttendanceRecordSerializer,
     BadgeSerializer, BadgeAwardSerializer, PointTransactionSerializer, StreakSerializer,
-    LiveSessionSerializer, TutoringBookingSerializer,
-    ProductCategorySerializer, ProductSerializer, OrderSerializer, OrderItemSerializer,
+    LiveSessionSerializer, TutoringBookingSerializer,TutoringBookingTeacherSerializer,
     SubscriptionPlanSerializer, OrganizationSubscriptionSerializer, SubscriptionInvoiceSerializer, SubscriptionPaymentSerializer,
-    NotificationSerializer,
+    NotificationSerializer,PrivateTutoringSerializer
 )
 
 from orgs.models import Organization, OrganizationMembership, AcademicSession
@@ -42,17 +41,35 @@ from assessments.models import Test, Question, Choice, TestAttempt, Assignment, 
 from attendance.models import AttendanceSession, AttendanceRecord
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak
 from live.models import PrivateTutoring, AvailableDay, TutoringBooking, LiveSession
-from store.models import ProductCategory, Product, Order, OrderItem
 from billing.models import (
     SubscriptionPlan, OrganizationSubscription, SubscriptionInvoice, SubscriptionPayment,
 )
 from notifications.models import Notification
-
-from core.utils import _get_teacher_for_user, _get_student_for_user,get_object_or_404_ajax,_resolve_org
+from django.shortcuts import get_object_or_404
+from core.utils import (_get_teacher_for_user, _get_student_for_user,get_object_or_404_ajax,
+    _resolve_org,_to_int,_is_org_admin_or_teacher)
 from django.urls import reverse
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([])
+def login_view(request):
+    email = request.data.get("email") or request.data.get("username")  # accept either key during rollout
+    password = request.data.get("password")
+    hours_valid = int(request.data.get("hours_valid") or 24)
+
+    if not email or not password:
+        return Response({"detail": "email and password are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = authenticate(request, email=email, password=password)  # <— key change
+    if not user:
+        return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    st = SessionToken.create_for_user(user, hours_valid=hours_valid, ip=request.META.get("REMOTE_ADDR"))
+    return Response({"sessionToken": st.key, "expiresAt": st.expires_at.isoformat(), "userId": user.id})
 
 
 
@@ -211,24 +228,6 @@ def password_reset_confirm_view(request):
 
     return Response(response_data, status=status.HTTP_200_OK)
 
-
-@api_view(["POST"])
-@permission_classes([HasAPIKey])
-@authentication_classes([])
-def login_view(request):
-    email = request.data.get("email") or request.data.get("username")  # accept either key during rollout
-    password = request.data.get("password")
-    hours_valid = int(request.data.get("hours_valid") or 24)
-
-    if not email or not password:
-        return Response({"detail": "email and password are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-    user = authenticate(request, email=email, password=password)  # <— key change
-    if not user:
-        return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
-
-    st = SessionToken.create_for_user(user, hours_valid=hours_valid, ip=request.META.get("REMOTE_ADDR"))
-    return Response({"sessionToken": st.key, "expiresAt": st.expires_at.isoformat(), "userId": user.id})
 
 
 @api_view(["POST"])
@@ -407,23 +406,6 @@ class LiveSessionViewSet(APIKeySessionViewSet):
 class TutoringBookingViewSet(APIKeySessionViewSet):
     queryset = TutoringBooking.objects.all()
     serializer_class = TutoringBookingSerializer
-
-
-class ProductCategoryViewSet(APIKeySessionViewSet):
-    queryset = ProductCategory.objects.all()
-    serializer_class = ProductCategorySerializer
-
-class ProductViewSet(APIKeySessionViewSet):
-    queryset = Product.objects.all()
-    serializer_class = ProductSerializer
-
-class OrderViewSet(APIKeySessionViewSet):
-    queryset = Order.objects.all()
-    serializer_class = OrderSerializer
-
-class OrderItemViewSet(APIKeySessionViewSet):
-    queryset = OrderItem.objects.all()
-    serializer_class = OrderItemSerializer
 
 
 class SubscriptionPlanViewSet(APIKeySessionViewSet):
@@ -993,3 +975,164 @@ def tutoring_stats(request):
         "average_rating": average_rating,
         "active_tutors": active_tutors,
     }, status=200)
+
+
+
+@api_view(["GET", "POST", "PATCH", "DELETE"])
+@authentication_classes([SessionTokenAuthentication])
+@permission_classes([HasAPIKey])
+def teacher_tutoring_bookings(request):
+    """
+    Endpoint for teacher tutoring bookings page.
+    - GET: List PrivateTutoring offerings (?tab=private) or TutoringBooking (?tab=upcoming|past)
+           with pagination (?page=1, ?limit=3)
+    - POST: Create PrivateTutoring offering (with available_days)
+    - PATCH: Update booking status (body: {"id": int, "status": str}) or PrivateTutoring status (body: {"id": int, "status": str})
+    - DELETE: Delete booking or PrivateTutoring (?id=int, ?tab=private|upcoming)
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Insufficient permissions."}, status=status.HTTP_403_FORBIDDEN)
+
+        if request.method == "GET":
+            tab = request.query_params.get("tab", "upcoming")
+            if tab not in ["upcoming", "past", "private"]:
+                return Response({"detail": "Invalid tab parameter. Use 'upcoming', 'past', or 'private'."},
+                               status=status.HTTP_400_BAD_REQUEST)
+
+            # Pagination parameters
+            page = _to_int(request.query_params.get("page", 1))
+            limit = _to_int(request.query_params.get("limit", 3))
+            start = (page - 1) * limit
+
+            if tab == "private":
+                # Handle PrivateTutoring for "Private Sessions" tab
+                qs = PrivateTutoring.objects.filter(teacher=teacher).select_related("course")
+                total = qs.count()
+                qs = qs[start:start + limit]
+                serializer = PrivateTutoringSerializer(qs, many=True)
+            else:
+                # Handle TutoringBooking for "Current Private Session" (upcoming) or "Past Sessions" (past)
+                qs = TutoringBooking.objects.filter(teacher=teacher).select_related(
+                    "student__user", "private_tutoring__course"
+                )
+                now = timezone.now()
+                if tab == "upcoming":
+                    qs = qs.filter(
+                        Q(status__in=["pending", "confirmed"]) &
+                        Q(completed_date__isnull=True) &
+                        Q(created_at__gte=now - timedelta(days=1))
+                    ).order_by("created_at")
+                else:  # past
+                    qs = qs.filter(
+                        Q(status__in=["completed", "cancelled"]) |
+                        Q(completed_date__lte=now)
+                    ).order_by("-completed_date", "-created_at")
+                total = qs.count()
+                qs = qs[start:start + limit]
+                serializer = TutoringBookingTeacherSerializer(qs, many=True)
+
+            return Response({
+                "results": serializer.data,
+                "total": total,
+                "page": page,
+                "pages": (total + limit - 1) // limit if limit > 0 else 0
+            })
+
+        elif request.method == "POST":
+            # Create PrivateTutoring (for "Private Sessions" tab)
+            data = request.data.copy()
+            data["teacher"] = teacher.id
+            serializer = PrivateTutoringSerializer(data=data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        elif request.method == "PATCH":
+            # Update status for TutoringBooking or PrivateTutoring
+            tab = request.query_params.get("tab", "upcoming")
+            if tab not in ["upcoming", "private"]:
+                return Response({"detail": "PATCH only supported for 'upcoming' or 'private' tabs."},
+                               status=status.HTTP_400_BAD_REQUEST)
+
+            item_id = request.data.get("id")
+            if not item_id:
+                return Response({"detail": "id required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            status_new = request.data.get("status")
+            if not status_new:
+                return Response({"detail": "status required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if tab == "private":
+                # Update PrivateTutoring status
+                item = get_object_or_404(PrivateTutoring, id=item_id, teacher=teacher)
+                if status_new not in ["Active", "Inactive"]:
+                    return Response({"detail": "Invalid status. Use 'Active' or 'Inactive'."},
+                                   status=status.HTTP_400_BAD_REQUEST)
+                item.status = status_new
+                item.save()
+                return Response(PrivateTutoringSerializer(item).data)
+            else:
+                # Update TutoringBooking status
+                item = get_object_or_404(TutoringBooking, id=item_id, teacher=teacher)
+                if status_new not in dict(TutoringBooking.Status.choices):
+                    return Response({"detail": "Invalid status."}, status=status.HTTP_400_BAD_REQUEST)
+                item.status = status_new
+                if status_new == "completed":
+                    item.completed_date = timezone.now()
+                item.save()
+                return Response(TutoringBookingTeacherSerializer(item).data)
+
+        elif request.method == "DELETE":
+            # Delete PrivateTutoring or TutoringBooking
+            tab = request.query_params.get("tab", "upcoming")
+            if tab not in ["upcoming", "private"]:
+                return Response({"detail": "DELETE only supported for 'upcoming' or 'private' tabs."},
+                               status=status.HTTP_400_BAD_REQUEST)
+
+            item_id = request.query_params.get("id")
+            if not item_id:
+                return Response({"detail": "id required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if tab == "private":
+                # Delete PrivateTutoring
+                item = get_object_or_404(PrivateTutoring, id=item_id, teacher=teacher)
+                if TutoringBooking.objects.filter(private_tutoring=item, status__in=["pending", "confirmed"]).exists():
+                    return Response({"detail": "Cannot delete PrivateTutoring with active bookings."},
+                                   status=status.HTTP_400_BAD_REQUEST)
+                item.delete()
+            else:
+                # Delete TutoringBooking
+                item = get_object_or_404(TutoringBooking, id=item_id, teacher=teacher)
+                if item.status == "completed":
+                    return Response({"detail": "Cannot delete completed booking."},
+                                   status=status.HTTP_400_BAD_REQUEST)
+                item.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        return Response({"detail": "Method not allowed."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response(
+            {"detail": f"An unexpected error occurred: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+
+
+
+
+
+

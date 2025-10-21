@@ -1,5 +1,6 @@
 from django.db import models
 from core.models import TimeStampedModel
+from django.utils import timezone
 
 class LiveSession(TimeStampedModel):
     class Status(models.TextChoices):
@@ -42,7 +43,6 @@ class AvailableDay(models.Model):
     private_tutoring = models.ForeignKey(PrivateTutoring, on_delete=models.PROTECT, related_name="available_days")
 
 
-
 class TutoringBooking(TimeStampedModel):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -57,6 +57,7 @@ class TutoringBooking(TimeStampedModel):
     price = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     notes = models.TextField(blank=True)
+    completed_date = models.DateTimeField(blank=True, null=True)
 
 
 

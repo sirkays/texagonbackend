@@ -11,7 +11,6 @@ from .views import (
     AttendanceSessionViewSet, AttendanceRecordViewSet,
     BadgeViewSet, BadgeAwardViewSet, PointTransactionViewSet, StreakViewSet,
     LiveSessionViewSet, TutoringBookingViewSet,
-    ProductCategoryViewSet, ProductViewSet, OrderViewSet, OrderItemViewSet,
     SubscriptionPlanViewSet, OrganizationSubscriptionViewSet, SubscriptionInvoiceViewSet, SubscriptionPaymentViewSet,
     NotificationViewSet,upsert_tutoring_booking, my_child_tutoring_bookings,
     tutoring_children,
@@ -20,7 +19,8 @@ from .views import (
     tutoring_tutor_availability,
     tutoring_stats,
     password_reset_request_view,
-    password_reset_confirm_view
+    password_reset_confirm_view,
+    teacher_tutoring_bookings
 )
 
 router = DefaultRouter()
@@ -54,10 +54,6 @@ router.register(r"point-transactions", PointTransactionViewSet)
 router.register(r"streaks", StreakViewSet)
 router.register(r"live-sessions", LiveSessionViewSet)
 router.register(r"tutoring-bookings", TutoringBookingViewSet)
-router.register(r"product-categories", ProductCategoryViewSet)
-router.register(r"products", ProductViewSet)
-router.register(r"orders", OrderViewSet)
-router.register(r"order-items", OrderItemViewSet)
 router.register(r"subscription-plans", SubscriptionPlanViewSet)
 router.register(r"org-subscriptions", OrganizationSubscriptionViewSet)
 router.register(r"invoices", SubscriptionInvoiceViewSet)
@@ -81,4 +77,9 @@ urlpatterns = [
     path("tutor/tutoring/tutors/<int:private_tutoring_id>/availability/", tutoring_tutor_availability, name="tutoring_tutor_availability"),
     path("tutor/tutoring/stats/", tutoring_stats, name="tutoring_stats"),
     path("", include(router.urls)),
+
+    ############# TEACHER PRIVATE SESSION ##########
+    path('teacher/tutoring-bookings/', teacher_tutoring_bookings, name='teacher_tutoring_bookings'),
 ]
+
+
