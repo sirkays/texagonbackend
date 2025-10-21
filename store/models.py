@@ -88,16 +88,22 @@ class Product(TimeStampedModel):
             self.pay_in_4_amount = (self.price / Decimal("4")).quantize(Decimal("0.01"))
         super().save(*args, **kwargs)
 
-
 class ProductImage(TimeStampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="images")
-    image_url = models.URLField(max_length=500)
+    product_image = models.ImageField(upload_to="product_images/", blank=True, null=True)  # use ImageField
     alt_text = models.CharField(max_length=200, blank=True)
     sort_order = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["sort_order", "created_at"]
+
+    def get_absolute_url(self, request=None):
+        if self.product_image:
+            if request:
+                return request.build_absolute_uri(self.product_image.url)
+            return f"{settings.MEDIA_URL}{self.product_image.name}"
+        return ""
 
 
 class Coupon(TimeStampedModel):

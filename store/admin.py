@@ -27,7 +27,7 @@ from .models import (
 class ProductImageInline(admin.TabularInline):
     model = ProductImage
     extra = 0
-    fields = ("image_url", "alt_text", "sort_order")
+    fields = ("product_image", "alt_text", "sort_order")
     ordering = ("sort_order",)
 
 class ReviewInline(admin.TabularInline):

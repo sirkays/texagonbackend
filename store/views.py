@@ -64,7 +64,10 @@ def _get_or_create_cart(request) -> Cart:
         cart.save(update_fields=["user"])
     return cart
 
-def _product_to_dict(p: Product) -> dict:
+def _product_to_dict(p: Product, request=None) -> dict:
+    first_image = p.images.order_by("sort_order").first()
+    image_url = first_image.get_absolute_url(request) if first_image else None
+
     return {
         "id": str(p.id),
         "title": p.title,
@@ -74,7 +77,7 @@ def _product_to_dict(p: Product) -> dict:
         "price": str(p.price),
         "rating": float(p.rating),
         "rating_count": p.rating_count,
-        "image": p.images.order_by("sort_order").values_list("image_url", flat=True).first(),
+        "image": image_url,
         "bnpl_enabled": getattr(p, "bnpl_enabled", True),
     }
 
@@ -148,7 +151,7 @@ def products_list(request):
     elif sort == "newest":
         qs = qs.order_by("-created_at")
 
-    data = [_product_to_dict(p) for p in qs[:60]]
+    data = [_product_to_dict(p, request) for p in qs[:60]]
     return Response({"results": data})
 
 @api_view(["GET"])
@@ -162,7 +165,7 @@ def product_detail(request, slug: str):
              .get(slug=slug, is_active=True))
     except Product.DoesNotExist:
         return Response({"detail": "Not found."}, status=404)
-    return Response(_product_to_dict(p))
+    return Response(_product_to_dict(p, request))
 
 # ---------- cart ----------
 
