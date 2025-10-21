@@ -1515,7 +1515,10 @@ def update_lesson(request, module_id: int, lesson_id: int):
             uploaded_file = request.FILES.get("file")
             cover_image = request.FILES.get("cover_image")
             if cover_image:
+                if lesson.cover_image:
+                    lesson.cover_image.delete(save=False)
                 lesson.cover_image = cover_image
+                lesson.save()
                 
             if uploaded_file:
                 # optionally remove previous file
