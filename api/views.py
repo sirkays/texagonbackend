@@ -86,15 +86,16 @@ def _issue_password_reset_token(user, hours_valid=1, ip=None):
     )
 
 
-def _send_password_reset_email(user, reset_token, request):
+def _send_password_reset_email(user, reset_token, request, reset_path=None):
     """
     Minimal email sender. Replace with your templating / email backend as needed.
     """
     # Build a link your frontend can handle. Adjust domain/origin and path to taste.
     # If you have a dedicated frontend URL, use it here.
     origin = getattr(settings, "FRONTEND_ORIGIN", "").rstrip("/") or request.build_absolute_uri("/").rstrip("/")
-    reset_path = "/reset-password"  # e.g., your frontend route
-    reset_url = f"{origin}{reset_path}?token={reset_token.key}"
+    if reset_path is None:
+        reset_path = "reset-password"  # e.g., your frontend route
+    reset_url = f"{origin}/{reset_path}?token={reset_token.key}"
 
     subject = "Reset your password"
     # If you have a template, use it; otherwise send a simple text message
@@ -147,6 +148,7 @@ def password_reset_request_view(request):
     Always returns 200 for privacy (no user enumeration).
     """
     email = (request.data.get("email") or "").strip().lower()
+    reset_path = request.data.get("reset_path", None)
     hours_valid = int(request.data.get("hours_valid") or 1)
     if not email:
         return Response({"detail": "email is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -160,7 +162,7 @@ def password_reset_request_view(request):
 
     # Issue short-lived reset token and email it
     st = _issue_password_reset_token(user, hours_valid=hours_valid, ip=request.META.get("REMOTE_ADDR"))
-    _send_password_reset_email(user, st, request)
+    _send_password_reset_email(user, st, request, reset_path)
 
     return Response({"detail": "If an account exists, a reset link has been sent."})
 

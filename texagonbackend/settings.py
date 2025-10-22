@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "CHANGE_ME")
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
-
+FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "https://texagon.epichouse.online")
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
 PAYMENT_TEST = os.environ.get("PAYMENT_TEST", "1") == "1"
 LOGO_URL = os.environ.get("LOGO_URL", "https://texagon.epichouse.online/logo.png")
