@@ -51,8 +51,11 @@ from core.utils import (_get_teacher_for_user, _get_student_for_user,get_object_
 from django.urls import reverse
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
+from django.db.models import Subquery
+from rest_framework.permissions import IsAuthenticated
 
 
+# ...your other imports
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([])
@@ -333,9 +336,73 @@ class ModuleViewSet(APIKeySessionViewSet):
     queryset = Module.objects.all()
     serializer_class = ModuleSerializer
 
+
 class LessonViewSet(APIKeySessionViewSet):
-    queryset = Lesson.objects.all()
     serializer_class = LessonSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        try:
+            request = self.request
+            org,msg = _resolve_org(request)
+            if not org:
+                return Lesson.objects.none()
+
+            # Base: only lessons inside this org (via course on module)
+            qs = (
+                Lesson.objects.filter(
+                    active=True,
+                    module__active=True,
+                    module__course__is_active=True,
+                    # ⬇️ use *_id to avoid instance/class mismatch
+                    module__course__organization_id=org.id,
+                )
+                .select_related(
+                    "module",
+                    "module__course",
+                    "module__course__teacher",
+                    "module__course__teacher__user",
+                )
+                .order_by("module_id", "order")
+            )
+
+            user = request.user
+            # If the requester is a student: restrict to courses they’re actively enrolled in
+            student = getattr(user, "student_profile", None)
+            if isinstance(student, StudentProfile):
+                if student.organization_id != org.id:
+                    return Lesson.objects.none()
+
+                enrolled_course_ids = Enrollment.objects.filter(
+                    student=student,
+                    status=Enrollment.Status.ACTIVE,
+                ).values("course_id")
+                qs = qs.filter(module__course_id__in=Subquery(enrolled_course_ids))
+
+            # If the requester is a teacher: show only their courses in this org (when not staff)
+            teacher = getattr(user, "teacher_profile", None)
+            if isinstance(teacher, TeacherProfile) and not user.is_staff and not user.is_superuser:
+                if teacher.organization_id != org.id:
+                    return Lesson.objects.none()
+                qs = qs.filter(module__course__teacher_id=teacher.id)
+
+            # Optional query params:
+            module_id = request.query_params.get("module")
+            if module_id:
+                qs = qs.filter(module_id=module_id)
+
+            course_id = request.query_params.get("course")
+            if course_id:
+                qs = qs.filter(module__course_id=course_id)
+
+            return qs
+
+        except Exception as e:
+            # Prefer logging in production:
+            # logger.exception("Error in LessonViewSet.get_queryset")
+            print(f"Error in LessonViewSet.get_queryset: {str(e)}")
+            return Lesson.objects.none()
+
 
 class MaterialViewSet(APIKeySessionViewSet):
     queryset = Material.objects.all()

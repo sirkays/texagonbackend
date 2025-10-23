@@ -22,4 +22,5 @@ urlpatterns = [
     # Helper endpoints
     path('api/teacher/courses/', views.get_teacher_courses, name='teacher_get_courses'),
     path('api/teacher/module-categories/', views.get_module_categories, name='teacher_get_module_categories'),
+    
 ]
