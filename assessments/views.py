@@ -1,31 +1,52 @@
-from typing import Any, DefaultDict, Dict, List, Optional
-from collections import defaultdict
-from decimal import Decimal
+# ===== Standard Library Imports =====
 import logging
+import math
 import traceback
+from collections import defaultdict
 from datetime import datetime, timezone as py_tz
+from decimal import Decimal
+from typing import Any, DefaultDict, Dict, List, Optional
 
+# ===== Django Imports =====
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Value, Avg, DecimalField
+from django.db.models import (
+    Avg,
+    Count,
+    DecimalField,
+    F,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+)
 from django.db.models.functions import Coalesce, Extract
 from django.db.utils import DataError
-from django.utils import timezone, dateparse
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from django.utils import dateparse, timezone
+from django.utils.dateparse import parse_datetime
+
+# ===== Third-Party Imports =====
+from rest_framework import status
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
 
-from api.authentication import SessionTokenAuthentication
+# ===== Local App Imports =====
+from api.models import SessionToken
 from academics.models import StudentProfile, TeacherProfile
 from assessments.models import Test, Question, Choice, TestAttempt, TestAnswer
-from learning.models import Enrollment, Course
-from orgs.models import OrganizationMembership
-from core.utils import _get_student_for_user
-from django.utils.dateparse import parse_datetime
+from learning.models import Course, Enrollment, Lesson, Module
+from orgs.models import Organization, OrganizationMembership
+from core.utils import (
+    _get_student_for_user,
+    _is_org_admin_or_teacher,
+    _resolve_org,
+    get_object_or_404_ajax,
+)
+from api.authentication import SessionTokenAuthentication
 from .serializers import TestAttemptSerializer
-from core.utils import _resolve_org,_is_org_admin_or_teacher
-from rest_framework import status
-
 
 logger = logging.getLogger(__name__)
 
@@ -1813,7 +1834,10 @@ def student_performance_detail(request):
         # Test summary
         total_marks = test.total_marks or Decimal("0")
         percentage = (attempt.score / total_marks * 100) if total_marks else Decimal("0")
-        completion_time = (Extract(attempt.submitted_at - attempt.started_at, "epoch") / 60.0) if attempt.submitted_at else 0
+        completion_time = 0
+        if attempt.submitted_at:
+            delta = attempt.submitted_at - attempt.started_at
+            completion_time = delta.total_seconds() / 60.0
         attempt_status = "Passed" if attempt.score >= total_marks * Decimal("0.7") else "Failed"
         submitted_at = attempt.submitted_at.isoformat() if attempt.submitted_at else None
 
@@ -1829,24 +1853,32 @@ def student_performance_detail(request):
 
         # Answer details
         answers = []
-        questions = Question.objects.filter(test=test).order_by("order")
+        questions = Question.objects.filter(test=test).order_by("order").prefetch_related("choices")
         student_answers = attempt.answers  # dict {q_id: value}
 
         for q in questions:
             selected = student_answers.get(str(q.id), "")
-            if q.qtype == "scq":
-                correct_idx = q.correct_answer if hasattr(q, "correct_answer") else 0  # assuming stored as index
-                options = [c.text for c in q.choices.order_by("order")]
-                correct = options[correct_idx] if options else ""
-                selected_text = options[int(selected)] if selected.isdigit() and int(selected) < len(options) else str(selected)
-            elif q.qtype == "tf":
-                correct = "True" if q.correct_answer else "False"
-                selected_text = "True" if selected else "False"
-            else:
-                correct = q.correct_answer or ""
+            if q.qtype in ["scq", "mcq", "tf"]:
+                choices = list(q.choices.order_by("order"))
+                options = [c.text for c in choices]
+                correct_indices = [i for i, c in enumerate(choices) if c.is_correct]
+                correct = ", ".join(options[i] for i in correct_indices)
+                if q.qtype == "mcq":
+                    selected_indices = selected if isinstance(selected, list) else [selected]
+                    selected_indices = [int(s) for s in selected_indices if str(s).isdigit()]
+                    selected_text = ", ".join(options[i] for i in selected_indices if 0 <= i < len(options))
+                    status_q = "Correct" if set(selected_indices) == set(correct_indices) else "Incorrect"
+                else:  # scq or tf
+                    if q.qtype == "tf" and not str(selected).isdigit():
+                        selected_index = 1 if str(selected).lower() == "true" else 0
+                    else:
+                        selected_index = int(selected) if str(selected).isdigit() else -1
+                    selected_text = options[selected_index] if 0 <= selected_index < len(options) else str(selected)
+                    status_q = "Correct" if selected_index in correct_indices else "Incorrect"
+            else:  # short, essay
+                correct = ""
                 selected_text = str(selected)
-
-            status_q = "Correct" if selected == q.correct_answer else "Incorrect"
+                status_q = "Pending"  # or based on if graded
 
             answers.append({
                 "question": q.body,
@@ -1866,3 +1898,110 @@ def student_performance_detail(request):
         traceback.print_exc()
         return Response({"detail": "Unexpected error", "error": str(e)},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def teacher_module_analytics(request):
+    try:
+        session_token = request.headers.get("X-Session-Token")
+        if not session_token:
+            return Response({"error": "Session token required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        token = get_object_or_404_ajax(SessionToken, key=session_token, is_active=True, expires_at__gt=timezone.now())
+        if not token:
+            return Response({"error": "Invalid or expired session token"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        user = token.user
+        teacher = get_object_or_404_ajax(TeacherProfile, user=user)
+        if not teacher:
+            return Response({"error": "Teacher profile not found"}, status=status.HTTP_403_FORBIDDEN)
+
+        org = teacher.organization
+
+        search = request.query_params.get("search", "")
+        difficulty = request.query_params.get("difficulty", "").upper()
+        active = request.query_params.get("active", "true") == "true"
+
+        page = max(1, int(request.query_params.get("page", 1)))
+        page_size = max(1, min(50, int(request.query_params.get("page_size", 10))))
+
+        qs = Module.objects.filter(course__organization=org, course__teacher=teacher)
+
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
+
+        if difficulty:
+            qs = qs.filter(difficulty=difficulty)
+
+        if active:
+            qs = qs.filter(active=True)
+
+        total_count = qs.count()
+        total_pages = math.ceil(total_count / page_size) if page_size else 1
+
+        qs = qs.select_related("course", "category").annotate(
+            lesson_count=Count("lessons", filter=Q(lessons__active=True)),
+            enrollments=Count("course__enrollments", filter=Q(course__enrollments__status=Enrollment.Status.ACTIVE)),
+            avg_completion=Avg("course__enrollments__progress_pct")
+        ).order_by('-updated_at')[(page-1)*page_size : page*page_size]
+
+        total_enrollments = qs.aggregate(total=Sum("enrollments"))["total"] or 0
+        completion_rate = qs.aggregate(avg=Avg("avg_completion"))["avg"] or 0.0
+
+        modules_data = []
+        for m in qs:
+            d = {
+                "id": m.id,
+                "title": m.name,
+                "description": m.description,
+                "difficulty": m.difficulty,
+                "category": {"id": m.category.id, "name": m.category.name} if m.category else None,
+                "estimatedDuration": m.estimated_duration_in_minutes or 0,
+                "order": m.order,
+                "active": m.active,
+                "isPublished": getattr(m, "is_published", False),
+                "course": {"id": m.course.id, "name": m.course.name},
+                "createdAt": m.created_at,
+                "updatedAt": m.updated_at,
+                "lessons": [],
+                "lessonCount": m.lesson_count,
+                "enrollments": m.enrollments,
+                "completion": m.avg_completion or 0,
+            }
+            modules_data.append(d)
+
+        data = {
+            "aggregates": {
+                "total_enrollments": total_enrollments,
+                "completion_rate": completion_rate,
+            },
+            "pagination": {
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "current_page": page,
+                "page_size": page_size,
+            },
+            "modules": modules_data,
+        }
+
+        return Response(data, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+
+
+
+
+
+
+
+
+
+

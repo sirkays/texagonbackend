@@ -31,5 +31,7 @@ urlpatterns = [
     path('api/student-list/performance/', views.student_performance_list, name='student_performance_list'),
 
     path('api/student-detail/performance/', views.student_performance_detail, name='student_performance_detail'),
+
+    path('api/teacher/module-analytics/', views.teacher_module_analytics, name='teacher_module_analytics'),
 ]
 
