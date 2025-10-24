@@ -6,7 +6,7 @@ urlpatterns = [
     # catalog
     path("categories/", views.categories_list),
     path("products/", views.products_list),
-    path("products/<slug:slug>+", views.product_detail),
+    path("products/<slug:slug>/", views.product_detail),
 
     # cart
     path("cart/", views.cart_get),
