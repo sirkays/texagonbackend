@@ -7,11 +7,10 @@ from datetime import datetime, timezone as py_tz
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Value, Avg, DecimalField
+from django.db.models.functions import Coalesce, Extract
 from django.db.utils import DataError
 from django.utils import timezone, dateparse
-
-from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
@@ -24,6 +23,8 @@ from orgs.models import OrganizationMembership
 from core.utils import _get_student_for_user
 from django.utils.dateparse import parse_datetime
 from .serializers import TestAttemptSerializer
+from core.utils import _resolve_org,_is_org_admin_or_teacher
+from rest_framework import status
 
 
 logger = logging.getLogger(__name__)
@@ -1555,18 +1556,313 @@ def teacher_courses(request):
 
 
 
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def student_performance_summary(request):
+    """
+    GET /api/teacher/student-performance/summary?test_id=<optional_test_id>
+
+    Returns a summary of student performances, optionally filtered by test_id.
+
+    Headers:
+      Authorization: Api-Key <YOUR_API_KEY>
+      X-Session-Token: <session_token>
+
+    Query Params:
+      test_id: Optional integer to filter performances by a specific test.
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Determine if user is teacher and get profile
+        teacher_profile = None
+        try:
+            teacher_profile = request.user.teacher_profile
+            if teacher_profile.organization != org:
+                teacher_profile = None
+        except TeacherProfile.DoesNotExist:
+            pass
+
+        test_id = request.query_params.get("test_id")
+        filters = Q(test__course__organization=org)
+        if teacher_profile:
+            filters &= Q(test__course__teacher=teacher_profile)
+        if test_id:
+            filters &= Q(test_id=test_id)
+
+        # Get all relevant TestAttempts
+        attempts = TestAttempt.objects.filter(filters).select_related(
+            "test", "test__course", "student", "student__user", "student__current_classroom"
+        )
+
+        # Aggregates
+        total_attempts = attempts.count()
+        avg_score = attempts.aggregate(avg=Coalesce(Avg("score"), Decimal("0"), output_field=DecimalField())).get("avg", Decimal("0"))
+        pass_rate = attempts.filter(score__gte=F("test__total_marks") * Decimal("0.7")).count() / max(1, total_attempts) * 100 if total_attempts else 0
+        avg_completion_time = attempts.filter(submitted_at__isnull=False).aggregate(
+            avg=Coalesce(Avg(Extract(F("submitted_at") - F("started_at"), 'epoch') / 60), Value(0.0))
+        ).get("avg", 0)
+
+        payload = {
+            "totalAttempts": total_attempts,
+            "averageScore": float(avg_score),
+            "passRate": round(pass_rate, 1),
+            "averageCompletionTime": round(avg_completion_time),
+        }
+        return Response(payload)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def student_performance_list(request):
+    """
+    GET /api/teacher/student-performance/list?test_id=<optional>&student_filter=<str>&sort_field=<score|completionTime|submittedAt>&sort_order=<asc|desc>&page=<int>&limit=<int>
+
+    Returns paginated list of student performances for the table.
+
+    Headers:
+      Authorization: Api-Key <YOUR_API_KEY>
+      X-Session-Token: <session_token>
+
+    Query Params:
+      test_id: Optional integer to filter by test.
+      student_filter: Optional string to filter by student name (ilike).
+      sort_field: Optional, one of 'score', 'completionTime', 'submittedAt' (default 'score').
+      sort_order: Optional, 'asc' or 'desc' (default 'desc').
+      page: Optional integer, default 1.
+      limit: Optional integer, default 10.
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Determine if user is teacher and get profile
+        teacher_profile = None
+        try:
+            teacher_profile = request.user.teacher_profile
+            if teacher_profile.organization != org:
+                teacher_profile = None
+        except TeacherProfile.DoesNotExist:
+            pass
+
+        test_id = request.query_params.get("test_id")
+        student_filter = request.query_params.get("student_filter", "").lower().strip()
+        sort_field = request.query_params.get("sort_field", "score")
+        if sort_field not in ["score", "completionTime", "submittedAt"]:
+            sort_field = "score"
+        sort_order = request.query_params.get("sort_order", "desc")
+        desc = "-" if sort_order == "desc" else ""
+
+        page = int(request.query_params.get("page", 1))
+        limit = int(request.query_params.get("limit", 10))
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 10
+        offset = (page - 1) * limit
+
+        filters = Q(test__course__organization=org)
+        if teacher_profile:
+            filters &= Q(test__course__teacher=teacher_profile)
+        if test_id:
+            filters &= Q(test_id=test_id)
+
+        # Base queryset
+        attempts_qs = TestAttempt.objects.filter(filters).select_related(
+            "test", "student", "student__user", "student__current_classroom"
+        ).annotate(
+            completion_time=Extract(F("submitted_at") - F("started_at"), "epoch") / 60.0
+        )
+
+        if student_filter:
+            attempts_qs = attempts_qs.filter(
+                Q(student__user__first_name__icontains=student_filter) |
+                Q(student__user__last_name__icontains=student_filter) |
+                Q(student__user__email__icontains=student_filter)
+            )
+
+        # Total count before slicing
+        total = attempts_qs.count()
+
+        # Sort and paginate
+        sort_map = {
+            "score": "score",
+            "completionTime": "completion_time",
+            "submittedAt": "submitted_at",
+        }
+        attempts = attempts_qs.order_by(f"{desc}{sort_map[sort_field]}")[offset:offset + limit]
+
+        performances = []
+        for attempt in attempts:
+            student = attempt.student
+            user = student.user
+            name = user.get_full_name() or user.email
+            class_grade = student.current_classroom.name if student.current_classroom else "N/A"
+            total_marks = attempt.test.total_marks or Decimal("0")
+            percentage = (attempt.score / total_marks * 100) if total_marks else Decimal("0")
+            completion_time = attempt.completion_time if attempt.submitted_at else 0
+            status = "Passed" if attempt.score >= total_marks * Decimal("0.7") else "Failed"
+            submitted_at = attempt.submitted_at.isoformat() if attempt.submitted_at else ""
+
+            performances.append({
+                "id": str(attempt.id),
+                "studentName": name,
+                "studentId": student.admission_no or str(student.id),
+                "email": user.email,
+                "classGrade": class_grade,
+                "score": float(attempt.score),
+                "totalMarks": float(total_marks),
+                "percentage": float(percentage),
+                "completionTime": round(completion_time),
+                "status": status,
+                "submittedAt": submitted_at,
+                "testId": str(attempt.test.id),
+                "testTitle": attempt.test.title,
+                # "answers": []  # exclude for list; fetch in detail if needed
+            })
+
+        return Response({
+            "performances": performances,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "pages": (total + limit - 1) // limit if limit else 1,
+            }
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def student_performance_detail(request):
+    """
+    GET /api/teacher/student-performance/detail/?id=<attempt_id>
 
+    Returns detailed performance for a specific attempt ID.
 
+    Headers:
+      Authorization: Api-Key <YOUR_API_KEY>
+      X-Session-Token: <session_token>
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
 
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
 
+        id = request.query_params.get("id")
+        if not id:
+            return Response({"detail": "id required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Fetch the attempt
+        attempt = TestAttempt.objects.filter(id=id, test__course__organization=org).select_related(
+            "test", "student", "student__user", "student__current_classroom", "test__course"
+        ).first()
 
+        if not attempt:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        # Teacher filter
+        teacher_profile = None
+        try:
+            teacher_profile = request.user.teacher_profile
+            if teacher_profile.organization != org:
+                teacher_profile = None
+        except TeacherProfile.DoesNotExist:
+            pass
 
+        if teacher_profile and attempt.test.course.teacher != teacher_profile:
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
 
+        student = attempt.student
+        user = student.user
+        test = attempt.test
 
+        # Student info
+        student_info = {
+            "studentName": user.get_full_name() or user.email,
+            "studentId": student.admission_no or str(student.id),
+            "email": user.email,
+            "classGrade": student.current_classroom.name if student.current_classroom else "N/A",
+        }
 
+        # Test summary
+        total_marks = test.total_marks or Decimal("0")
+        percentage = (attempt.score / total_marks * 100) if total_marks else Decimal("0")
+        completion_time = (Extract(attempt.submitted_at - attempt.started_at, "epoch") / 60.0) if attempt.submitted_at else 0
+        attempt_status = "Passed" if attempt.score >= total_marks * Decimal("0.7") else "Failed"
+        submitted_at = attempt.submitted_at.isoformat() if attempt.submitted_at else None
+
+        test_summary = {
+            "testTitle": test.title,
+            "score": float(attempt.score),
+            "totalMarks": float(total_marks),
+            "percentage": float(percentage),
+            "status": attempt_status,
+            "completionTime": round(completion_time),
+            "submittedAt": submitted_at,
+        }
+
+        # Answer details
+        answers = []
+        questions = Question.objects.filter(test=test).order_by("order")
+        student_answers = attempt.answers  # dict {q_id: value}
+
+        for q in questions:
+            selected = student_answers.get(str(q.id), "")
+            if q.qtype == "scq":
+                correct_idx = q.correct_answer if hasattr(q, "correct_answer") else 0  # assuming stored as index
+                options = [c.text for c in q.choices.order_by("order")]
+                correct = options[correct_idx] if options else ""
+                selected_text = options[int(selected)] if selected.isdigit() and int(selected) < len(options) else str(selected)
+            elif q.qtype == "tf":
+                correct = "True" if q.correct_answer else "False"
+                selected_text = "True" if selected else "False"
+            else:
+                correct = q.correct_answer or ""
+                selected_text = str(selected)
+
+            status_q = "Correct" if selected == q.correct_answer else "Incorrect"
+
+            answers.append({
+                "question": q.body,
+                "selected": selected_text,
+                "correct": correct,
+                "status": status_q,
+            })
+
+        payload = {
+            "student": student_info,
+            "test": test_summary,
+            "answers": answers,
+        }
+        return Response(payload)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)

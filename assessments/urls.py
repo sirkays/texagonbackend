@@ -24,4 +24,12 @@ urlpatterns = [
 
     ##### TEST ATTEMPTS #################
     path('api/student/test-attempts/', views.my_test_attempts, name='my_test_attempts'),
+
+
+    path('api/student/performance-summary/', views.student_performance_summary, name='student_performance_summary'),
+
+    path('api/student-list/performance/', views.student_performance_list, name='student_performance_list'),
+
+    path('api/student-detail/performance/', views.student_performance_detail, name='student_performance_detail'),
 ]
+
