@@ -10,7 +10,9 @@ from django.shortcuts import _get_queryset
 from accounts.models import User
 from learning.models import Course, Module, Enrollment,Lesson,Module
 from calendar import monthrange
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from datetime import date, datetime, timedelta
+from rest_framework import permissions
 
 StatusLiteral = Literal["active", "inactive", "suspended"]
 
@@ -353,3 +355,33 @@ def _ach_to_dict(a: AchievementDefinition) -> dict:
         "points": a.points,
         "is_active": bool(a.is_active),
     }
+
+
+
+def _lesson_belongs_to_org(lesson: Lesson, org) -> bool:
+    """
+    Verify lesson -> module -> course -> organization == org
+    """
+    if not lesson or not org:
+        return False
+    # Avoid extra queries when possible by walking FKs
+    try:
+        return lesson.module.course.organization_id == org.id
+    except Exception:
+        # Fallback if any relation is missing
+        l = Lesson.objects.select_related("module__course__organization").filter(id=lesson.id).first()
+        return bool(l and l.module and l.module.course and l.module.course.organization_id == org.id)
+
+
+class IsOwnerOrOrgStaff(permissions.BasePermission):
+    """
+    - Students: must own the object (Bookmark/Note.student points to their StudentProfile)
+    - Org admins/teachers: allowed for all objects (still org-scoped by queryset)
+    """
+
+    def has_object_permission(self, request, view, obj):
+        org, _ = _resolve_org(request)
+        if _is_org_admin_or_teacher(request, org):
+            return True
+        sp = _get_student_for_user(request.user)
+        return bool(sp and getattr(obj, "student_id", None) == sp.id)

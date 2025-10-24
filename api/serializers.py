@@ -152,13 +152,14 @@ class MaterialSerializer(serializers.ModelSerializer):
 class BookmarkSerializer(serializers.ModelSerializer):
     class Meta:
         model = Bookmark
-        fields = "__all__"
-
+        fields = ["id", "student", "lesson", "note", "position_seconds", "created_at", "updated_at"]
+        read_only_fields = ["id", "student", "created_at", "updated_at"]
 
 class NoteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Note
-        fields = "__all__"
+        fields = ["id", "student", "lesson", "content", "is_private", "created_at", "updated_at"]
+        read_only_fields = ["id", "student", "created_at", "updated_at"]
 
 
 class TestSerializer(serializers.ModelSerializer):

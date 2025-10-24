@@ -8,11 +8,11 @@ from django.contrib.auth import authenticate
 from django.db import transaction
 from django.db.models import Q, Sum, Count, F
 from django.utils import timezone
-
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
-
+from rest_framework import permissions
 from rest_framework_api_key.permissions import HasAPIKey
 from accounts.models import User
 from .authentication import SessionTokenAuthentication
@@ -47,7 +47,7 @@ from billing.models import (
 from notifications.models import Notification
 from django.shortcuts import get_object_or_404
 from core.utils import (_get_teacher_for_user, _get_student_for_user,get_object_or_404_ajax,
-    _resolve_org,_to_int,_is_org_admin_or_teacher)
+    _resolve_org,_to_int,_is_org_admin_or_teacher, IsOwnerOrOrgStaff, _lesson_belongs_to_org)
 from django.urls import reverse
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
@@ -408,13 +408,142 @@ class MaterialViewSet(APIKeySessionViewSet):
     queryset = Material.objects.all()
     serializer_class = MaterialSerializer
 
+
+
 class BookmarkViewSet(APIKeySessionViewSet):
     queryset = Bookmark.objects.all()
     serializer_class = BookmarkSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrOrgStaff]
+
+    def get_queryset(self):
+        """
+        Admins/teachers: all bookmarks in org (optionally filtered by lesson).
+        Students: only their bookmarks (still ensuring lesson is in org).
+        """
+        request = self.request
+        org, org_error_response = _resolve_org(request)
+        if org_error_response:
+            # If your APIKeySessionViewSet already handles responses,
+            # you could raise an APIException; returning 0 rows also works,
+            # but raising is clearer:
+            raise PermissionDenied(detail=org_error_response.data.get("detail", "Organization access denied."))
+
+        qs = (
+            Bookmark.objects
+            .select_related("student__organization", "lesson__module__course__organization")
+        )
+
+        lesson_id = request.query_params.get("lesson")
+        if _is_org_admin_or_teacher(request, org):
+            qs = qs.filter(lesson__module__course__organization=org)
+            if lesson_id:
+                qs = qs.filter(lesson_id=lesson_id)
+            return qs
+
+        # Student scope
+        sp = _get_student_for_user(request.user)
+        if not sp or sp.organization_id != org.id:
+            # No student profile in this org => no access
+            return qs.none()
+
+        qs = qs.filter(student=sp, lesson__module__course__organization=org)
+        if lesson_id:
+            qs = qs.filter(lesson_id=lesson_id)
+        return qs
+
+    def perform_create(self, serializer):
+        request = self.request
+        org, _ = _resolve_org(request)
+
+        sp = _get_student_for_user(request.user)
+        if not sp or sp.organization_id != org.id:
+            raise PermissionDenied("You are not a student in this organization.")
+
+        lesson = serializer.validated_data.get("lesson")
+        if not lesson or not _lesson_belongs_to_org(lesson, org):
+            raise ValidationError({"lesson": "Lesson does not belong to this organization."})
+
+        serializer.save(student=sp)
+
+    def perform_update(self, serializer):
+        request = self.request
+        org, _ = _resolve_org(request)
+
+        instance: Bookmark = self.get_object()
+        # Permission class will block non-owners already, but we still validate lesson/org on payload changes
+        lesson = serializer.validated_data.get("lesson", instance.lesson)
+        if not _lesson_belongs_to_org(lesson, org):
+            raise ValidationError({"lesson": "Lesson does not belong to this organization."})
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        # IsOwnerOrOrgStaff enforces ownership/admin; queryset already org-scoped
+        super().perform_destroy(instance)
+
 
 class NoteViewSet(APIKeySessionViewSet):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrOrgStaff]
+
+    def get_queryset(self):
+        """
+        Admins/teachers: all notes in org (optionally filtered by lesson).
+        Students: only their notes (still ensuring lesson is in org).
+        """
+        request = self.request
+        org, org_error_response = _resolve_org(request)
+        if org_error_response:
+            raise PermissionDenied(detail=org_error_response.data.get("detail", "Organization access denied."))
+
+        qs = (
+            Note.objects
+            .select_related("student__organization", "lesson__module__course__organization")
+        )
+
+        lesson_id = request.query_params.get("lesson")
+        if _is_org_admin_or_teacher(request, org):
+            qs = qs.filter(lesson__module__course__organization=org)
+            if lesson_id:
+                qs = qs.filter(lesson_id=lesson_id)
+            return qs
+
+        sp = _get_student_for_user(request.user)
+        if not sp or sp.organization_id != org.id:
+            return qs.none()
+
+        qs = qs.filter(student=sp, lesson__module__course__organization=org)
+        if lesson_id:
+            qs = qs.filter(lesson_id=lesson_id)
+        return qs
+
+    def perform_create(self, serializer):
+        request = self.request
+        org, _ = _resolve_org(request)
+
+        sp = _get_student_for_user(request.user)
+        if not sp or sp.organization_id != org.id:
+            raise PermissionDenied("You are not a student in this organization.")
+
+        lesson = serializer.validated_data.get("lesson")
+        if not lesson or not _lesson_belongs_to_org(lesson, org):
+            raise ValidationError({"lesson": "Lesson does not belong to this organization."})
+
+        serializer.save(student=sp)
+
+    def perform_update(self, serializer):
+        request = self.request
+        org, _ = _resolve_org(request)
+
+        instance: Note = self.get_object()
+        lesson = serializer.validated_data.get("lesson", instance.lesson)
+        if not _lesson_belongs_to_org(lesson, org):
+            raise ValidationError({"lesson": "Lesson does not belong to this organization."})
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        super().perform_destroy(instance)
+
 
 
 class TestViewSet(APIKeySessionViewSet):

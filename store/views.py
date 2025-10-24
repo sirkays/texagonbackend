@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import heapq
+from itertools import islice
 from decimal import Decimal
+from datetime import datetime
+
 from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
@@ -8,23 +12,41 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
 
 from rest_framework_api_key.permissions import HasAPIKey
 
-from api.authentication import SessionTokenAuthentication  # your custom class
-
-# Models
-from store.models import (
-    Category, Product, ProductImage, Review,
-    Cart, CartItem, Coupon, Address,
-    Order, OrderItem, Payment, Entitlement,
-    BNPLPlanTemplate, BNPLAgreement, BNPLInstallment,
-    Shipment, ShipmentItem, TrackingEvent,
-    ReturnAuthorization, ReturnItem,
-    ShippingCarrier, ShippingMethod,
-)
+from api.authentication import SessionTokenAuthentication
+from api.models import SessionToken
 from accounts.models import User
-from api.models import SessionToken 
+from core.utils import _resolve_org
+from billing.models import SubscriptionPayment, SubscriptionInvoice
+
+# Store-related models
+from store.models import (
+    Category,
+    Product,
+    ProductImage,
+    Review,
+    Cart,
+    CartItem,
+    Coupon,
+    Address,
+    Order,
+    OrderItem,
+    Payment,
+    Entitlement,
+    BNPLPlanTemplate,
+    BNPLAgreement,
+    BNPLInstallment,
+    Shipment,
+    ShipmentItem,
+    TrackingEvent,
+    ReturnAuthorization,
+    ReturnItem,
+    ShippingCarrier,
+    ShippingMethod,
+)
 
 # ---------- helpers ----------
 
@@ -115,6 +137,13 @@ def categories_list(request):
             for c in Category.objects.order_by("name")]
     return Response({"results": data})
 
+
+
+class CustomPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -153,8 +182,10 @@ def products_list(request):
     elif sort == "newest":
         qs = qs.order_by("-created_at")
 
-    data = [_product_to_dict(p, request) for p in qs[:60]]
-    return Response({"results": data})
+    paginator = CustomPagination()
+    page = paginator.paginate_queryset(qs, request)
+    data = [_product_to_dict(p, request) for p in page]
+    return paginator.get_paginated_response({"results": data})
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])

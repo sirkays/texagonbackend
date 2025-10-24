@@ -4,20 +4,32 @@ import traceback
 from datetime import timedelta
 
 from django.conf import settings
-from django.db.models import Sum, Count, Q
+from django.db.models import Q, Sum, Count
 from django.utils import timezone
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
-from rest_framework import status
 from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
-
-# 🔧 adjust imports to match your app layout
+from academics.models import ParentProfile, ParentChildLink, StudentProfile
+from assessments.models import TestAttempt
+from codeide.models import CodeSubmission
+from gamification.models import (
+    Badge,
+    BadgeAward,
+    PointTransaction,
+    Streak,
+    AchievementDefinition,
+)
+from learning.models import Enrollment
 from orgs.models import OrganizationMembership
-from academics.models import StudentProfile
-from gamification.models import PointTransaction, BadgeAward, Streak
-
+from core.utils import (
+    _sum_points,
+    _resolve_org,
+    _status_from_user_membership,
+    _avatar_url_for,
+)
 
 # ---------- helpers ----------
 def _get_student_for_user(user) -> Optional[StudentProfile]:
@@ -376,3 +388,150 @@ def _dummy_payload() -> Dict[str, Any]:
             {"rank": 3, "name": "Mike Johnson", "points": 320, "avatar": None, "streak": 5},
         ],
     }
+
+
+
+
+def _parent_dummy() -> Dict[str, Any]:
+    return {
+        "children": [],
+        "leaderboard": [],
+    }
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def parent_rewards(request):
+
+    """
+    Endpoint for the parent rewards page.
+    Returns data for children rewards tracking and leaderboard.
+
+    Query params:
+      - page_leaderboard (default 1)
+      - limit_leaderboard (default 5, max 20)
+      - debug=1 to include traceback in error responses
+
+    Response:
+      {
+        "children": [...],          # list of child dicts with points, streak, badges, etc.
+        "leaderboard": [...],       # paginated list of top students across all organizations
+      }
+    """
+    try:
+        user = request.user
+        parent = ParentProfile.objects.filter(user=user).first()
+        if not parent:
+            return Response(_parent_dummy(), status=status.HTTP_200_OK)
+
+        # Get children
+        children_links = ParentChildLink.objects.filter(parent=parent)
+        student_ids = list(children_links.values_list("student_id", flat=True))
+        students = StudentProfile.objects.filter(id__in=student_ids).select_related("user", "organization")
+
+        # Pagination params
+        def _int_param(key, default, max_val=None):
+            try:
+                val = int(request.query_params.get(key, default))
+                return min(val, max_val) if max_val else val
+            except Exception:
+                return default
+
+        page_leaderboard = max(1, _int_param("page_leaderboard", 1))
+        limit_leaderboard = _int_param("limit_leaderboard", 5, 20)
+
+        # ---------- Children data ----------
+        children_data: List[Dict[str, Any]] = []
+
+        for student in students:
+            org = getattr(student, "organization", None)
+            total_points = _sum_points(student)
+            streak_obj = Streak.objects.filter(student=student).first()
+            current_streak = streak_obj.current_days if streak_obj else 0
+
+            # Badges
+            all_badges = Badge.objects.filter(Q(organization__isnull=True) | Q(organization=org))
+            awarded = BadgeAward.objects.filter(student=student, badge__in=all_badges).select_related("badge")
+            awarded_map = {aw.badge_id: aw for aw in awarded}
+
+            badges_data = []
+            for b in all_badges:
+                aw = awarded_map.get(b.id)
+                badge_dict = {
+                    "name": b.name,
+                    "icon": b.icon_name or "🏅",
+                    "earned": bool(aw),
+                }
+                if aw:
+                    badge_dict["date"] = aw.awarded_at.strftime("%Y-%m-%d")
+                badges_data.append(badge_dict)
+
+            # Recent achievements (from PointTransaction)
+            recent_trans = PointTransaction.objects.filter(student=student).order_by("-created_at")[:5]
+            recent_ach = [
+                {
+                    "title": trans.reason or "Points Earned",
+                    "points": trans.points,
+                    "date": trans.created_at.strftime("%Y-%m-%d"),
+                    "type": "Achievement"
+                } for trans in recent_trans
+            ]
+
+            avatar = _avatar_url_for(student.user, request) or "/placeholder.svg?height=40&width=40"
+
+            children_data.append({
+                "id": student.id,
+                "name": student.user.get_full_name() or student.user.username,
+                "avatar": avatar,
+                "totalPoints": total_points,
+                "currentStreak": current_streak,
+                "badges": badges_data,
+                "recentAchievements": recent_ach,
+            })
+
+        # ---------- Leaderboard (top by points globally) ----------
+        points_agg = PointTransaction.objects.values("student_id").annotate(total=Sum("points")).order_by("-total")
+        top_points = list(points_agg[:limit_leaderboard * page_leaderboard])
+        start = (page_leaderboard - 1) * limit_leaderboard
+        paginated_points = top_points[start : start + limit_leaderboard]
+
+        all_student_ids = [p["student_id"] for p in paginated_points]
+        all_students = StudentProfile.objects.filter(id__in=all_student_ids).select_related("user", "organization")
+        student_map = {s.id: s for s in all_students}
+
+        leaderboard = []
+        base_rank = start + 1
+        for idx, p in enumerate(paginated_points):
+            s = student_map.get(p["student_id"])
+            if not s:
+                continue
+            name = s.user.get_full_name() or s.user.username
+            is_child = p["student_id"] in student_ids
+            leaderboard.append({
+                "rank": base_rank + idx,
+                "name": name,
+                "school": getattr(s.organization, "name", "") or "School",
+                "points": p["total"] or 0,
+                "isChild": is_child
+            })
+
+        return Response({
+            "children": children_data,
+            "leaderboard": leaderboard,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        err = {"detail": "Failed to load rewards data.", "error": f"{type(e).__name__}: {e}"}
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+            err["traceback"] = traceback.format_exc()
+        return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+
+
+
+
+
+        

@@ -1,5 +1,12 @@
 from django.urls import path
-from .views import (update_subscription_payment,create_subscription_payment,fetch_parent_invoices,confirm_payement)
+from .views import (update_subscription_payment,create_subscription_payment,fetch_parent_invoices,confirm_payement,
+transactions_list,
+    create_complaint,
+    list_complaints,
+    get_complaint,
+    add_complaint_response,
+    update_complaint,
+)
 
 urlpatterns = [
     path("api/create/subscription/payment/", create_subscription_payment, name="create_subscription_payment"),
@@ -9,4 +16,15 @@ urlpatterns = [
 
 
     path("api/confirm/payment/", confirm_payement, name="confirm_payement"),
+
+    path("api/transactions-list/", transactions_list, name="transactions_list"),
+
+
+    path("api/complaints/", create_complaint, name="complaints-create"),                      # POST
+    path("api/complaints/list/", list_complaints, name="complaints-list"),                   # GET
+    path("api/complaints/<uuid:complaint_id>/", get_complaint, name="complaints-detail"),    # GET
+    path("api/complaints/<uuid:complaint_id>/responses/", add_complaint_response, name="complaints-add-response"),  # POST
+    path("api/complaints/<uuid:complaint_id>/update/", update_complaint, name="complaints-update"),                 # PATCH
 ]
+
+

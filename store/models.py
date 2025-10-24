@@ -228,9 +228,8 @@ class OrderItem(TimeStampedModel):
 
 class Payment(TimeStampedModel):
     class Provider(models.TextChoices):
-        STRIPE = "stripe", _("Stripe")
+        FLUTTERWAVE = "flutterwave", _("Flutterwave")
         PAYSTACK = "paystack", _("Paystack")
-        MOCK = "mock", _("Mock")
 
     class Status(models.TextChoices):
         INITIATED = "initiated", _("Initiated")
@@ -241,7 +240,7 @@ class Payment(TimeStampedModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name="payment")
-    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.STRIPE)
+    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.FLUTTERWAVE)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.INITIATED)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=10, default="NGN")
