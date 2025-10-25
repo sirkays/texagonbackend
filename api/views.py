@@ -947,6 +947,7 @@ def _teacher_card_dict(pt: PrivateTutoring):
 
     return {
         "id": pt.id,
+        "title":pt.title,
         "teacher_id": teacher.id,
         "teacher_name": teacher.user.get_full_name() or teacher.user.email,
         "course_id": course.id,
@@ -1308,6 +1309,7 @@ def teacher_tutoring_bookings(request):
                 if TutoringBooking.objects.filter(private_tutoring=item, status__in=["pending", "confirmed"]).exists():
                     return Response({"detail": "Cannot delete PrivateTutoring with active bookings."},
                                    status=status.HTTP_400_BAD_REQUEST)
+                item.available_days.all().delete()
                 item.delete()
             else:
                 # Delete TutoringBooking

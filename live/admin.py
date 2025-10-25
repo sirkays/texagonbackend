@@ -123,6 +123,7 @@ class PrivateTutoringAdmin(admin.ModelAdmin):
     fieldsets = (
         ("Tutoring Details", {
             "fields": (
+                "title",
                 "teacher",
                 "course",
                 "rate_per_hour",

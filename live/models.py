@@ -20,13 +20,15 @@ class LiveSession(TimeStampedModel):
     active = models.BooleanField(default=True)
 
 
-
+##### CREATED BY TEACHER FOR DISPLAYING PRIVATE TUTORING
 class PrivateTutoring(TimeStampedModel):
+    title = models.CharField(max_length=250, default="My Private Tutoring")
     teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="private_tutoring")
     course = models.ForeignKey("learning.Course", on_delete=models.PROTECT, related_name="private_tutoring")
     rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
     tutoring_duration_days = models.PositiveIntegerField(default=24) # NUMBER OF DAYS THE TUTORING WILL LAST
     notes = models.CharField(max_length=225)
+    active = models.BooleanField(default=True)
     
 
 class AvailableDay(models.Model):
