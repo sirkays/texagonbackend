@@ -929,13 +929,16 @@ def _get_teacher_for_user(user) -> Optional[TeacherProfile]:
 
 def _serialize_lesson(lesson: Lesson) -> Dict[str, Any]:
     """Convert lesson model to API response format."""
-
+    if lesson.duration_seconds:
+        duration_min = int(lesson.duration_seconds)/60
+    else:
+        duration_min = ""
     return {
         "id": lesson.id,
         "title": lesson.name,
         "type": lesson.content_type,
         "order": lesson.order,
-        "duration": str(lesson.duration_seconds) if lesson.duration_seconds else "",
+        "duration": duration_min,
         "file": lesson.file.url if lesson.file else None,
         "url": lesson.url or "",
         "videoUrl": lesson.url if lesson.content_type == "video" else "",
@@ -1501,7 +1504,7 @@ def update_lesson(request, module_id: int, lesson_id: int):
                 except json.JSONDecodeError:
                     meta = {}
             lesson.meta = meta
-
+        lesson.save()
         # Remove file if requested (send remove_file=true in form-data or JSON)
         remove_file = str(data.get("remove_file", "")).lower() in ("1", "true", "yes")
         if remove_file and lesson.file:
