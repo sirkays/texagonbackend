@@ -116,6 +116,7 @@ class Bookmark(TimeStampedModel):
         unique_together = ("student", "lesson", "position_seconds")
 
 class Note(TimeStampedModel):
+    title = models.CharField(max_length=100, default="No title")
     student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="notes")
     lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="notes")
     content = models.TextField()

@@ -2,7 +2,7 @@ import json
 import traceback
 from decimal import Decimal
 from datetime import timedelta
-
+from .permissions import IsStudent
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.db import transaction
@@ -404,9 +404,27 @@ class LessonViewSet(APIKeySessionViewSet):
             return Lesson.objects.none()
 
 
+
+
 class MaterialViewSet(APIKeySessionViewSet):
     queryset = Material.objects.all()
     serializer_class = MaterialSerializer
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    # (Optional) Prevent non-admins from seeing other orgs' materials
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if hasattr(user, "student_profile") and user.student_profile.organization_id:
+            return qs.filter(organization=user.student_profile.organization_id, active=True)
+        return qs.none()
+
+    # (Optional) Auto-set owner/organization on create
+    def perform_create(self, serializer):
+        user = self.request.user
+        org = getattr(user.student_profile, "organization", None)
+        serializer.save(owner=user, organization=org)
+
 
 
 

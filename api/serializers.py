@@ -158,7 +158,7 @@ class BookmarkSerializer(serializers.ModelSerializer):
 class NoteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Note
-        fields = ["id", "student", "lesson", "content", "is_private", "created_at", "updated_at"]
+        fields = ["id","title" ,"student", "lesson", "content", "is_private", "created_at", "updated_at"]
         read_only_fields = ["id", "student", "created_at", "updated_at"]
 
 

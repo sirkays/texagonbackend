@@ -173,7 +173,7 @@ def my_materials(request):
             for n in notes_qs[:n_lim]:
                 content = n.content or ""
                 first_line = (content.splitlines()[0] if content else "").strip()
-                title = first_line[:80] if first_line else "Note"
+                title = n.title
                 notes_out.append({
                     "id": str(n.id),
                     "title": title,
@@ -1525,6 +1525,7 @@ def update_lesson(request, module_id: int, lesson_id: int):
                 if lesson.file:
                     lesson.file.delete(save=False)
                 lesson.file = uploaded_file
+                lesson.save()
 
                 # attempt to update content_type from extension if sensible
                 name = uploaded_file.name or ""
