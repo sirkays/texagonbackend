@@ -1082,6 +1082,17 @@ def get_module(request, module_id: int):
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+def _next_available_order(course, start_from: int = 1) -> int:
+    # Get all existing orders once, then scan for the first gap >= start_from
+    taken = set(
+        Module.objects.filter(course=course).values_list("order", flat=True)
+    )
+    i = max(1, int(start_from or 1))
+    while i in taken:
+        i += 1
+    return i
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -1089,12 +1100,12 @@ def get_module(request, module_id: int):
 def create_module(request):
     """
     Create a new module.
-    
+
     Expected JSON body:
     {
         "title": "Module Title",
         "description": "Module description",
-        "courseId": 123,
+        "courseId": 123,      // or "course_id"
         "difficulty": "BEGINNER",
         "categoryId": 456,
         "estimatedDuration": 60,
@@ -1108,13 +1119,14 @@ def create_module(request):
             return Response({"detail": "No teacher profile found."}, status=status.HTTP_404_NOT_FOUND)
 
         data = request.data or {}
-        
+
         # Validate required fields
-        title = data.get("title", "").strip()
+        title = (data.get("title") or "").strip()
         if not title:
             return Response({"detail": "Title is required."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        course_id = data.get("course_id")
+
+        # Accept either courseId or course_id
+        course_id = data.get("course_id") or data.get("courseId")
         if not course_id:
             return Response({"detail": "Course ID is required."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1133,23 +1145,43 @@ def create_module(request):
             except ModuleCategory.DoesNotExist:
                 return Response({"detail": "Category not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Get next order number if not provided
-        order = data.get("order")
-        if not order:
-            last_module = Module.objects.filter(course=course).order_by('-order').first()
-            order = (last_module.order + 1) if last_module else 1
+        # Figure out desired starting order (if provided)
+        requested_order = data.get("order")
+        try:
+            requested_order = int(requested_order) if requested_order is not None else None
+        except (TypeError, ValueError):
+            return Response({"detail": "Order must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Create module
-        module = Module.objects.create(
-            name=title,
-            description=data.get("description", ""),
-            course=course,
-            difficulty=data.get("difficulty", Module.DifficultyLevel.BEGINNER),
-            category=category,
-            estimated_duration_in_minutes=data.get("estimatedDuration", 0) or None,
-            order=order,
-            active=True
-        )
+        # If order not provided, start from (last+1); if provided, start from that number
+        if requested_order is None:
+            last = Module.objects.filter(course=course).order_by("-order").first()
+            start_from = (last.order + 1) if last else 1
+        else:
+            start_from = max(1, requested_order)
+
+        # Pick the first available order slot >= start_from
+        order = _next_available_order(course, start_from=start_from)
+
+        # Create module (retry once more if a concurrent insert sneaks in)
+        for _ in range(2):
+            try:
+                module = Module.objects.create(
+                    name=title,
+                    description=data.get("description", ""),
+                    course=course,
+                    difficulty=data.get("difficulty", Module.DifficultyLevel.BEGINNER),
+                    category=category,
+                    estimated_duration_in_minutes=(data.get("estimatedDuration") or None),
+                    order=order,
+                    active=True,
+                )
+                break
+            except IntegrityError:
+                # In case of race condition on (course, order), bump to next free slot
+                order = _next_available_order(course, start_from=order + 1)
+        else:
+            return Response({"detail": "Could not allocate a unique order, please retry."},
+                            status=status.HTTP_409_CONFLICT)
 
         module_data = _serialize_module(module, include_lessons=True)
         return Response({"module": module_data}, status=status.HTTP_201_CREATED)
@@ -1162,7 +1194,6 @@ def create_module(request):
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @api_view(["PUT", "PATCH"])
 @permission_classes([HasAPIKey])
