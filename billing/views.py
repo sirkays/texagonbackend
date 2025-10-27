@@ -13,7 +13,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import dateparse, timezone
 
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes,parser_classes
 from rest_framework.response import Response
 
 from rest_framework_api_key.permissions import HasAPIKey
@@ -24,8 +24,14 @@ from billing.models import SubscriptionInvoice, SubscriptionPayment
 from core.utils import _is_org_admin_or_teacher, _resolve_org, get_object_or_404_ajax
 from orgs.models import OrganizationMembership
 from store.models import Order, Payment
-from .models import Complaint, ComplaintResponse
+from .models import Complaint, ComplaintResponse,ComplaintAttachment
 from .utils import confirm_transaction, generate_payment_link
+from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
+from django.core.files.uploadedfile import UploadedFile
+
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25MB per file
+ALLOWED_CONTENT_TYPES = None  # e.g. {"image/png","image/jpeg","application/pdf"}
+
 
 # try to import nanoid; fallback if not installed
 try:
@@ -504,8 +510,8 @@ def _human(user) -> str | None:
     full = full.strip()
     return full or getattr(user, "email", None) or getattr(user, "username", None)
 
+
 def _resp_dict(r: ComplaintResponse) -> dict:
-    # Your model does not have author_username, so don't access it
     author = getattr(r, "author_name", None) or ""
     return {
         "id": str(r.id),
@@ -514,6 +520,7 @@ def _resp_dict(r: ComplaintResponse) -> dict:
         "role": r.role,
         "created_at": r.created_at.isoformat(),
     }
+
 
 def _complaint_org_id(c: Complaint):
     """
@@ -528,7 +535,24 @@ def _complaint_org_id(c: Complaint):
             return None
     return None
 
+
+def _attachment_dict(a: ComplaintAttachment) -> dict:
+    try:
+        url = a.file.url
+    except Exception:
+        url = None
+    return {
+        "id": str(a.id),
+        "original_name": a.original_name or (getattr(a.file, "name", "") or ""),
+        "content_type": a.content_type,
+        "uploaded_at": a.uploaded_at.isoformat(),
+        "file_url": url,  # will be absolutized in responses
+        "uploaded_by": _human(getattr(a, "uploaded_by", None)),
+    }
+
+
 def _complaint_dict(c: Complaint) -> dict:
+    # Transaction info
     tx = None
     if c.payment_id:
         tx = {
@@ -556,15 +580,64 @@ def _complaint_dict(c: Complaint) -> dict:
         "transaction": tx,
         "organization_id": _complaint_org_id(c),  # may be None for purchase complaints
         "responses": [_resp_dict(r) for r in c.responses.order_by("created_at")],
+        "attachments": [_attachment_dict(a) for a in c.attachments.order_by("uploaded_at")],
     }
 
 
-# -----------------------------
+def _absolutize_attachment_urls(request, payload: dict | list[dict]):
+    """
+    Turn relative media URLs into absolute URLs on any payload(s) that contain 'attachments'.
+    """
+    if isinstance(payload, dict):
+        items = [payload]
+    else:
+        items = payload
+
+    for item in items:
+        for a in item.get("attachments", []):
+            if a.get("file_url"):
+                a["file_url"] = request.build_absolute_uri(a["file_url"])
+
+
+def _save_attachments_from_request(request, complaint: Complaint, uploader) -> list[ComplaintAttachment]:
+    """
+    Accepts multipart uploads under 'attachments' or 'attachments[]'.
+    Validates size/type against MAX_ATTACHMENT_BYTES and ALLOWED_CONTENT_TYPES.
+    """
+    files = []
+    if "attachments" in request.FILES:
+        many = request.FILES.getlist("attachments")
+        files = many if many else [request.FILES["attachments"]]
+    elif "attachments[]" in request.FILES:
+        files = request.FILES.getlist("attachments[]")
+
+    created = []
+    for f in files:
+        if not isinstance(f, UploadedFile):
+            continue
+        if f.size and f.size > MAX_ATTACHMENT_BYTES:
+            raise ValueError(f"Attachment '{getattr(f, 'name', '')}' exceeds max size of {MAX_ATTACHMENT_BYTES // (1024 * 1024)}MB.")
+        if ALLOWED_CONTENT_TYPES and f.content_type not in ALLOWED_CONTENT_TYPES:
+            raise ValueError(f"Attachment type '{f.content_type}' not allowed.")
+
+        att = ComplaintAttachment.objects.create(
+            complaint=complaint,
+            file=f,  # respects complaint-aware upload_to path
+            uploaded_by=uploader,
+            original_name=getattr(f, "name", "") or "",
+            content_type=getattr(f, "content_type", "") or "",
+        )
+        created.append(att)
+    return created
+
+
+# ======================================================
 # Create Complaint
-# -----------------------------
+# ======================================================
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
+@parser_classes([MultiPartParser, FormParser, JSONParser])  # allow attachments at creation
 def create_complaint(request):
     try:
         user = getattr(request, "user", None)
@@ -638,8 +711,27 @@ def create_complaint(request):
                 author_name=user.get_full_name() or user.email,
                 role="user",
             )
+            # Save attachments AFTER complaint exists so upload_to can include complaint.code
+            try:
+                _save_attachments_from_request(request, comp, user)
+            except ValueError as ve:
+                # convert to 400 with clear message
+                return Response({"detail": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(_complaint_dict(comp), status=status.HTTP_201_CREATED)
+        # Reload with prefetch to include responses + attachments
+        comp = (
+            Complaint.objects.select_related(
+                "payment__order",
+                "subscription_payment__invoice__subscription__organization",
+                "assigned_to",
+            )
+            .prefetch_related("responses", "attachments")
+            .get(id=comp.id)
+        )
+
+        payload = _complaint_dict(comp)
+        _absolutize_attachment_urls(request, payload)
+        return Response(payload, status=status.HTTP_201_CREATED)
 
     except Exception as e:
         print("\n[ERROR] create_complaint():", str(e))
@@ -648,9 +740,9 @@ def create_complaint(request):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# -----------------------------
+# ======================================================
 # List Complaints
-# -----------------------------
+# ======================================================
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -671,7 +763,7 @@ def list_complaints(request):
                 "subscription_payment__invoice__subscription__organization",
                 "assigned_to",
             )
-            .prefetch_related("responses")
+            .prefetch_related("responses", "attachments")
             .order_by("-created_at")
         )
 
@@ -718,6 +810,7 @@ def list_complaints(request):
             qs = qs.filter(models.Q(title__icontains=search) | models.Q(description__icontains=search))
 
         data = [_complaint_dict(c) for c in qs[:200]]
+        _absolutize_attachment_urls(request, data)
         return Response({"results": data}, status=status.HTTP_200_OK)
 
     except Exception as e:
@@ -727,9 +820,9 @@ def list_complaints(request):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# -----------------------------
+# ======================================================
 # Retrieve Complaint
-# -----------------------------
+# ======================================================
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -748,7 +841,7 @@ def get_complaint(request, complaint_id: str):
                 "payment__order",
                 "subscription_payment__invoice__subscription__organization",
                 "assigned_to",
-            ).prefetch_related("responses"),
+            ).prefetch_related("responses", "attachments"),
             id=complaint_id,
         )
 
@@ -774,7 +867,9 @@ def get_complaint(request, complaint_id: str):
             if tx_org is None and (c.created_by_id != user.id) and not (user.is_staff or user.is_superuser):
                 return Response({"detail": "Not permitted."}, status=status.HTTP_403_FORBIDDEN)
 
-        return Response(_complaint_dict(c), status=status.HTTP_200_OK)
+        payload = _complaint_dict(c)
+        _absolutize_attachment_urls(request, payload)
+        return Response(payload, status=status.HTTP_200_OK)
 
     except Exception as e:
         print("\n[ERROR] get_complaint():", str(e))
@@ -783,9 +878,9 @@ def get_complaint(request, complaint_id: str):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# -----------------------------
+# ======================================================
 # Add Response
-# -----------------------------
+# ======================================================
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -852,9 +947,9 @@ def add_complaint_response(request, complaint_id: str):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# -----------------------------
+# ======================================================
 # Update Complaint
-# -----------------------------
+# ======================================================
 @api_view(["PATCH"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -924,10 +1019,141 @@ def update_complaint(request, complaint_id: str):
         c.updated_at = timezone.now()
         c.save()
 
-        return Response(_complaint_dict(c), status=status.HTTP_200_OK)
+        # include attachments/responses in latest shape
+        c = (
+            Complaint.objects.select_related(
+                "payment__order",
+                "subscription_payment__invoice__subscription__organization",
+                "assigned_to",
+            )
+            .prefetch_related("responses", "attachments")
+            .get(id=complaint_id)
+        )
+        payload = _complaint_dict(c)
+        _absolutize_attachment_urls(request, payload)
+
+        return Response(payload, status=status.HTTP_200_OK)
 
     except Exception as e:
         print("\n[ERROR] update_complaint():", str(e))
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ======================================================
+# Upload Attachments (add later)
+# ======================================================
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@parser_classes([MultiPartParser, FormParser])  # must be multipart for files
+def add_complaint_attachments(request, complaint_id: str):
+    """
+    POST files as 'attachments' or 'attachments[]' (multipart/form-data)
+    """
+    try:
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        org, org_err = _resolve_org(request)  # optional
+        if org_err:
+            return org_err
+
+        c = get_object_or_404(
+            Complaint.objects.select_related(
+                "subscription_payment__invoice__subscription__organization",
+                "created_by",
+            ),
+            id=complaint_id,
+        )
+
+        # Permission: creator, staff/superuser, or member of org (for subscription-linked complaints)
+        tx_org = _complaint_org_id(c)
+        if org:
+            if tx_org and tx_org != org.id:
+                return Response({"detail": "Complaint does not belong to this organization."},
+                                status=status.HTTP_403_FORBIDDEN)
+            if tx_org and not OrganizationMembership.objects.filter(user=user, organization=org, is_active=True).exists():
+                return Response({"detail": "You do not have access to this organization."},
+                                status=status.HTTP_403_FORBIDDEN)
+            if tx_org is None and (c.created_by_id != user.id) and not (user.is_staff or user.is_superuser):
+                return Response({"detail": "Not permitted."}, status=status.HTTP_403_FORBIDDEN)
+        else:
+            if tx_org:
+                if not OrganizationMembership.objects.filter(user=user, organization_id=tx_org, is_active=True).exists():
+                    return Response({"detail": "You do not have access to this organization."},
+                                    status=status.HTTP_403_FORBIDDEN)
+            elif (c.created_by_id != user.id) and not (user.is_staff or user.is_superuser):
+                return Response({"detail": "Not permitted."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            created = _save_attachments_from_request(request, c, user)
+        except ValueError as ve:
+            return Response({"detail": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = [_attachment_dict(a) for a in created]
+        _absolutize_attachment_urls(request, data)
+        # Touch updated_at
+        c.updated_at = timezone.now()
+        c.save(update_fields=["updated_at"])
+
+        return Response({"attachments": data}, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        print("\n[ERROR] add_complaint_attachments():", str(e))
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ======================================================
+# Delete Attachment
+# ======================================================
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def delete_complaint_attachment(request, complaint_id: str, attachment_id: str):
+    try:
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        org, org_err = _resolve_org(request)  # optional
+        if org_err:
+            return org_err
+
+        a = get_object_or_404(
+            ComplaintAttachment.objects.select_related(
+                "complaint__subscription_payment__invoice__subscription__organization",
+                "complaint__created_by",
+            ),
+            id=attachment_id,
+            complaint_id=complaint_id,
+        )
+        c = a.complaint
+        tx_org = _complaint_org_id(c)
+
+        # Same permission shape as update_complaint: org admins/teachers can delete if sub-linked; else staff/superuser or creator
+        if tx_org:
+            subs_org = getattr(c.subscription_payment.invoice.subscription, "organization", None)
+            if org and tx_org != org.id:
+                return Response({"detail": "Complaint does not belong to this organization."},
+                                status=status.HTTP_403_FORBIDDEN)
+            if not _is_org_admin_or_teacher(request, subs_org):
+                return Response({"detail": "Insufficient permissions."}, status=status.HTTP_403_FORBIDDEN)
+        else:
+            if not (user.is_staff or user.is_superuser or c.created_by_id == user.id):
+                return Response({"detail": "Insufficient permissions."}, status=status.HTTP_403_FORBIDDEN)
+
+        a.delete()
+        c.updated_at = timezone.now()
+        c.save(update_fields=["updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    except Exception as e:
+        print("\n[ERROR] delete_complaint_attachment():", str(e))
         traceback.print_exc()
         return Response({"detail": "An unexpected error occurred.", "error": str(e)},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
