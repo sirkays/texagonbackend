@@ -6,7 +6,6 @@ from collections import defaultdict
 from datetime import datetime, timezone as py_tz
 from decimal import Decimal
 from typing import Any, DefaultDict, Dict, List, Optional
-
 # ===== Django Imports =====
 from django.conf import settings
 from django.db import IntegrityError, transaction
@@ -22,6 +21,7 @@ from django.db.models import (
     Sum,
     Value,
     FloatField,
+    Exists
 )
 
 from django.db.models.functions import Coalesce, Extract
@@ -177,58 +177,70 @@ def my_test_attempts(request):
       - page: int (default 1)
       - page_size: int (default 20, max 100)
     """
-    # Must be a student
-    student = _get_student_for_user(request.user)
-    if not student:
-        return Response({"detail": "Only students can access their test attempts."},
-                        status=status.HTTP_403_FORBIDDEN)
+    try:
+        # Must be a student
+        student = _get_student_for_user(request.user)
+        if not student:
+            return Response(
+                {"detail": "Only students can access their test attempts."},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
-    qs = TestAttempt.objects.select_related("test").filter(student=student)
+        qs = TestAttempt.objects.select_related("test").filter(student=student)
 
-    # Filters
-    test_id = request.query_params.get("test_id")
-    if test_id:
-        qs = qs.filter(test_id=test_id)
+        # Filters
+        test_id = request.query_params.get("test_id")
+        if test_id:
+            qs = qs.filter(test_id=test_id)
 
-    status_param = request.query_params.get("status")
-    if status_param:
-        qs = qs.filter(status=status_param)
+        status_param = request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
 
-    # Active window filter (uses test.start_at/end_at)
-    if request.query_params.get("active", "").lower() == "true":
-        now = timezone.now()
-        qs = qs.filter(
-            (Q(test__start_at__isnull=True) | Q(test__start_at__lte=now)) &
-            (Q(test__end_at__isnull=True) | Q(test__end_at__gte=now))
+        # Active window filter (uses test.start_at/end_at)
+        if request.query_params.get("active", "").lower() == "true":
+            now = timezone.now()
+            qs = qs.filter(
+                (Q(test__start_at__isnull=True) | Q(test__start_at__lte=now)) &
+                (Q(test__end_at__isnull=True) | Q(test__end_at__gte=now))
+            )
+
+        qs = qs.order_by("-created_at")
+
+        # Simple pagination
+        try:
+            page = max(int(request.query_params.get("page", 1)), 1)
+        except ValueError:
+            page = 1
+
+        try:
+            page_size = min(max(int(request.query_params.get("page_size", 20)), 1), 100)
+        except ValueError:
+            page_size = 20
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        total = qs.count()
+
+        serializer = TestAttemptSerializer(qs[start:end], many=True)
+        return Response(
+            {
+                "count": total,
+                "page": page,
+                "page_size": page_size,
+                "results": serializer.data,
+            },
+            status=status.HTTP_200_OK,
         )
 
-    qs = qs.order_by("-created_at")
-
-    # Simple pagination
-    try:
-        page = max(int(request.query_params.get("page", 1)), 1)
-    except ValueError:
-        page = 1
-    try:
-        page_size = min(max(int(request.query_params.get("page_size", 20)), 1), 100)
-    except ValueError:
-        page_size = 20
-
-    start = (page - 1) * page_size
-    end = start + page_size
-    total = qs.count()
-
-    serializer = TestAttemptSerializer(qs[start:end], many=True)
-    return Response(
-        {
-            "count": total,
-            "page": page,
-            "page_size": page_size,
-            "results": serializer.data,
-        },
-        status=status.HTTP_200_OK,
-    )
-
+    except Exception as e:
+        # Log error (optional, if you have logging set up)
+        # logger.exception("Error fetching test attempts")
+        print(e)
+        return Response(
+            {"detail": f"An unexpected error occurred: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(["GET"])
@@ -334,10 +346,6 @@ def available_tests_old(request):
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-from django.db.models import Q, Count, Exists, OuterRef
-from django.utils import timezone
-# ...your other imports
-
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -395,7 +403,7 @@ def available_tests(request):
         )
         qs = qs.annotate(has_attempt=Exists(student_attempts)).filter(has_attempt=False)
         # -------------------------------------------------------------------------
-
+        
         # Collect test ids
         tests = list(qs.select_related("course"))
         test_ids = [t.id for t in tests]
@@ -492,7 +500,7 @@ def available_tests(request):
                 "endsAt": getattr(t, "end_at", None).isoformat() if _has_field(Test, "end_at") and getattr(t, "end_at", None) else None,
                 "items": questions_out,
             })
-
+        print(items, " all items....")
         return Response({"tests": items}, status=status.HTTP_200_OK)
 
     except Exception as e:

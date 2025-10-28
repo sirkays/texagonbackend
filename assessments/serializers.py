@@ -4,7 +4,8 @@ from assessments.models import TestAttempt, Test
 
 
 class TestMiniSerializer(serializers.ModelSerializer):
-    course_id = serializers.IntegerField(source="course_id", read_only=True)
+    # No need for 'source' here; DRF automatically maps course_id
+    course_id = serializers.IntegerField(read_only=True)
     course_name = serializers.CharField(source="course.name", read_only=True)
 
     class Meta:
@@ -74,7 +75,7 @@ class TestAttemptSerializer(serializers.ModelSerializer):
 
     def get_is_open_now(self, obj):
         """
-        Mirrors the filter you used in the endpoint:
+        Mirrors the filter used in the endpoint:
         (start_at is null or <= now) AND (end_at is null or >= now)
         """
         now = timezone.now()

@@ -962,14 +962,13 @@ def _teacher_card_dict(pt: PrivateTutoring):
     # You can replace these with real aggregates (ratings, total sessions, etc.)
     rating = 4.8
     total_sessions = TutoringBooking.objects.filter(teacher=teacher).count()
-
     return {
         "id": pt.id,
         "title":pt.title,
         "teacher_id": teacher.id,
         "teacher_name": teacher.user.get_full_name() or teacher.user.email,
         "course_id": course.id,
-        "course": getattr(course, "title", str(course)),
+        "course": getattr(course, "name", str(course)),
         "modules": module_names,
         "rating": float(rating),
         "experience": f"{getattr(teacher, 'experience', 0)}+ years",
@@ -991,7 +990,7 @@ def _booking_dict(b: TutoringBooking):
     """Shape booking item for 'Current / Past tutoring' lists."""
     tutor_name = b.teacher.user.get_full_name() or b.teacher.user.email
     course_title = getattr(getattr(b, "private_tutoring", None), "course", None)
-    course_title = getattr(course_title, "title", str(course_title) if course_title else "Course")
+    course_title = getattr(course_title, "name", str(course_title) if course_title else "Course")
 
     # naive status mapping to UI labels (capitalize)
     status_label = b.status.capitalize()
