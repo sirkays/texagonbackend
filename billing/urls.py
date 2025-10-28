@@ -7,6 +7,7 @@ transactions_list,
     add_complaint_response,
     update_complaint,
     delete_complaint_attachment,
+    add_complaint_attachments
 )
 
 urlpatterns = [
@@ -26,7 +27,11 @@ urlpatterns = [
     path("api/complaints/<uuid:complaint_id>/", get_complaint, name="complaints-detail"),    # GET
     path("api/complaints/<uuid:complaint_id>/responses/", add_complaint_response, name="complaints-add-response"),  # POST
     path("api/complaints/<uuid:complaint_id>/update/", update_complaint, name="complaints-update"),                 # PATCH
-    path("api/complaints/<uuid:complaint_id>/attachments/<uuid:attachment_id>/", delete_complaint_attachment, name="delete-complaint-attachment"),
+    path("api/complaints/<uuid:complaint_id>/attachments/", add_complaint_attachments, name="complaints-add-attachments"),  # POST (multipart)
+
+    path("api/complaints/<uuid:complaint_id>/attachments/<uuid:attachment_id>/", delete_complaint_attachment, 
+    name="delete-complaint-attachment"),
+    
     # urls.py
 
 ]

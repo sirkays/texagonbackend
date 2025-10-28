@@ -348,6 +348,7 @@ def confirm_payement(request):
     return Response({"status":"success"}, status=status.HTTP_200_OK)
 
 
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -361,28 +362,32 @@ def transactions_list(request):
         if not org:
             return Response({"detail": "Organization not found"}, status=400)
 
+        # --- Read type param ---
+        type_param = request.query_params.get("type")
+        if type_param not in (None, "store", "subscription"):
+            return Response({"detail": "Invalid type. Must be 'store' or 'subscription'."}, status=400)
+
+        # --- Build base querysets ---
         sub_qs = SubscriptionPayment.objects.filter(
             invoice__organization_membership__user=user,
-            invoice__subscription__organization=org
+            invoice__subscription__organization=org,
         ).select_related(
             "invoice",
             "invoice__subscription",
             "invoice__organization_membership",
-            "invoice__organization_membership__user"
+            "invoice__organization_membership__user",
         ).annotate(
             effective_date=Case(
-                When(status='success', then='paid_at'),
-                default='created_at',
-                output_field=DateTimeField()
+                When(status="success", then=F("paid_at")),
+                default=F("created_at"),
+                output_field=DateTimeField(),
             )
         )
 
-        store_qs = Payment.objects.filter(
-            order__user=user,
-        ).select_related("order", "order__user").annotate(
-            effective_date=F('created_at')
-        )
-
+        store_qs = Payment.objects.filter(order__user=user).select_related(
+            "order", "order__user"
+        ).annotate(effective_date=F("created_at"))
+        # --- Apply filters common to both ---
         status_param = request.query_params.get("status")
         if status_param:
             sub_qs = sub_qs.filter(status=status_param)
@@ -391,60 +396,77 @@ def transactions_list(request):
         from_date_str = request.query_params.get("from_date")
         if from_date_str:
             try:
-                from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
-                from_date = timezone.make_aware(from_date)
-                sub_qs = sub_qs.filter(created_at__gte=from_date)
-                store_qs = store_qs.filter(created_at__gte=from_date)
+                from_date = timezone.make_aware(datetime.strptime(from_date_str, "%Y-%m-%d"))
             except ValueError:
                 return Response({"detail": "Invalid from_date format. Use YYYY-MM-DD."}, status=400)
+            sub_qs = sub_qs.filter(created_at__gte=from_date)
+            store_qs = store_qs.filter(created_at__gte=from_date)
 
         to_date_str = request.query_params.get("to_date")
         if to_date_str:
             try:
-                to_date = datetime.strptime(to_date_str, "%Y-%m-%d")
-                to_date = timezone.make_aware(to_date.replace(hour=23, minute=59, second=59))
-                sub_qs = sub_qs.filter(created_at__lte=to_date)
-                store_qs = store_qs.filter(created_at__lte=to_date)
+                to_date = timezone.make_aware(
+                    datetime.strptime(to_date_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+                )
             except ValueError:
                 return Response({"detail": "Invalid to_date format. Use YYYY-MM-DD."}, status=400)
+            sub_qs = sub_qs.filter(created_at__lte=to_date)
+            store_qs = store_qs.filter(created_at__lte=to_date)
 
         search = request.query_params.get("search")
         if search:
             sub_qs = sub_qs.filter(
-                Q(reference__icontains=search) |
-                Q(invoice__number__icontains=search) |
-                Q(transaction_id__icontains=search)
+                Q(reference__icontains=search)
+                | Q(invoice__number__icontains=search)
+                | Q(transaction_id__icontains=search)
             )
             store_qs = store_qs.filter(
-                Q(provider_ref__icontains=search) |
-                Q(error_message__icontains=search)
+                Q(provider_ref__icontains=search) | Q(error_message__icontains=search)
             )
 
-        sub_qs = sub_qs.order_by('-effective_date')
-        store_qs = store_qs.order_by('-effective_date')
+        # --- Apply type filter ---
+        if type_param == "subscription":
+            qs = sub_qs.order_by("-effective_date")
+        elif type_param == "store":
+            qs = store_qs.order_by("-effective_date")
+        else:
+            # merge both if no type specified
+            sub_qs = sub_qs.order_by("-effective_date")
+            store_qs = store_qs.order_by("-effective_date")
+            qs = heapq.merge(
+                sub_qs.iterator(chunk_size=1000),
+                store_qs.iterator(chunk_size=1000),
+                key=lambda p: p.effective_date,
+                reverse=True,
+            )
 
-        sub_iter = sub_qs.iterator(chunk_size=1000)
-        store_iter = store_qs.iterator(chunk_size=1000)
-
-        merged = heapq.merge(sub_iter, store_iter, key=lambda p: -p.effective_date.timestamp())
-
+        # --- Pagination ---
         try:
             page_number = int(request.query_params.get("page", 1))
             page_size = int(request.query_params.get("page_size", 10))
         except ValueError:
             return Response({"detail": "Invalid page or page_size."}, status=400)
-
         if page_number < 1 or page_size < 1:
             return Response({"detail": "Page and page_size must be positive."}, status=400)
 
         start = (page_number - 1) * page_size
-        paginated = islice(merged, start, start + page_size)
+        end = start + page_size
 
+        if type_param in ("store", "subscription"):
+            paginated = qs[start:end]
+        else:
+            paginated = list(islice(qs, start, end))
+
+        # --- Serialize ---
         data = []
         for pay in paginated:
             if isinstance(pay, SubscriptionPayment):
                 date = pay.paid_at if pay.status == "success" else pay.created_at
-                customer_email = pay.invoice.organization_membership.user.email if pay.invoice.organization_membership else ""
+                customer_email = (
+                    pay.invoice.organization_membership.user.email
+                    if pay.invoice.organization_membership
+                    else ""
+                )
                 d = {
                     "id": pay.id,
                     "type": "subscription",
@@ -452,13 +474,13 @@ def transactions_list(request):
                     "amount": str(pay.amount),
                     "currency": pay.currency,
                     "status": pay.status,
-                    "date": date.isoformat(),
+                    "date": (date or pay.created_at).isoformat(),
                     "customer": customer_email,
                     "invoice_number": pay.invoice.number,
                 }
-            else:  # Payment
+            else:  # Payment (store)
                 date = pay.created_at
-                customer_email = pay.order.user.email if pay.order.user else ""
+                customer_email = pay.order.user.email if pay.order and pay.order.user else ""
                 d = {
                     "id": str(pay.id),
                     "type": "store",
@@ -466,34 +488,34 @@ def transactions_list(request):
                     "amount": str(pay.amount),
                     "currency": pay.currency,
                     "status": pay.status,
-                    "date": date.isoformat(),
+                    "date": (date or pay.effective_date).isoformat(),
                     "customer": customer_email,
-                    "order_id": str(pay.order.id),
+                    "order_id": str(pay.order.id) if pay.order else "",
                 }
             data.append(d)
 
-        count = sub_qs.count() + store_qs.count()
+        if type_param == "subscription":
+            count = sub_qs.count()
+        elif type_param == "store":
+            count = store_qs.count()
+        else:
+            count = sub_qs.count() + store_qs.count()
+
         num_pages = (count + page_size - 1) // page_size
 
-        return Response({
-            "count": count,
-            "num_pages": num_pages,
-            "page": page_number,
-            "results": data
-        })
-
-    except Exception as e:
-        # Print to server logs
-        import traceback
-        traceback.print_exc()
-
-        # Return error response
         return Response(
-            {"detail": f"An unexpected error occurred: {str(e)}"},
-            status=500
+            {
+                "count": count,
+                "num_pages": num_pages,
+                "page": page_number,
+                "results": data,
+            }
         )
 
-
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response({"detail": f"An unexpected error occurred: {str(e)}"}, status=500)
 
 # -----------------------------
 # Serialization helpers
@@ -649,52 +671,100 @@ def create_complaint(request):
         if org_err:
             return org_err
 
+        # ---- Inputs ----
+        # Normalize category; accept "order" as alias for "store" for backward-compat
+        category = (request.data.get("category") or "").strip().lower()
+        if category not in ("subscription", "order"):
+            return Response(
+                {"detail": "Invalid 'category'. Must be 'store' (or 'order') or 'subscription'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         title = (request.data.get("title") or "").strip()
         description = (request.data.get("description") or "").strip()
         priority = (request.data.get("priority") or "medium").lower()
-        if not title or not description:
-            return Response({"detail": "Both 'title' and 'description' are required."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        if priority not in ("low", "medium", "high"):
-            return Response({"detail": "Invalid 'priority'. Must be low|medium|high."},
-                            status=status.HTTP_400_BAD_REQUEST)
 
-        payment_id = request.data.get("payment_id")
+        if not title or not description:
+            return Response(
+                {"detail": "Both 'title' and 'description' are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if priority not in ("low", "medium", "high"):
+            return Response(
+                {"detail": "Invalid 'priority'. Must be low|medium|high."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Transaction identifiers
+        payment_id = request.data.get("transaction_reference")
         sub_ref = request.data.get("subscription_reference")
         sub_txn_id = request.data.get("subscription_transaction_id")
 
+        # ---- Resolve the linked transaction according to category ----
         payment = None
         sub_payment = None
-        tx_org_id = None
+        tx_org_id = None  # used only for subscription ownership/org checks
+        if category == "order":
+            # must provide payment_id and must NOT provide subscription identifiers
+            if not payment_id:
+                return Response(
+                    {"detail": "For category 'store', 'payment_id' is required."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            payment = get_object_or_404(
+                Payment.objects.select_related("order", "order__user"),
+                provider_ref=payment_id
+            )
+            # Ownership check: ensure the payment belongs to this user
+            if not payment.order or payment.order.user_id != user.id:
+                return Response(
+                    {"detail": "You do not have access to this payment."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            # Note: Orders in this schema have no org FK, so we cannot enforce org equality for store.
 
-        # Purchase complaint (Payment -> Order) — do NOT assume Order has organization
-        if payment_id:
-            payment = get_object_or_404(Payment.objects.select_related("order"), id=payment_id)
-            # tx_org_id stays None (no org FK on Order in your schema)
-
-        # Subscription complaint — we can resolve org safely
-        if sub_ref or sub_txn_id:
+        elif category == "subscription":
+            # must provide either subscription_reference OR subscription_transaction_id
+            if not payment_id:
+                return Response(
+                    {"detail": "For category 'subscription', do not provide 'payment_id'."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            
             sub_payment = (
                 SubscriptionPayment.objects
-                .select_related("invoice__subscription__organization")
-                .filter(**({"reference": sub_ref} if sub_ref else {"transaction_id": sub_txn_id}))
+                .select_related("invoice__subscription__organization",
+                                "invoice__organization_membership__user")
+                .filter(**({"reference": payment_id}))
                 .first()
             )
             if not sub_payment:
                 return Response({"detail": "Subscription transaction not found."},
                                 status=status.HTTP_404_NOT_FOUND)
+
+            # Ensure the subscription payment belongs to the requesting user
+            inv_mem = getattr(sub_payment, "invoice", None)
+            inv_mem = getattr(inv_mem, "organization_membership", None)
+            inv_user_id = getattr(inv_mem, "user_id", None)
+            if inv_user_id != user.id:
+                return Response(
+                    {"detail": "You do not have access to this subscription transaction."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            # We CAN org-check for subscriptions
             tx_org_id = getattr(sub_payment.invoice.subscription, "organization_id", None)
+            if org and tx_org_id:
+                if tx_org_id != org.id:
+                    return Response(
+                        {"detail": "Transaction does not belong to this organization."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                if not OrganizationMembership.objects.filter(user=user, organization=org, is_active=True).exists():
+                    return Response(
+                        {"detail": "You do not have access to this organization."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
 
-        # If an org was supplied and we have a subscription org, enforce membership & same org.
-        # (For purchase, we can't org-check since Order has no org FK.)
-        if org and tx_org_id:
-            if tx_org_id != org.id:
-                return Response({"detail": "Transaction does not belong to this organization."},
-                                status=status.HTTP_403_FORBIDDEN)
-            if not OrganizationMembership.objects.filter(user=user, organization=org, is_active=True).exists():
-                return Response({"detail": "You do not have access to this organization."},
-                                status=status.HTTP_403_FORBIDDEN)
-
+        # ---- Create complaint + first message, then attachments ----
         with transaction.atomic():
             comp = Complaint.objects.create(
                 title=title,
@@ -702,8 +772,8 @@ def create_complaint(request):
                 priority=priority,
                 status=Complaint.Status.OPEN,
                 created_by=user,
-                payment=payment,
-                subscription_payment=sub_payment,
+                payment=payment if category == "store" else None,
+                subscription_payment=sub_payment if category == "subscription" else None,
             )
             ComplaintResponse.objects.create(
                 complaint=comp,
@@ -711,14 +781,13 @@ def create_complaint(request):
                 author_name=user.get_full_name() or user.email,
                 role="user",
             )
-            # Save attachments AFTER complaint exists so upload_to can include complaint.code
+
             try:
                 _save_attachments_from_request(request, comp, user)
             except ValueError as ve:
-                # convert to 400 with clear message
                 return Response({"detail": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Reload with prefetch to include responses + attachments
+        # ---- Reload with relations for response payload ----
         comp = (
             Complaint.objects.select_related(
                 "payment__order",
@@ -736,9 +805,10 @@ def create_complaint(request):
     except Exception as e:
         print("\n[ERROR] create_complaint():", str(e))
         traceback.print_exc()
-        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+        return Response(
+            {"detail": "An unexpected error occurred.", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 # ======================================================
 # List Complaints
