@@ -972,7 +972,7 @@ def _teacher_card_dict(pt: PrivateTutoring):
         "modules": module_names,
         "rating": float(rating),
         "experience": f"{getattr(teacher, 'experience', 0)}+ years",
-        "rate": f"₦{pt.rate_per_hour}/hour",
+        "rate": f"₦{pt.rate_per_hour}/month",
         "languages": language_names,
         "availability_days": availability_days,  # ["Mon","Wed","Fri"]
         "verified": True,

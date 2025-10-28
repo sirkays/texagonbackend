@@ -209,6 +209,7 @@ def cart_get(request):
     cart = _get_or_create_cart(request)
     return Response(_cart_to_dict(cart))
 
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -216,19 +217,47 @@ def cart_add(request):
     """
     Body: {product_id, quantity}
     """
-    cart = _get_or_create_cart(request)
-    pid = request.data.get("product_id")
-    qty = int(request.data.get("quantity") or 1)
     try:
-        product = Product.objects.get(pk=pid, is_active=True)
-    except Product.DoesNotExist:
-        return Response({"detail": "Invalid product."}, status=400)
-    item, created = CartItem.objects.get_or_create(cart=cart, product=product, defaults={"quantity": qty})
-    if not created:
-        item.quantity = F("quantity") + qty
-        item.save(update_fields=["quantity"])
-        item.refresh_from_db()
-    return Response(_cart_to_dict(cart), status=201)
+        print(" cndjkcndkcndknkfjvnfkvjnkjf ")
+        print(request.data)
+        cart = _get_or_create_cart(request)
+        pid = request.data.get("product_id")
+        qty = int(request.data.get("quantity") or 1)
+        print(cart," cart " ,pid," pid " ,qty, " qttyyyy")
+        if not pid:
+            return Response({"detail": "Product ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+        print(pid)
+        try:
+            product = Product.objects.get(pk=pid, is_active=True)
+        except Product.DoesNotExist:
+            print("ppppppppp")
+            return Response({"detail": "Invalid product."}, status=status.HTTP_400_BAD_REQUEST)
+
+        item, created = CartItem.objects.get_or_create(
+            cart=cart,
+            product=product,
+            defaults={"quantity": qty},
+        )
+        print(item, " item")
+
+        if not created:
+            item.quantity = F("quantity") + qty
+            item.save(update_fields=["quantity"])
+            item.refresh_from_db()
+        print(_cart_to_dict(cart))
+        return Response(_cart_to_dict(cart), status=status.HTTP_201_CREATED)
+
+    except ValueError:
+        print(e)
+        return Response({"detail": "Invalid quantity value."}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        print(e)
+        # Catch any unexpected errors
+        return Response(
+            {"detail": f"An unexpected error occurred: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
 
 @api_view(["PATCH"])
 @permission_classes([HasAPIKey])
