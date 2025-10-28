@@ -21,7 +21,9 @@ from django.db.models import (
     Subquery,
     Sum,
     Value,
+    FloatField,
 )
+
 from django.db.models.functions import Coalesce, Extract
 from django.db.utils import DataError
 from django.utils import dateparse, timezone
@@ -1901,16 +1903,28 @@ def student_performance_detail(request):
 
 
 
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def teacher_module_analytics(request):
+    """
+    Returns paginated module analytics for the authenticated teacher.
+    Enrollment totals are the number of people enrolled in the module's course.
+    Uses subqueries to avoid join fan-out.
+    """
     try:
+        # --- auth & teacher/org lookup ---
         session_token = request.headers.get("X-Session-Token")
         if not session_token:
             return Response({"error": "Session token required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        token = get_object_or_404_ajax(SessionToken, key=session_token, is_active=True, expires_at__gt=timezone.now())
+        token = get_object_or_404_ajax(
+            SessionToken,
+            key=session_token,
+            is_active=True,
+            expires_at__gt=timezone.now()
+        )
         if not token:
             return Response({"error": "Invalid or expired session token"}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -1921,41 +1935,98 @@ def teacher_module_analytics(request):
 
         org = teacher.organization
 
-        search = request.query_params.get("search", "")
-        difficulty = request.query_params.get("difficulty", "").upper()
-        active = request.query_params.get("active", "true") == "true"
+        # --- filters & pagination ---
+        search      = request.query_params.get("search", "")
+        difficulty  = request.query_params.get("difficulty", "").upper()
+        active      = request.query_params.get("active", "true") == "true"
 
-        page = max(1, int(request.query_params.get("page", 1)))
-        page_size = max(1, min(50, int(request.query_params.get("page_size", 10))))
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+        except Exception:
+            page = 1
+        try:
+            page_size = max(1, min(50, int(request.query_params.get("page_size", 10))))
+        except Exception:
+            page_size = 10
 
-        qs = Module.objects.filter(course__organization=org, course__teacher=teacher)
-
+        base_qs = Module.objects.filter(course__organization=org, course__teacher=teacher)
         if search:
-            qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
-
+            base_qs = base_qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
         if difficulty:
-            qs = qs.filter(difficulty=difficulty)
-
+            base_qs = base_qs.filter(difficulty=difficulty)
         if active:
-            qs = qs.filter(active=True)
+            base_qs = base_qs.filter(active=True)
 
-        total_count = qs.count()
+        total_count = base_qs.count()
         total_pages = math.ceil(total_count / page_size) if page_size else 1
 
-        qs = qs.select_related("course", "category").annotate(
-            lesson_count=Count("lessons", filter=Q(lessons__active=True)),
-            enrollments=Count("course__enrollments", filter=Q(course__enrollments__status=Enrollment.Status.ACTIVE)),
-            avg_completion=Avg("course__enrollments__progress_pct")
-        ).order_by('-updated_at')[(page-1)*page_size : page*page_size]
+        # --- subqueries: per-module course enrollments & avg completion ---
+        enroll_qs = (
+            Enrollment.objects
+            .filter(course=OuterRef("course"), status=Enrollment.Status.ACTIVE)
+            .values("course")
+            .annotate(c=Count("id"))
+            .values("c")
+        )
+        avg_qs = (
+            Enrollment.objects
+            .filter(
+                course=OuterRef("course"),
+                status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED]
+            )
+            .values("course")
+            .annotate(a=Avg("progress_pct"))
+            .values("a")
+        )
 
-        total_enrollments = qs.aggregate(total=Sum("enrollments"))["total"] or 0
-        completion_rate = qs.aggregate(avg=Avg("avg_completion"))["avg"] or 0.0
+        # --- order, annotate, then slice ---
+        start = (page - 1) * page_size
+        end   = page * page_size
+
+        page_qs = (
+            base_qs.select_related("course", "category")
+                   .annotate(
+                       lesson_count=Count("lessons", filter=Q(lessons__active=True), distinct=True),
+                       enrollments=Coalesce(Subquery(enroll_qs, output_field=IntegerField()), 0),
+                       avg_completion=Coalesce(Subquery(avg_qs, output_field=FloatField()), 0.0),
+                   )
+                   .order_by("-updated_at")[start:end]
+        )
+
+        # Force evaluation ONCE so we can safely compute aggregates without .distinct() on a sliced qs
+        page_modules = list(page_qs)
+
+        # ---------- AGGREGATES WITHOUT DOUBLE COUNTING COURSES ----------
+        # Unique courses on THIS PAGE (dedupe in Python; no DB .distinct() after slice)
+        course_ids_in_page = list({m.course_id for m in page_modules})
+
+        # Total enrollments across unique courses on page
+        if course_ids_in_page:
+            per_course_enrollments = (
+                Enrollment.objects
+                .filter(course_id__in=course_ids_in_page, status=Enrollment.Status.ACTIVE)
+                .values("course_id")
+                .annotate(c=Count("id"))
+            )
+            total_enrollments = sum(row["c"] for row in per_course_enrollments)
+            completion_rate = (
+                Enrollment.objects
+                .filter(
+                    course_id__in=course_ids_in_page,
+                    status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
+                )
+                .aggregate(avg=Avg("progress_pct"))["avg"] or 0.0
+            )
+        else:
+            total_enrollments = 0
+            completion_rate = 0.0
+        # ---------------------------------------------------------------
 
         modules_data = []
-        for m in qs:
-            d = {
+        for m in page_modules:
+            modules_data.append({
                 "id": m.id,
-                "title": m.name,
+                "title": f"{m.name} ({m.course.name})",
                 "description": m.description,
                 "difficulty": m.difficulty,
                 "category": {"id": m.category.id, "name": m.category.name} if m.category else None,
@@ -1967,15 +2038,14 @@ def teacher_module_analytics(request):
                 "createdAt": m.created_at,
                 "updatedAt": m.updated_at,
                 "lessons": [],
-                "lessonCount": m.lesson_count,
-                "enrollments": m.enrollments,
-                "completion": m.avg_completion or 0,
-            }
-            modules_data.append(d)
+                "lessonCount": m.lesson_count or 0,
+                "enrollments": m.enrollments or 0,                 # per-module = course's enrollment
+                "completion": float(m.avg_completion or 0.0),      # per-module avg from course
+            })
 
         data = {
             "aggregates": {
-                "total_enrollments": total_enrollments,
+                "total_enrollments": total_enrollments,  # counted once per course on the page
                 "completion_rate": completion_rate,
             },
             "pagination": {
@@ -1986,15 +2056,10 @@ def teacher_module_analytics(request):
             },
             "modules": modules_data,
         }
-
         return Response(data, status=status.HTTP_200_OK)
 
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-
 
 
 
