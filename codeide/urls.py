@@ -20,4 +20,9 @@ urlpatterns = [
     path("api/ide/files/upload/", views.codefile_upload, name="ide_codefile_upload"),
     path("api/ide/files/<int:file_id>/", views.codefile_detail, name="ide_codefile_detail"),
     path("api/ide/files/<int:file_id>/delete/", views.codefile_delete, name="ide_codefile_delete"),
+    
+    path("api/teacher/submissions/", views.teacher_submissions_list, name="teacher_submissions_list"),
+    path("api/teacher/submissions/<int:pk>/", views.teacher_submission_detail, name="teacher_submission_detail"),
+    path("api/teacher/submissions/<int:pk>/comments/", views.teacher_submission_comments, name="teacher_submission_comments"),
+    path("api/teacher/submissions/<int:pk>/grade/", views.teacher_submission_grade, name="teacher_submission_grade"),
 ]

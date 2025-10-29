@@ -1245,18 +1245,15 @@ def teacher_tutoring_bookings(request):
                 if tab == "upcoming":
                     qs = qs.filter(
                         Q(status__in=["pending", "confirmed"]) &
-                        Q(completed_date__isnull=True) &
-                        Q(created_at__gte=now - timedelta(days=1))
+                        Q(completed_date__isnull=True)
                     ).order_by("created_at")
                 else:  # past
                     qs = qs.filter(
-                        Q(status__in=["completed", "cancelled"]) |
-                        Q(completed_date__lte=now)
+                        Q(status__in=["completed", "cancelled"])
                     ).order_by("-completed_date", "-created_at")
                 total = qs.count()
                 qs = qs[start:start + limit]
                 serializer = TutoringBookingTeacherSerializer(qs, many=True)
-
             return Response({
                 "results": serializer.data,
                 "total": total,

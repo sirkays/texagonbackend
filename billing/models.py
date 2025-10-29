@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 from core.models import TimeStampedModel, NamedModel
 from orgs.models import OrganizationMembership
 from store.models import Product, Payment
+from live.models import TutoringBooking
 
 
 class SubscriptionPlan(NamedModel):
@@ -100,7 +101,6 @@ class SubscriptionPayment(TimeStampedModel):
         self.status = status
         self.paid_at = timezone.now()
         self.save()
-
 
 
 

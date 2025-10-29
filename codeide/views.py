@@ -1,26 +1,33 @@
 # app: ide/views.py
+from django.conf import settings
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+
+from rest_framework import status, pagination
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
 
 from rest_framework_api_key.permissions import HasAPIKey
-from api.authentication import SessionTokenAuthentication  # your existing session-token auth
+from api.authentication import SessionTokenAuthentication
 
-from core.utils import _get_student_for_user, _get_teacher_for_user
+from core.utils import _get_student_for_user, _get_teacher_for_user, _resolve_org
 from learning.models import Lesson
-from .models import CodeSnippet, CodeSubmission, CodeComment,CodeFile
+
+from .models import CodeSnippet, CodeSubmission, CodeComment, CodeFile
 from .serializers import (
     CodeSnippetSerializer,
     CodeSubmissionSerializer,
     TeacherUpdateSubmissionSerializer,
-    CodeCommentSerializer,CodeFileSerializer
+    CodeCommentSerializer,
+    CodeFileSerializer,
+    SubmissionListSerializer,
+    TeacherCodeSubmissionDetailSerializer,
+    TeacherCodeCommentSerializer,
 )
 from .utils import user_is_submission_student, user_teaches_lesson, user_is_teacher
-
-from rest_framework.parsers import MultiPartParser, FormParser
-from django.conf import settings
 
 
 # ---------- SNIPPETS ----------
@@ -321,3 +328,190 @@ def codefile_delete(request, file_id: int):
     obj.file.delete(save=False)
     obj.delete()
     return Response(status=204)
+
+
+
+
+
+# ---------- Pagination ----------
+class QuickPagination(pagination.PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+# ---------- Helpers ----------
+def _teacher_scoped_queryset(request):
+    """
+    Limit submissions to courses taught by the authenticated teacher
+    and (optionally) to the selected organization.
+    """
+    teacher = _get_teacher_for_user(request.user)
+    if not teacher:
+        return None, Response({"detail": "Teacher profile not found."}, status=403)
+
+    # Optional org resolution & enforcement
+    org, org_err = _resolve_org(request)
+    if org_err:
+        return None, org_err
+
+    qs = (
+        CodeSubmission.objects
+        .select_related(
+            "student__user",
+            "lesson__module__course__teacher__user",
+            "lesson__module__course__classroom",
+        )
+        .prefetch_related("comments")
+        .filter(lesson__module__course__teacher=teacher)
+    )
+    # If your Course has organization, also scope to org
+    try:
+        qs = qs.filter(lesson__module__course__organization=org)
+    except Exception:
+        # If no org relation on Course, you can remove this filter
+        pass
+
+    return qs, None
+
+def _apply_filters(request, qs):
+    """
+    Filters:
+      - q: text search across student name/email, lesson name, course name
+      - class_id, classroom_id
+      - course_id
+      - lesson_id
+      - status (single or CSV)
+    """
+    q = request.query_params.get("q", "").strip()
+    course_id = request.query_params.get("course_id")
+    lesson_id = request.query_params.get("lesson_id")
+    class_id = request.query_params.get("class_id") or request.query_params.get("classroom_id")
+    status_value = request.query_params.get("status", "").strip()
+
+    if q:
+        qs = qs.filter(
+            Q(lesson__name__icontains=q) |
+            Q(lesson__module__course__name__icontains=q) |
+            Q(student__user__first_name__icontains=q) |
+            Q(student__user__last_name__icontains=q) |
+            Q(student__user__email__icontains=q)
+        )
+
+    if course_id:
+        qs = qs.filter(lesson__module__course_id=course_id)
+
+    if lesson_id:
+        qs = qs.filter(lesson_id=lesson_id)
+
+    if class_id:
+        # Prefer course.classroom
+        qs = qs.filter(
+            Q(lesson__module__course__classroom_id=class_id)
+            | Q(student__classroom_id=class_id)
+        )
+
+    if status_value:
+        statuses = [s.strip() for s in status_value.split(",") if s.strip()]
+        if statuses:
+            qs = qs.filter(status__in=statuses)
+
+    order = request.query_params.get("order", "-created_at")
+    allowed = {"created_at", "-created_at", "graded_at", "-graded_at", "status", "-status"}
+    if order in allowed:
+        qs = qs.order_by(order, "-id")
+
+    return qs
+
+# ---------- 1) Teacher list ----------
+@api_view(["GET"])
+@permission_classes([HasAPIKey, IsAuthenticated])
+@authentication_classes([SessionTokenAuthentication])
+def teacher_submissions_list(request):
+    qs, err = _teacher_scoped_queryset(request)
+    if err:
+        return err
+    qs = _apply_filters(request, qs)
+
+    paginator = QuickPagination()
+    page = paginator.paginate_queryset(qs, request)
+    ser = SubmissionListSerializer(page, many=True)
+    return paginator.get_paginated_response(ser.data)
+
+# ---------- 2) Detail ----------
+@api_view(["GET"])
+@permission_classes([HasAPIKey, IsAuthenticated])
+@authentication_classes([SessionTokenAuthentication])
+def teacher_submission_detail(request, pk: int):
+    qs, err = _teacher_scoped_queryset(request)
+    if err:
+        return err
+    obj = get_object_or_404(qs, pk=pk)
+    ser = TeacherCodeSubmissionDetailSerializer(obj)
+    return Response(ser.data)
+
+# ---------- 3) Comments list/create ----------
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey, IsAuthenticated])
+@authentication_classes([SessionTokenAuthentication])
+def teacher_submission_comments(request, pk: int):
+    qs, err = _teacher_scoped_queryset(request)
+    if err:
+        return err
+    submission = get_object_or_404(qs, pk=pk)
+
+    if request.method == "GET":
+        comments = submission.comments.select_related("author").order_by("created_at")
+        ser = TeacherCodeCommentSerializer(comments, many=True)
+        return Response(ser.data)
+
+    # POST: create comment
+    message = (request.data.get("message") or "").strip()
+    if not message:
+        return Response({"detail": "Message is required."}, status=400)
+
+    c = CodeComment.objects.create(
+        submission=submission,
+        author=request.user,
+        author_role="teacher",
+        message=message,
+    )
+    return Response(TeacherCodeCommentSerializer(c).data, status=201)
+
+# ---------- 4) Grade ----------
+@api_view(["POST"])
+@permission_classes([HasAPIKey, IsAuthenticated])
+@authentication_classes([SessionTokenAuthentication])
+def teacher_submission_grade(request, pk: int):
+    qs, err = _teacher_scoped_queryset(request)
+    if err:
+        return err
+    submission = get_object_or_404(qs, pk=pk)
+
+    # data
+    score = request.data.get("score")
+    feedback = request.data.get("feedback", "")
+    correction_code = request.data.get("correction_code", "")
+
+    # Basic validation
+    try:
+        score_val = None if score in (None, "") else float(score)
+        if score_val is not None and (score_val < 0 or score_val > 1000):
+            return Response({"detail": "Score must be between 0 and 1000."}, status=400)
+    except Exception:
+        return Response({"detail": "Score must be numeric."}, status=400)
+
+    teacher = _get_teacher_for_user(request.user)
+    if not teacher:
+        return Response({"detail": "Teacher profile not found."}, status=403)
+
+    submission.score = score_val
+    submission.feedback = feedback
+    submission.correction_code = correction_code
+    submission.status = CodeSubmission.Status.GRADED
+    submission.graded_by = teacher
+    submission.graded_at = timezone.now()
+    submission.save(update_fields=[
+        "score", "feedback", "correction_code", "status", "graded_by", "graded_at", "updated_at"
+    ])
+
+    return Response(TeacherCodeSubmissionDetailSerializer(submission).data, status=200)
