@@ -500,7 +500,6 @@ def available_tests(request):
                 "endsAt": getattr(t, "end_at", None).isoformat() if _has_field(Test, "end_at") and getattr(t, "end_at", None) else None,
                 "items": questions_out,
             })
-        print(items, " all items....")
         return Response({"tests": items}, status=status.HTTP_200_OK)
 
     except Exception as e:
@@ -901,7 +900,7 @@ def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
         "category": category,
         "isPublished": is_published,
         "questionsCount": questions_count,
-
+        "course_id":course.id,
         # created/updated
         "createdAt": _iso(getattr(test, "created_at", None)),
         "updatedAt": _iso(getattr(test, "updated_at", None)),
@@ -910,7 +909,6 @@ def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
         "start_at": _iso(getattr(test, "start_at", None)),
         "end_at": _iso(getattr(test, "end_at", None)),
     }
-
     if include_questions and questions_manager is not None:
         questions = list(questions_manager.all().order_by("order", "id"))
         result["questions"] = [_serialize_question(q) for q in questions]  # assumes this helper exists
@@ -936,7 +934,6 @@ def update_test(request, test_id: int):
             return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
 
         data = request.data or {}
-
         # Core fields
         if "title" in data:
             test.title = (data["title"] or "").strip()
