@@ -110,8 +110,12 @@ def _cart_to_dict(cart: Cart) -> dict:
     subtotal = Decimal("0.00")
     for it in cart.items.select_related("product"):
         line = it.quantity * it.product.price
+        
+        image_url = it.product.images.first().url
+        
         items.append({
             "id": str(it.id),
+            "image_url":image_url,
             "product_id": str(it.product_id),
             "title": it.product.title,
             "price": str(it.product.price),

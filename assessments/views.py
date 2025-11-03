@@ -1,6 +1,7 @@
 # ===== Standard Library Imports =====
 import logging
 import math
+from rest_framework.permissions import IsAuthenticated
 import traceback
 from collections import defaultdict
 from datetime import datetime, timezone as py_tz
@@ -524,211 +525,218 @@ def _test_has_field(model, field_name: str) -> bool:
 
 
 @api_view(["POST"])
-@permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
+@permission_classes([HasAPIKey, IsAuthenticated])  # << add IsAuthenticated
 @transaction.atomic
 def submit_test(request, test_id: int):
-    """
-    Submit a completed test with all answers.
-
-    Expected JSON body (examples):
-    - SCQ/TF (single choice):
-      {"answers":[{"question":101,"choice":555}, ...]}
-
-    - MCQ (multiple choices):
-      {"answers":[{"question":102,"choices":[561,562]}, ...]}
-
-    - Short/Essay (free text):
-      {"answers":[{"question":103,"text":"your answer"}, ...]}
-
-    Optional meta:
-      "started_at": "2025-08-23T12:00:00Z",
-      "duration_seconds": 1760,
-      "suspicious_activity": 2   # ignored unless you add fields for it
-    """
-    user = request.user
-    student = _get_student_for_user(user)
-    if not student:
-        return Response({"detail": "Student profile not found for user."}, status=status.HTTP_400_BAD_REQUEST)
-
     try:
-        test = Test.objects.get(pk=test_id)
-    except Test.DoesNotExist:
-        return Response({"detail": "Test not found."}, status=status.HTTP_404_NOT_FOUND)
+        """
+        Submit a completed test with all answers.
 
-    payload = request.data or {}
-    answers_in: List[Dict[str, Any]] = payload.get("answers") or []
-    if not isinstance(answers_in, list) or not answers_in:
-        return Response({"detail": "answers must be a non-empty list."}, status=status.HTTP_400_BAD_REQUEST)
+        Expected JSON body (examples):
+        - SCQ/TF (single choice):
+        {"answers":[{"question":101,"choice":555}, ...]}
 
-    started_at_iso = payload.get("started_at")
-    duration_seconds = payload.get("duration_seconds")
+        - MCQ (multiple choices):
+        {"answers":[{"question":102,"choices":[561,562]}, ...]}
 
-    # membership check: accept only questions that belong to this test
-    test_question_ids = set(Question.objects.filter(test=test).values_list("id", flat=True))
+        - Short/Essay (free text):
+        {"answers":[{"question":103,"text":"your answer"}, ...]}
 
-    # Total points from Questions
-    total_points = Question.objects.filter(test=test).aggregate(total=Sum("points"))["total"] or Decimal(0)
+        Optional meta:
+        "started_at": "2025-08-23T12:00:00Z",
+        "duration_seconds": 1760,
+        "suspicious_activity": 2   # ignored unless you add fields for it
+        """
+        if not getattr(request.user, "is_authenticated", False):
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
 
-    # Build normalized answers + grade
-    score = Decimal(0)
-    auto_graded_count = 0
-    pending_manual = 0
-    breakdown: List[Dict[str, Any]] = []
-    normalized_answers: List[Dict[str, Any]] = []
-    answer_rows: List[TestAnswer] = []
+        user = request.user
+        student = _get_student_for_user(user)
+        if not student:
+            return Response({"detail": "Student profile not found for user."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Preload all correct choice ids per question to avoid repeated queries
-    correct_map = {
-        qid: set(Choice.objects.filter(question_id=qid, is_correct=True).values_list("id", flat=True))
-        for qid in test_question_ids
-    }
+        try:
+            test = Test.objects.get(pk=test_id)
+        except Test.DoesNotExist:
+            return Response({"detail": "Test not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    # Preload points per question
-    points_map = dict(Question.objects.filter(test=test).values_list("id", "points"))
+        payload = request.data or {}
+        print(payload, " alll pay.... ")
+        answers_in: List[Dict[str, Any]] = payload.get("answers") or []
+        if not isinstance(answers_in, list) or not answers_in:
+            return Response({"detail": "answers must be a non-empty list."}, status=status.HTTP_400_BAD_REQUEST)
 
-    for item in answers_in:
-        qid = item.get("question")
-        if qid not in test_question_ids:
-            logger.info("Ignoring answer for question not in test: question=%s test=%s", qid, test_id)
-            continue
+        started_at_iso = payload.get("started_at")
+        duration_seconds = payload.get("duration_seconds")
 
-        q_points = Decimal(points_map.get(qid, 0) or 0)
-        awarded = Decimal(0)
-        auto_graded = False
+        # membership check: accept only questions that belong to this test
+        test_question_ids = set(Question.objects.filter(test=test).values_list("id", flat=True))
 
-        selected_choice_id = None
-        selected_choice_ids: List[int] = []
-        answer_text = ""
+        # Total points from Questions
+        total_points = Question.objects.filter(test=test).aggregate(total=Sum("points"))["total"] or Decimal(0)
 
-        # ----- SCQ/TF -----
-        if "choice" in item and item["choice"] is not None:
-            selected_choice_id = int(item["choice"])
-            auto_graded = True
-            if selected_choice_id in correct_map.get(qid, set()):
-                awarded = q_points
+        # Build normalized answers + grade
+        score = Decimal(0)
+        auto_graded_count = 0
+        pending_manual = 0
+        breakdown: List[Dict[str, Any]] = []
+        normalized_answers: List[Dict[str, Any]] = []
+        answer_rows: List[TestAnswer] = []
 
-        # ----- MCQ -----
-        elif "choices" in item and isinstance(item["choices"], list):
-            try:
-                selected_choice_ids = [int(x) for x in item["choices"]]
-            except Exception:
-                selected_choice_ids = []
-            # all-or-nothing grading by default:
-            auto_graded = True
-            if set(selected_choice_ids) == correct_map.get(qid, set()):
-                awarded = q_points
+        # Preload all correct choice ids per question to avoid repeated queries
+        correct_map = {
+            qid: set(Choice.objects.filter(question_id=qid, is_correct=True).values_list("id", flat=True))
+            for qid in test_question_ids
+        }
 
-        # ----- Short/Essay -----
-        elif "text" in item:
-            answer_text = (item.get("text") or "").strip()
-            # Optional: auto-grade if you store an expected text in meta.correct_text
-            try:
-                q = Question.objects.only("id", "meta").get(id=qid)
-                correct_text = (q.meta or {}).get("correct_text")
-            except Question.DoesNotExist:
-                correct_text = None
-            except Exception:
-                correct_text = None
+        # Preload points per question
+        points_map = dict(Question.objects.filter(test=test).values_list("id", "points"))
 
-            if correct_text:
+        for item in answers_in:
+            qid = item.get("question")
+            if qid not in test_question_ids:
+                logger.info("Ignoring answer for question not in test: question=%s test=%s", qid, test_id)
+                continue
+
+            q_points = Decimal(points_map.get(qid, 0) or 0)
+            awarded = Decimal(0)
+            auto_graded = False
+
+            selected_choice_id = None
+            selected_choice_ids: List[int] = []
+            answer_text = ""
+
+            # ----- SCQ/TF -----
+            if "choice" in item and item["choice"] is not None:
+                selected_choice_id = int(item["choice"])
                 auto_graded = True
-                if str(correct_text).lower() in answer_text.lower():
+                if selected_choice_id in correct_map.get(qid, set()):
                     awarded = q_points
+
+            # ----- MCQ -----
+            elif "choices" in item and isinstance(item["choices"], list):
+                try:
+                    selected_choice_ids = [int(x) for x in item["choices"]]
+                except Exception:
+                    selected_choice_ids = []
+                # all-or-nothing grading by default:
+                auto_graded = True
+                if set(selected_choice_ids) == correct_map.get(qid, set()):
+                    awarded = q_points
+
+            # ----- Short/Essay -----
+            elif "text" in item:
+                answer_text = (item.get("text") or "").strip()
+                # Optional: auto-grade if you store an expected text in meta.correct_text
+                try:
+                    q = Question.objects.only("id", "meta").get(id=qid)
+                    correct_text = (q.meta or {}).get("correct_text")
+                except Question.DoesNotExist:
+                    correct_text = None
+                except Exception:
+                    correct_text = None
+
+                if correct_text:
+                    auto_graded = True
+                    if str(correct_text).lower() in answer_text.lower():
+                        awarded = q_points
+                else:
+                    pending_manual += 1
+
             else:
-                pending_manual += 1
+                logger.info("No recognizable answer format for question id=%s item=%s", qid, item)
 
-        else:
-            logger.info("No recognizable answer format for question id=%s item=%s", qid, item)
+            score += awarded
+            if auto_graded:
+                auto_graded_count += 1
 
-        score += awarded
-        if auto_graded:
-            auto_graded_count += 1
+            # Keep normalized (for quick debug/exports)
+            normalized_answers.append({
+                "question": qid,
+                "choice": selected_choice_id,
+                "choices": selected_choice_ids,
+                "text": answer_text,
+                "awarded": float(awarded),
+                "points": float(q_points),
+                "auto_graded": auto_graded,
+            })
 
-        # Keep normalized (for quick debug/exports)
-        normalized_answers.append({
-            "question": qid,
-            "choice": selected_choice_id,
-            "choices": selected_choice_ids,
-            "text": answer_text,
-            "awarded": float(awarded),
-            "points": float(q_points),
-            "auto_graded": auto_graded,
-        })
+            breakdown.append({
+                "question": qid,
+                "points": float(q_points),
+                "awarded": float(awarded),
+                "auto_graded": auto_graded,
+            })
 
-        breakdown.append({
-            "question": qid,
-            "points": float(q_points),
-            "awarded": float(awarded),
-            "auto_graded": auto_graded,
-        })
+            # Prepare TestAnswer row (FKs only set if applicable)
+            ans = TestAnswer(
+                attempt=None,  # set after attempt is created
+                question_id=qid,
+                selected_choice_id=selected_choice_id,
+                selected_choice_ids=selected_choice_ids,
+                answer_text=answer_text,
+                awarded_points=awarded,
+                is_auto_graded=auto_graded,
+            )
+            answer_rows.append(ans)
 
-        # Prepare TestAnswer row (FKs only set if applicable)
-        ans = TestAnswer(
-            attempt=None,  # set after attempt is created
-            question_id=qid,
-            selected_choice_id=selected_choice_id,
-            selected_choice_ids=selected_choice_ids,
-            answer_text=answer_text,
-            awarded_points=awarded,
-            is_auto_graded=auto_graded,
-        )
-        answer_rows.append(ans)
+        answered = len(answer_rows)
+        percentage = int(round((float(score) / float(total_points)) * 100)) if total_points else 0
+        pass_mark = 70  # change to test.pass_mark if you add that field
+        result = "PASS" if percentage >= pass_mark else "FAIL"
 
-    answered = len(answer_rows)
-    percentage = int(round((float(score) / float(total_points)) * 100)) if total_points else 0
-    pass_mark = 70  # change to test.pass_mark if you add that field
-    result = "PASS" if percentage >= pass_mark else "FAIL"
+        # Parse started_at
+        now = timezone.now()
+        started_at = None
+        if started_at_iso:
+            try:
+                parsed = datetime.fromisoformat(str(started_at_iso).replace("Z", "+00:00"))
+                started_at = parsed if parsed.tzinfo else timezone.make_aware(parsed)
+            except Exception:
+                logger.exception("Failed to parse started_at: %s", started_at_iso)
+                started_at = None
+        if not started_at and duration_seconds:
+            try:
+                started_at = now - timezone.timedelta(seconds=int(duration_seconds))
+            except Exception:
+                started_at = None
 
-    # Parse started_at
-    now = timezone.now()
-    started_at = None
-    if started_at_iso:
+        # Create attempt
         try:
-            parsed = datetime.fromisoformat(str(started_at_iso).replace("Z", "+00:00"))
-            started_at = parsed if parsed.tzinfo else timezone.make_aware(parsed)
-        except Exception:
-            logger.exception("Failed to parse started_at: %s", started_at_iso)
-            started_at = None
-    if not started_at and duration_seconds:
-        try:
-            started_at = now - timezone.timedelta(seconds=int(duration_seconds))
-        except Exception:
-            started_at = None
+            attempt = TestAttempt.objects.create(
+                test=test,
+                student=student,
+                started_at=started_at or now,
+                submitted_at=now,
+                score=score,
+                answers=normalized_answers,  # keep for convenience; we also persist rows below
+                status="submitted",
+            )
+        except (IntegrityError, DataError):
+            logger.exception("Failed creating TestAttempt")
+            return Response({"detail": "Server error creating attempt."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # Create attempt
-    try:
-        attempt = TestAttempt.objects.create(
-            test=test,
-            student=student,
-            started_at=started_at or now,
-            submitted_at=now,
-            score=score,
-            answers=normalized_answers,  # keep for convenience; we also persist rows below
-            status="submitted",
-        )
-    except (IntegrityError, DataError):
-        logger.exception("Failed creating TestAttempt")
-        return Response({"detail": "Server error creating attempt."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Attach attempt FK and save all answers
+        for a in answer_rows:
+            a.attempt = attempt
+        TestAnswer.objects.bulk_create(answer_rows, ignore_conflicts=True)
 
-    # Attach attempt FK and save all answers
-    for a in answer_rows:
-        a.attempt = attempt
-    TestAnswer.objects.bulk_create(answer_rows, ignore_conflicts=True)
+        return Response({
+            "attempt_id": attempt.id,
+            "score": float(score),
+            "total_points": float(total_points),
+            "percentage": percentage,
+            "result": result,
+            "answered": answered,
+            "auto_graded": auto_graded_count,
+            "pending_manual": pending_manual,
+            "breakdown": breakdown,
+        }, status=status.HTTP_200_OK)
 
-    return Response({
-        "attempt_id": attempt.id,
-        "score": float(score),
-        "total_points": float(total_points),
-        "percentage": percentage,
-        "result": result,
-        "answered": answered,
-        "auto_graded": auto_graded_count,
-        "pending_manual": pending_manual,
-        "breakdown": breakdown,
-    }, status=status.HTTP_200_OK)
-
-
+    except Exception as e:
+        print(e)
+    return Response({})
 
 
 ####################################
