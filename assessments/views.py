@@ -1137,7 +1137,7 @@ def create_test(request):
             return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
 
         data = request.data or {}
-        
+
         # Validate required fields
         title = data.get('title', '').strip()
         if not title:
@@ -1152,11 +1152,18 @@ def create_test(request):
             course = Course.objects.get(id=course_id, teacher=teacher)
         except Course.DoesNotExist:
             return Response({"detail": "Course not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
-        
+
+        if "start_at" in data:
+            start_at = _to_aware_utc(data["start_at"])
+        if "end_at" in data:
+            end_at = _to_aware_utc(data["end_at"])     
+
         # Create test
         test_data = {
             'course': course,
             'title': title,
+            'start_at':start_at,
+            'end_at':end_at,
             'instructions': data.get('instructions', ''),
             'total_marks': data.get("total_marks", 100),
             'duration_minutes': max(1, int(data.get('duration', 30))),
