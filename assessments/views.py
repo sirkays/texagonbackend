@@ -47,9 +47,12 @@ from core.utils import (
     _is_org_admin_or_teacher,
     _resolve_org,
     get_object_or_404_ajax,
+    get_or_make_device_id, user_agent, client_ip, hash_ip, COOKIE_NAME
 )
 from api.authentication import SessionTokenAuthentication
 from .serializers import TestAttemptSerializer
+from core.models import StudentDevice
+
 
 logger = logging.getLogger(__name__)
 
@@ -347,36 +350,67 @@ def available_tests_old(request):
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def available_tests(request):
-    """
-    List tests available to the current student (by enrollments) and include all questions & options.
-
-    Query params:
-      - include_past: '1' to include tests whose start_at is in the past (default excludes past-start)
-      - course: course id to filter
-      - include_answers: '1' to include correct answers (off by default; do not use for students)
-      - debug: '1' to include traceback on error (dev only)
-    """
     try:
         user = request.user
         student = _get_student_for_user(user)
         if not student:
-            return Response({"tests": [], "detail": "No student profile found."}, status=status.HTTP_200_OK)
+            resp = Response({"tests": [], "detail": "No student profile found."}, status=status.HTTP_200_OK)
+            # Set cookie so the browser keeps a stable device id even if no student yet
+            dev_id = get_or_make_device_id(request)
+            resp.set_cookie(
+                COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
+                secure=not settings.DEBUG, max_age=60*60*24*365  # 1 year
+            )
+            return resp
 
+        # ---- Device gate (FIRST device wins) ----
+        dev_id = get_or_make_device_id(request)
+        ua = user_agent(request)
+        ip_h = hash_ip(client_ip(request))
+
+        # Has the student registered a primary device yet?
+        existing = StudentDevice.objects.filter(student=student).order_by("first_seen")
+        if existing.exists():
+            primary = existing.first()
+            is_allowed_device = (primary.device_id == dev_id)
+            if is_allowed_device:
+                # touch last_seen for analytics
+                StudentDevice.objects.filter(pk=primary.pk).update(last_seen=timezone.now())
+            else:
+                # Not the same device → return empty tests
+                resp = Response({"tests": []}, status=status.HTTP_200_OK)
+                # Still set/refresh cookie so this second device stays consistent
+                resp.set_cookie(
+                    COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
+                    secure=not settings.DEBUG, max_age=60*60*24*365
+                )
+                return resp
+        else:
+            # No device yet → register THIS device as the student's primary
+            StudentDevice.objects.create(
+                student=student, device_id=dev_id, user_agent=ua, ip_hash=ip_h
+            )
+            is_allowed_device = True
+        # -----------------------------------------
+
+        # From here on your original logic is unchanged
         enrollments = (Enrollment.objects
                        .filter(student=student)
                        .only("id", "course_id"))
         course_ids = list(enrollments.values_list("course_id", flat=True))
         if not course_ids:
-            return Response({"tests": []}, status=status.HTTP_200_OK)
+            resp = Response({"tests": []}, status=status.HTTP_200_OK)
+            resp.set_cookie(COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
+                            secure=not settings.DEBUG, max_age=60*60*24*365)
+            return resp
 
-        # Base queryset: tests in the student's courses and with schedule set
         qs = Test.objects.filter(course_id__in=course_ids, start_at__isnull=False, end_at__isnull=False)
 
-        # Optional filter by one course
         course_filter = request.query_params.get("course")
         if course_filter:
             try:
@@ -384,7 +418,6 @@ def available_tests(request):
             except ValueError:
                 pass
 
-        # Optional: exclude past tests if scheduled
         include_past = request.query_params.get("include_past") in {"1", "true", "True"}
         if _has_field(Test, "start_at") and not include_past:
             now = timezone.now()
@@ -393,32 +426,26 @@ def available_tests(request):
                 (Q(end_at__isnull=True) | Q(end_at__gte=now))
             )
 
-        # ---------- NEW: exclude no-question tests & tests already taken ----------
-        # Count questions and require at least 1
         qs = qs.annotate(qcount=Count("questions", distinct=True)).filter(qcount__gt=0)
 
-        # Consider a test "taken" if the student has any attempt (you can narrow to submitted/graded if you prefer)
-        student_attempts = TestAttempt.objects.filter(
-            test_id=OuterRef("pk"),
-            student=student,
-        )
+        student_attempts = TestAttempt.objects.filter(test_id=OuterRef("pk"), student=student)
         qs = qs.annotate(has_attempt=Exists(student_attempts)).filter(has_attempt=False)
-        # -------------------------------------------------------------------------
-        
-        # Collect test ids
+
         tests = list(qs.select_related("course"))
         test_ids = [t.id for t in tests]
         if not test_ids:
-            return Response({"tests": []}, status=status.HTTP_200_OK)
+            resp = Response({"tests": []}, status=status.HTTP_200_OK)
+            resp.set_cookie(COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
+                            secure=not settings.DEBUG, max_age=60*60*24*365)
+            return resp
 
-        # -------- Fetch questions & choices in bulk (avoid N+1) --------
         questions = list(Question.objects.filter(test_id__in=test_ids))
-        questions_by_test: DefaultDict[int, List[Question]] = defaultdict(list)
+        questions_by_test = defaultdict(list)
         for q in questions:
             questions_by_test[q.test_id].append(q)
 
         choice_qids = [q.id for q in questions]
-        choices_map: DefaultDict[int, List[Choice]] = defaultdict(list)
+        choices_map = defaultdict(list)
         if choice_qids:
             for c in Choice.objects.filter(question_id__in=choice_qids):
                 choices_map[c.question_id].append(c)
@@ -430,15 +457,13 @@ def available_tests(request):
 
         include_answers = request.query_params.get("include_answers") in {"1", "true", "True"}
 
-        # Sort tests: scheduled first by start time, else newest first
         if _has_field(Test, "start_at"):
             far_future = datetime.max.replace(tzinfo=py_tz.utc)
             tests.sort(key=lambda t: (getattr(t, "start_at", None) or far_future, -t.id))
         else:
             tests.sort(key=lambda t: -t.id)
 
-        # ------------ Build payload ------------
-        items: List[Dict[str, Any]] = []
+        items = []
         for t in tests:
             test_qs = questions_by_test.get(t.id, [])
             q_count = len(test_qs)
@@ -455,15 +480,13 @@ def available_tests(request):
                 cname = getattr(getattr(t, "course", None), "name", None)
                 description = f"Assessment for {cname}" if cname else "Assessment"
 
-            questions_out: List[Dict[str, Any]] = []
+            questions_out = []
             for q in test_qs:
                 q_choices = choices_map.get(q.id, [])
                 choice_objs = [{"id": c.id, "text": getattr(c, "text", str(c))} for c in q_choices]
                 choice_texts = [co["text"] for co in choice_objs]
-
                 qtype_norm = _map_qtype(q, len(q_choices), choice_texts)
-
-                q_out: Dict[str, Any] = {
+                q_out = {
                     "id": q.id,
                     "type": qtype_norm,
                     "question": _question_text(q),
@@ -471,7 +494,6 @@ def available_tests(request):
                     "choices": choice_objs,
                     "options": choice_texts,
                 }
-
                 if include_answers and _has_field(Choice, "is_correct"):
                     correct_ids = [c.id for c in q_choices if getattr(c, "is_correct", False)]
                     if correct_ids:
@@ -483,7 +505,6 @@ def available_tests(request):
                                 q_out["correct_index"] = idx
                         except Exception:
                             pass
-
                 questions_out.append(q_out)
 
             items.append({
@@ -501,19 +522,21 @@ def available_tests(request):
                 "endsAt": getattr(t, "end_at", None).isoformat() if _has_field(Test, "end_at") and getattr(t, "end_at", None) else None,
                 "items": questions_out,
             })
-        return Response({"tests": items}, status=status.HTTP_200_OK)
+
+        resp = Response({"tests": items}, status=status.HTTP_200_OK)
+        # Ensure browser retains the same device id
+        resp.set_cookie(
+            COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
+            secure=not settings.DEBUG, max_age=60*60*24*365
+        )
+        return resp
 
     except Exception as e:
-        payload = {
-            "detail": "Error while fetching available tests.",
-            "error": f"{type(e).__name__}: {e}",
-        }
+        payload = {"detail": "Error while fetching available tests.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
             import traceback
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 
 def _test_has_field(model, field_name: str) -> bool:
     try:
@@ -562,7 +585,7 @@ def submit_test(request, test_id: int):
             return Response({"detail": "Test not found."}, status=status.HTTP_404_NOT_FOUND)
 
         payload = request.data or {}
-        print(payload, " alll pay.... ")
+
         answers_in: List[Dict[str, Any]] = payload.get("answers") or []
         if not isinstance(answers_in, list) or not answers_in:
             return Response({"detail": "answers must be a non-empty list."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1191,6 +1214,8 @@ def create_test(request):
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 
 
 @api_view(["DELETE"])

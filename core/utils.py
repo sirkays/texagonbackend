@@ -13,9 +13,31 @@ from calendar import monthrange
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from datetime import date, datetime, timedelta
 from rest_framework import permissions
+import hmac, hashlib, uuid
+from django.conf import settings
 
 StatusLiteral = Literal["active", "inactive", "suspended"]
 
+COOKIE_NAME = "device_id"
+
+def get_or_make_device_id(request):
+    # Prefer explicit header from native clients; fall back to cookie for browsers.
+    dev = request.META.get("HTTP_X_DEVICE_ID") or request.COOKIES.get(COOKIE_NAME)
+    return dev or uuid.uuid4().hex  # generate if missing
+
+def user_agent(request):
+    return request.META.get("HTTP_USER_AGENT", "")
+
+def client_ip(request):
+    xff = request.META.get("HTTP_X_FORWARDED_FOR")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
+
+def hash_ip(ip: str) -> str:
+    if not ip:
+        return ""
+    return hmac.new(settings.SECRET_KEY.encode(), ip.encode(), hashlib.sha256).hexdigest()
 
 # ---------- helpers specific to this view ----------
 
