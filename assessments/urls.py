@@ -25,6 +25,8 @@ urlpatterns = [
     ##### TEST ATTEMPTS #################
     path('api/student/test-attempts/', views.my_test_attempts, name='my_test_attempts'),
 
+    path('api/student/cbt-quit/', views.cbt_test_quit, name='cbt_test_quit'),
+
 
     path('api/student/performance-summary/', views.student_performance_summary, name='student_performance_summary'),
 

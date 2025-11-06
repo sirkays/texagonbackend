@@ -8,7 +8,6 @@ class SessionTokenAuthentication(BaseAuthentication):
 
     def authenticate(self, request):
         token = request.META.get("HTTP_X_SESSION_TOKEN")
-        print(token," gotennnnnnnnnnnnnnnnnn")
         if not token:
             auth = request.META.get("HTTP_AUTHORIZATION", "")
             # allow "X-Session-Token <token>" *or* "Bearer <token>"
@@ -21,12 +20,9 @@ class SessionTokenAuthentication(BaseAuthentication):
 
         if token in (None, ""):
             raise AuthenticationFailed("Session token required.")
-        print("still token... ",token, " sjjjs ",type(token))
         try:
             st = SessionToken.objects.select_related("user").get(key=token, is_active=True)
-            print(st, " scmdkcdvndjvnfjvndfjvn ",st.user)
         except SessionToken.DoesNotExist:
-            print(type(token), " type of tomckdmlcdkcmdlm")
             raise AuthenticationFailed("Invalid or revoked session token.")
 
         if st.expires_at <= timezone.now():

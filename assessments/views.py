@@ -350,6 +350,40 @@ def available_tests_old(request):
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def cbt_test_quit(request):
+    if not getattr(request.user, "is_authenticated", False):
+        return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    user = request.user
+    student = _get_student_for_user(user)
+    if not student:
+        return Response({"detail": "Student profile not found for user."}, status=status.HTTP_400_BAD_REQUEST)
+
+    payload = request.data or {}
+
+    try:
+        test = Test.objects.get(pk=payload.get('test_id'))
+    except Test.DoesNotExist:
+        return Response({"detail": "Test not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    submitted_at = timezone.now()
+    TestAttempt.objects.get_or_create(
+       test=test,
+       student=student,
+       defaults={
+        "submitted_at":submitted_at,
+        "score":0.0,
+        "status":"quit"
+       }
+    )
+
+    return Response({"status": "success"}, status=status.HTTP_200_OK)
+
+    
+
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -538,6 +572,8 @@ def available_tests(request):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+
 def _test_has_field(model, field_name: str) -> bool:
     try:
         model._meta.get_field(field_name)
@@ -709,33 +745,31 @@ def submit_test(request, test_id: int):
         pass_mark = 70  # change to test.pass_mark if you add that field
         result = "PASS" if percentage >= pass_mark else "FAIL"
 
-        # Parse started_at
         now = timezone.now()
-        started_at = None
-        if started_at_iso:
-            try:
-                parsed = datetime.fromisoformat(str(started_at_iso).replace("Z", "+00:00"))
-                started_at = parsed if parsed.tzinfo else timezone.make_aware(parsed)
-            except Exception:
-                logger.exception("Failed to parse started_at: %s", started_at_iso)
-                started_at = None
-        if not started_at and duration_seconds:
-            try:
-                started_at = now - timezone.timedelta(seconds=int(duration_seconds))
-            except Exception:
-                started_at = None
-
         # Create attempt
         try:
-            attempt = TestAttempt.objects.create(
-                test=test,
-                student=student,
-                started_at=started_at or now,
-                submitted_at=now,
-                score=score,
-                answers=normalized_answers,  # keep for convenience; we also persist rows below
-                status="submitted",
-            )
+            attempt = get_object_or_404_ajax(
+                TestAttempt,test=test,student=student
+             )
+            if attempt and attempt.status == "quit":
+                attempt.submitted_at = now
+                attempt.score = score
+                attempt.answers = normalized_answers
+                attempt.status = "submitted"
+                attempt.save()
+
+            elif attempt is False:
+                attempt = TestAttempt.objects.create(
+                    test=test,
+                    student=student,
+                    started_at=started_at or now,
+                    submitted_at=now,
+                    score=score,
+                    answers=normalized_answers,  # keep for convenience; we also persist rows below
+                    status="submitted",
+                )
+            else:
+                return Response({"detail": "User already perform test."}, status=status.HTTP_400_BAD_REQUEST)
         except (IntegrityError, DataError):
             logger.exception("Failed creating TestAttempt")
             return Response({"detail": "Server error creating attempt."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
