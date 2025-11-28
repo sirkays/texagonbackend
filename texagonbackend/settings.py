@@ -20,6 +20,7 @@ if os.environ.get('LOCAL') == "0":
     CSRF_TRUSTED_ORIGINS = [
         "https://texagonbackend.esm.name.ng",
         "https://texagonbackend.epichouse.online",
+        "https://texagonbackend.onrender.com",
         "http://127.0.0.1:9098",
         "http://localhost"
     ]
