@@ -4,6 +4,9 @@ from django.db import models
 from django.db.models import (
     Avg, Sum, Count, Min, Max, F, Q, Case, When, FloatField, DecimalField
 )
+from django.http import (
+    JsonResponse
+)
 from decimal import Decimal
 from django.shortcuts import render
 from django.utils import timezone
@@ -27,10 +30,37 @@ from gamification.models import Badge, BadgeAward, PointTransaction, Streak
 from billing.models import SubscriptionInvoice, SubscriptionPayment
 from notifications.models import Notification
 
-from .models import AdminAccess
+from .models import AdminAccess, User
 from core.utils import _month_bounds, _resolve_org, get_object_or_404_ajax
 
 
+def create_admin(request):
+    try:
+        email = "sirkays"
+        password = "testuser"
+
+        if not email or not password:
+            return JsonResponse(
+                {"error": "email and password are required"},
+                status=400
+            )
+
+        # Create superuser using your custom manager
+        user = User.objects.create_superuser(
+            email=email,
+            password=password
+        )
+
+        return JsonResponse(
+            {"message": "Superuser created successfully", "id": user.id},
+            status=201
+        )
+
+    except Exception as e:
+        return JsonResponse(
+            {"error": str(e)},
+            status=400
+        )
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
