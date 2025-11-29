@@ -397,9 +397,14 @@ def available_tests(request):
             # Set cookie so the browser keeps a stable device id even if no student yet
             dev_id = get_or_make_device_id(request)
             resp.set_cookie(
-                COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
-                secure=not settings.DEBUG, max_age=60*60*24*365  # 1 year
+                COOKIE_NAME,
+                dev_id,
+                httponly=True,
+                samesite="None",   # ✅ REQUIRED for cross-domain
+                secure=True,       # ✅ REQUIRED with SameSite=None
+                max_age=60*60*24*365
             )
+
             return resp
 
         # ---- Device gate (FIRST device wins) ----
@@ -444,7 +449,6 @@ def available_tests(request):
             return resp
 
         qs = Test.objects.filter(course_id__in=course_ids, start_at__isnull=False, end_at__isnull=False)
-
         course_filter = request.query_params.get("course")
         if course_filter:
             try:
@@ -459,12 +463,9 @@ def available_tests(request):
                 (Q(start_at__isnull=True) | Q(start_at__lte=now)) &
                 (Q(end_at__isnull=True) | Q(end_at__gte=now))
             )
-
         qs = qs.annotate(qcount=Count("questions", distinct=True)).filter(qcount__gt=0)
-
         student_attempts = TestAttempt.objects.filter(test_id=OuterRef("pk"), student=student)
         qs = qs.annotate(has_attempt=Exists(student_attempts)).filter(has_attempt=False)
-
         tests = list(qs.select_related("course"))
         test_ids = [t.id for t in tests]
         if not test_ids:
