@@ -419,7 +419,7 @@ def available_tests(request):
         if existing.exists():
             primary = existing.first()
             is_allowed_device = (primary.device_id == dev_id)
-            print(primary.device_id, " dev ... ",dev_id)
+            print(primary.device_id, " STATEMENT ZERO ",dev_id)
             if is_allowed_device:
                 # touch last_seen for analytics
                 StudentDevice.objects.filter(pk=primary.pk).update(last_seen=timezone.now())
@@ -433,6 +433,7 @@ def available_tests(request):
                 )
                 return resp
         else:
+            print(existing, " STATEMENT ONE....")
             # No device yet → register THIS device as the student's primary
             StudentDevice.objects.create(
                 student=student, device_id=dev_id, user_agent=ua, ip_hash=ip_h
@@ -452,14 +453,12 @@ def available_tests(request):
             return resp
 
         qs = Test.objects.filter(course_id__in=course_ids, start_at__isnull=False, end_at__isnull=False)
-        print(qs, " test is here...")
         course_filter = request.query_params.get("course")
         if course_filter:
             try:
                 qs = qs.filter(course_id=int(course_filter))
             except ValueError:
                 pass
-        print(qs, " going now for test...")
         include_past = request.query_params.get("include_past") in {"1", "true", "True"}
         if _has_field(Test, "start_at") and not include_past:
             now = timezone.now()
@@ -468,7 +467,6 @@ def available_tests(request):
                 (Q(end_at__isnull=True) | Q(end_at__gte=now))
             )
         qs = qs.annotate(qcount=Count("questions", distinct=True)).filter(qcount__gt=0)
-        print(qs, " on qs")
         student_attempts = TestAttempt.objects.filter(test_id=OuterRef("pk"), student=student)
         qs = qs.annotate(has_attempt=Exists(student_attempts)).filter(has_attempt=False)
         tests = list(qs.select_related("course"))
@@ -504,7 +502,6 @@ def available_tests(request):
             tests.sort(key=lambda t: -t.id)
 
         items = []
-        print(tests, " on load....")
         for t in tests:
             test_qs = questions_by_test.get(t.id, [])
             q_count = len(test_qs)
@@ -522,7 +519,6 @@ def available_tests(request):
                 description = f"Assessment for {cname}" if cname else "Assessment"
 
             questions_out = []
-            print(test_qs, " test ,,,,,")
             for q in test_qs:
                 q_choices = choices_map.get(q.id, [])
                 choice_objs = [{"id": c.id, "text": getattr(c, "text", str(c))} for c in q_choices]
@@ -564,7 +560,6 @@ def available_tests(request):
                 "endsAt": getattr(t, "end_at", None).isoformat() if _has_field(Test, "end_at") and getattr(t, "end_at", None) else None,
                 "items": questions_out,
             })
-        print(items, " items...")
         resp = Response({"tests": items}, status=status.HTTP_200_OK)
         # Ensure browser retains the same device id
         resp.set_cookie(
