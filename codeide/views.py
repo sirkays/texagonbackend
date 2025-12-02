@@ -31,27 +31,68 @@ from .utils import user_is_submission_student, user_teaches_lesson, user_is_teac
 
 
 # ---------- SNIPPETS ----------
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def snippet_delete(request, snippet_id: int):
+    """
+    Delete a saved snippet belonging to the current student.
+    """
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Student profile not found."}, status=403)
+
+    try:
+        snippet = CodeSnippet.objects.get(pk=snippet_id, student=student)
+    except CodeSnippet.DoesNotExist:
+        return Response({"detail": "Snippet not found."}, status=404)
+
+    snippet.delete()
+    return Response(status=204)
+
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def snippet_create(request):
     """
-    Student: save code (draft).
-    Body: {lesson: <id|nullable>, title, language, code_text, meta?}
+    Create or update a code snippet for the current student.
+
+    - If no `id` / `pk` is provided in the body → create a new snippet.
+    - If `id` / `pk` is provided → update the existing snippet (for this student).
     """
     student = _get_student_for_user(request.user)
     if not student:
         return Response({"detail": "Student profile not found."}, status=403)
 
     data = request.data.copy()
+    # Never allow student to be overridden from payload
     data.pop("student", None)
 
+    # accept either "id" or "pk"
+    snippet_id = data.pop("id", None) or data.pop("pk", None)
+
+    if snippet_id:
+        # -------- UPDATE FLOW --------
+        try:
+            snippet = CodeSnippet.objects.get(pk=snippet_id, student=student)
+        except CodeSnippet.DoesNotExist:
+            return Response({"detail": "Snippet not found."}, status=404)
+
+        # partial update: they can send only some fields
+        serializer = CodeSnippetSerializer(snippet, data=data, partial=True)
+        if serializer.is_valid():
+            obj = serializer.save()  # student already set on instance
+            return Response(CodeSnippetSerializer(obj).data, status=200)
+        return Response(serializer.errors, status=400)
+
+    # -------- CREATE FLOW (no id/pk) --------
     serializer = CodeSnippetSerializer(data=data)
     if serializer.is_valid():
         obj = serializer.save(student=student)
         return Response(CodeSnippetSerializer(obj).data, status=201)
     return Response(serializer.errors, status=400)
-
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])

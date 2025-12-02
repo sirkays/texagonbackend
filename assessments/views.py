@@ -184,7 +184,6 @@ def my_test_attempts(request):
     try:
         # Must be a student
         student = _get_student_for_user(request.user)
-        print(student, " first studne")
         if not student:
             return Response(
                 {"detail": "Only students can access their test attempts."},
@@ -192,7 +191,6 @@ def my_test_attempts(request):
             )
 
         qs = TestAttempt.objects.select_related("test").filter(student=student)
-        print(qs, " Test attempt")
         # Filters
         test_id = request.query_params.get("test_id")
         if test_id:
@@ -201,7 +199,6 @@ def my_test_attempts(request):
         status_param = request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
-        print(status_param)
         # Active window filter (uses test.start_at/end_at)
         if request.query_params.get("active", "").lower() == "true":
             now = timezone.now()
@@ -209,7 +206,6 @@ def my_test_attempts(request):
                 (Q(test__start_at__isnull=True) | Q(test__start_at__lte=now)) &
                 (Q(test__end_at__isnull=True) | Q(test__end_at__gte=now))
             )
-        print(qs, " qs....kkkk.")
         qs = qs.order_by("-created_at")
 
         # Simple pagination
@@ -228,7 +224,6 @@ def my_test_attempts(request):
         total = qs.count()
 
         serializer = TestAttemptSerializer(qs[start:end], many=True)
-        print(serializer.data)
         return Response(
             {
                 "count": total,
@@ -419,7 +414,6 @@ def available_tests(request):
         if existing.exists():
             primary = existing.first()
             is_allowed_device = (primary.device_id == dev_id)
-            print(primary.device_id, " STATEMENT ZERO ",dev_id)
             if is_allowed_device:
                 # touch last_seen for analytics
                 StudentDevice.objects.filter(pk=primary.pk).update(last_seen=timezone.now())
@@ -433,7 +427,6 @@ def available_tests(request):
                 )
                 return resp
         else:
-            print(existing, " STATEMENT ONE....")
             # No device yet → register THIS device as the student's primary
             StudentDevice.objects.create(
                 student=student, device_id=dev_id, user_agent=ua, ip_hash=ip_h
@@ -635,12 +628,16 @@ def submit_test(request, test_id: int):
             )
 
         payload: Dict[str, Any] = request.data or {}
-        answers_in: List[Dict[str, Any]] = payload.get("answers") or []
-        if not isinstance(answers_in, list) or not answers_in:
+
+        raw_answers = payload.get("answers", [])
+        # Allow no answers, but enforce that if provided, it must be a list
+        if not isinstance(raw_answers, list):
             return Response(
-                {"detail": "answers must be a non-empty list."},
+                {"detail": "answers must be a list."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        answers_in: List[Dict[str, Any]] = raw_answers
 
         started_at_iso = payload.get("started_at")
         duration_seconds = payload.get("duration_seconds")  # currently unused
@@ -807,12 +804,12 @@ def submit_test(request, test_id: int):
             test.settings.get("pass_mark")
             if isinstance(getattr(test, "settings", {}), dict)
             and "pass_mark" in test.settings
-            else 70
+            else 50
         )
         try:
             pass_mark = int(pass_mark)
         except (ValueError, TypeError):
-            pass_mark = 70
+            pass_mark = 45
 
         result = "PASS" if percentage >= pass_mark else "FAIL"
 
@@ -918,7 +915,17 @@ def submit_test(request, test_id: int):
                     {"detail": "Server error creating attempt."},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
-
+        print(            {
+                "attempt_id": attempt.id,
+                "score": float(score),
+                "total_points": float(total_points),
+                "percentage": percentage,
+                "result": result,
+                "answered": answered,
+                "auto_graded": auto_graded_count,
+                "pending_manual": pending_manual,
+                "breakdown": breakdown,
+            },)
         # ------------- FINAL RESPONSE -------------
         return Response(
             {
@@ -941,8 +948,7 @@ def submit_test(request, test_id: int):
             {"detail": "Unexpected server error while submitting test."},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-####################################
-# api/teacher_cbt_views.py
+
 
 
 def _get_teacher_for_user(user) -> Optional[TeacherProfile]:
@@ -2029,7 +2035,6 @@ def student_performance_detail(request):
         attempt = TestAttempt.objects.filter(id=id, test__course__organization=org).select_related(
             "test", "student", "student__user", "student__current_classroom", "test__course"
         ).first()
-
         if not attempt:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -2081,9 +2086,11 @@ def student_performance_detail(request):
         answers = []
         questions = Question.objects.filter(test=test).order_by("order").prefetch_related("choices")
         student_answers = attempt.answers  # dict {q_id: value}
-
         for q in questions:
-            selected = student_answers.get(str(q.id), "")
+            if len(student_answers) < 1:
+                return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            print(student_answers)
+            selected = student_answers[0].get(str(q.id), "")
             if q.qtype in ["scq", "mcq", "tf"]:
                 choices = list(q.choices.order_by("order"))
                 options = [c.text for c in choices]
@@ -2112,6 +2119,7 @@ def student_performance_detail(request):
                 "correct": correct,
                 "status": status_q,
             })
+
 
         payload = {
             "student": student_info,

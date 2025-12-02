@@ -6,6 +6,7 @@ urlpatterns = [
     # snippets
     path("api/ide/snippets/", views.snippet_list, name="ide_snippet_list"),          # GET (student)
     path("api/ide/snippets/create/", views.snippet_create, name="ide_snippet_create"),  # POST (student)
+    path("snippets/<int:snippet_id>/delete/", views.snippet_delete, name="snippet_delete"),
     path("api/ide/snippets/<int:snippet_id>/", views.snippet_detail, name="ide_snippet_detail"),  # GET (student)
 
     # submissions

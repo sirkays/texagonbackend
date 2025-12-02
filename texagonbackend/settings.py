@@ -147,6 +147,7 @@ USE_TZ = True
 
 TIME_ZONE= "Africa/Lagos"
 
+pass_mark = 45
 
 STATIC_URL = 'static/'
 MEDIA_URL = 'media/'
