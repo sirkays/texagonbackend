@@ -7,6 +7,7 @@ from django.db.models import (
 from django.http import (
     JsonResponse
 )
+from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from decimal import Decimal
 from django.shortcuts import render
@@ -62,7 +63,6 @@ def create_admin(request):
             {"error": str(e)},
             status=400
         )
-
 
 
 @api_view(["POST"])
@@ -160,8 +160,9 @@ def create_account_view(request):
                     try:
                         subscription = OrganizationSubscription.objects.get(pk=org_sub_id)
                     except OrganizationSubscription.DoesNotExist:
-                        raise ValidationError(
-                            {"organization_subscription_id": ["Invalid subscription id."]}
+                        return Response(
+                            {"detail": "organization_subscription_id is invalid."},
+                            status=status.HTTP_400_BAD_REQUEST,
                         )
 
                 parent_profile = ParentProfile.objects.create(
@@ -175,17 +176,26 @@ def create_account_view(request):
                 # We must have a ParentProfile to link to
                 parent_profile_id = request.data.get("parent_profile_id")
                 if not parent_profile_id:
-                    raise ValidationError(
-                        {"parent_profile_id": ["This field is required for student accounts."]}
+                    return Response(
+                        {
+                            "detail": {
+                                "parent_profile_id": [
+                                    "This field is required for student accounts."
+                                ]
+                            }
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
                     )
 
                 try:
-                    parent_profile = ParentProfile.objects.select_related("organization").get(
-                        pk=parent_profile_id
+                    parent_profile = (
+                        ParentProfile.objects.select_related("organization")
+                        .get(pk=parent_profile_id)
                     )
                 except ParentProfile.DoesNotExist:
-                    raise ValidationError(
-                        {"parent_profile_id": ["Invalid parent_profile_id."]}
+                    return Response(
+                        {"detail": {"parent_profile_id": ["Invalid parent_profile_id."]}},
+                        status=status.HTTP_400_BAD_REQUEST,
                     )
 
                 # If no org explicitly passed, inherit from parent's org
@@ -199,8 +209,9 @@ def create_account_view(request):
                     try:
                         dob = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
                     except ValueError:
-                        raise ValidationError(
-                            {"dob": ["Invalid date format. Use YYYY-MM-DD."]}
+                        return Response(
+                            {"detail": {"dob": ["Invalid date format. Use YYYY-MM-DD."]}},
+                            status=status.HTTP_400_BAD_REQUEST,
                         )
 
                 classroom = None
@@ -209,8 +220,9 @@ def create_account_view(request):
                     try:
                         classroom = Classroom.objects.get(pk=classroom_id)
                     except Classroom.DoesNotExist:
-                        raise ValidationError(
-                            {"classroom_id": ["Invalid classroom_id."]}
+                        return Response(
+                            {"detail": {"classroom_id": ["Invalid classroom_id."]}},
+                            status=status.HTTP_400_BAD_REQUEST,
                         )
 
                 # Create StudentProfile
@@ -232,29 +244,38 @@ def create_account_view(request):
 
             else:
                 # account_type == "teacher"
-                # Per your note: current setup is OK, so we don't force TeacherProfile creation here.
-                # If you want, you can uncomment this block:
+                # Current setup: just the User (no TeacherProfile forced).
+                # You can enforce org here if you want, but use Response not raise:
                 #
                 # if org is None:
-                #     raise ValidationError(
-                #         {"primary_org_id": ["primary_org_id is required for teacher accounts."]}
+                #     return Response(
+                #         {"detail": {"primary_org_id": ["primary_org_id is required for teacher accounts."]}},
+                #         status=status.HTTP_400_BAD_REQUEST,
                 #     )
-                # TeacherProfile.objects.create(user=user, organization=org)
                 #
-                # For now, do nothing special.
+                # TeacherProfile.objects.create(user=user, organization=org)
                 pass
 
             # 3) Create OTP entry (e.g. 10 minutes validity)
             otp = EmailOTP.create_for_user(user, minutes_valid=10)
 
     except IntegrityError:
+        # Most common: duplicate email (unique constraint on User.email)
         return Response(
             {"detail": "A user with that email already exists."},
             status=status.HTTP_400_BAD_REQUEST,
         )
     except ValidationError as e:
+        # In case any model.save() or full_clean() throws ValidationError
+        detail = e.message_dict if hasattr(e, "message_dict") else e.messages
         return Response(
-            {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
+            {"detail": detail},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as e:
+        # Optional: log e somewhere (Sentry, logger, etc.)
+        return Response(
+            {"detail": str(e)},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -290,7 +311,6 @@ def create_account_view(request):
         },
         status=status.HTTP_201_CREATED,
     )
-
 
 
 @api_view(["POST"])
