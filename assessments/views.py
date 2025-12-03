@@ -2062,7 +2062,6 @@ def student_performance_detail(request):
             "classGrade": student.current_classroom.name if student.current_classroom else "N/A",
         }
 
-        # Test summary
         total_marks = test.total_marks or Decimal("0")
         percentage = (attempt.score / total_marks * 100) if total_marks else Decimal("0")
         completion_time = 0
@@ -2082,44 +2081,98 @@ def student_performance_detail(request):
             "submittedAt": submitted_at,
         }
 
-        # Answer details
+        # ===========================
+        # Answer details via TestAnswer
+        # ===========================
+        questions = (
+            Question.objects
+            .filter(test=test)
+            .order_by("order")
+            .prefetch_related("choices")
+        )
+
+        answer_rows = (
+            TestAnswer.objects
+            .filter(attempt=attempt)
+            .select_related("question", "selected_choice")
+            .prefetch_related("question__choices")
+        )
+
+        # Map question_id -> TestAnswer row
+        answers_by_qid = {row.question_id: row for row in answer_rows}
+
         answers = []
-        questions = Question.objects.filter(test=test).order_by("order").prefetch_related("choices")
-        student_answers = attempt.answers  # dict {q_id: value}
+
         for q in questions:
-            if len(student_answers) < 1:
-                return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-            print(student_answers)
-            selected = student_answers[0].get(str(q.id), "")
+            row = answers_by_qid.get(q.id)
+
+            # defaults
+            selected_text = ""
+            correct_text = ""
+            status_q = "Not answered"
+
+            # If no answer row at all
+            if not row:
+                answers.append({
+                    "question": q.body,
+                    "selected": selected_text,
+                    "correct": correct_text,
+                    "status": status_q,
+                })
+                continue
+
+            choices = list(q.choices.all())
+            correct_choices = [c for c in choices if c.is_correct]
+            correct_text = ", ".join(c.text for c in correct_choices)
+
             if q.qtype in ["scq", "mcq", "tf"]:
-                choices = list(q.choices.order_by("order"))
-                options = [c.text for c in choices]
-                correct_indices = [i for i, c in enumerate(choices) if c.is_correct]
-                correct = ", ".join(options[i] for i in correct_indices)
+                # ---------- MCQ ----------
                 if q.qtype == "mcq":
-                    selected_indices = selected if isinstance(selected, list) else [selected]
-                    selected_indices = [int(s) for s in selected_indices if str(s).isdigit()]
-                    selected_text = ", ".join(options[i] for i in selected_indices if 0 <= i < len(options))
-                    status_q = "Correct" if set(selected_indices) == set(correct_indices) else "Incorrect"
-                else:  # scq or tf
-                    if q.qtype == "tf" and not str(selected).isdigit():
-                        selected_index = 1 if str(selected).lower() == "true" else 0
+                    selected_ids = row.selected_choice_ids or []
+                    # make sure they're ints
+                    selected_ids = [int(x) for x in selected_ids if str(x).isdigit()]
+
+                    selected_choices = [c for c in choices if c.id in selected_ids]
+                    selected_text = ", ".join(c.text for c in selected_choices)
+
+                    correct_ids = {c.id for c in correct_choices}
+                    status_q = "Correct" if set(selected_ids) == correct_ids else "Incorrect"
+
+                # ---------- SCQ / TF ----------
+                else:
+                    selected_choice = row.selected_choice
+                    if selected_choice:
+                        selected_text = selected_choice.text
                     else:
-                        selected_index = int(selected) if str(selected).isdigit() else -1
-                    selected_text = options[selected_index] if 0 <= selected_index < len(options) else str(selected)
-                    status_q = "Correct" if selected_index in correct_indices else "Incorrect"
-            else:  # short, essay
-                correct = ""
-                selected_text = str(selected)
-                status_q = "Pending"  # or based on if graded
+                        # fallback if something was stored as text
+                        selected_text = (row.answer_text or "").strip()
+
+                    status_q = "Correct" if (selected_choice and selected_choice.is_correct) else "Incorrect"
+
+            else:
+                # ---------- SHORT / ESSAY ----------
+                selected_text = (row.answer_text or "").strip()
+                correct_text = ""
+
+                if row.is_auto_graded:
+                    if row.awarded_points >= q.points:
+                        status_q = "Correct"
+                    elif row.awarded_points > 0:
+                        status_q = "Partially Correct"
+                    else:
+                        status_q = "Incorrect"
+                else:
+                    status_q = "Pending"
 
             answers.append({
                 "question": q.body,
                 "selected": selected_text,
-                "correct": correct,
+                "correct": correct_text,
                 "status": status_q,
+                # optional extras if you want in the payload:
+                # "awardedPoints": float(row.awarded_points),
+                # "maxPoints": float(q.points),
             })
-
 
         payload = {
             "student": student_info,
