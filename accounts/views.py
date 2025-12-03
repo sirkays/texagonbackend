@@ -65,22 +65,39 @@ def create_admin(request):
 
 
 
-
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([])  # API key only
-def create_teacher_view(request):
+def create_account_view(request):
     """
-    Create a teacher account & send OTP to verify email.
+    Create account & send OTP to verify email.
 
-    Request body:
+    Request body (base):
     {
         "email": "teacher@example.com",
         "password": "strongpassword",
         "first_name": "Jane",
         "last_name": "Doe",
         "phone": "+123456789",
-        "primary_org_id": 1   # optional
+        "primary_org_id": 1,           # optional
+        "account_type": "teacher"      # "teacher" | "parent" | "student" (default: "teacher")
+    }
+
+    Extra for PARENT account:
+    {
+        "account_type": "parent",
+        "address": "Parent home address",                 # optional
+        "organization_subscription_id": 5                 # optional
+    }
+
+    Extra for STUDENT account:
+    {
+        "account_type": "student",
+        "parent_profile_id": 10,                          # REQUIRED
+        "admission_no": "STU-001",                        # optional
+        "dob": "2012-09-15",                              # optional (YYYY-MM-DD)
+        "classroom_id": 3,                                # optional
+        "relationship": "Father"                          # optional (for ParentChildLink)
     }
     """
     email = request.data.get("email")
@@ -89,6 +106,14 @@ def create_teacher_view(request):
     if not email or not password:
         return Response(
             {"detail": "email and password are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # account_type: teacher / parent / student
+    account_type = (request.data.get("account_type") or "teacher").strip().lower()
+    if account_type not in ("teacher", "parent", "student"):
+        return Response(
+            {"detail": "account_type must be one of: 'teacher', 'parent', 'student'."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -101,10 +126,11 @@ def create_teacher_view(request):
         "first_name": first_name,
         "last_name": last_name,
         "phone": phone,
-        # Mark user inactive until email is verified (optional but recommended)
+        # Mark user inactive until email is verified
         "is_active": False,
     }
 
+    org = None
     if primary_org_id:
         try:
             org = Organization.objects.get(pk=primary_org_id)
@@ -117,9 +143,108 @@ def create_teacher_view(request):
 
     try:
         with transaction.atomic():
+            # 1) Create the base user
             user = User.objects.create_user(email=email, password=password, **extra_fields)
 
-            # Create OTP entry (e.g. 10 minutes validity)
+            parent_profile = None
+            student_profile = None
+
+            # 2) Create appropriate profile(s) based on account_type
+            if account_type == "parent":
+                # Optional fields for parent
+                address = (request.data.get("address") or "").strip()
+                org_sub_id = request.data.get("organization_subscription_id")
+                subscription = None
+
+                if org_sub_id:
+                    try:
+                        subscription = OrganizationSubscription.objects.get(pk=org_sub_id)
+                    except OrganizationSubscription.DoesNotExist:
+                        raise ValidationError(
+                            {"organization_subscription_id": ["Invalid subscription id."]}
+                        )
+
+                parent_profile = ParentProfile.objects.create(
+                    user=user,
+                    organization=org,
+                    organization_subscription=subscription,
+                    address=address,
+                )
+
+            elif account_type == "student":
+                # We must have a ParentProfile to link to
+                parent_profile_id = request.data.get("parent_profile_id")
+                if not parent_profile_id:
+                    raise ValidationError(
+                        {"parent_profile_id": ["This field is required for student accounts."]}
+                    )
+
+                try:
+                    parent_profile = ParentProfile.objects.select_related("organization").get(
+                        pk=parent_profile_id
+                    )
+                except ParentProfile.DoesNotExist:
+                    raise ValidationError(
+                        {"parent_profile_id": ["Invalid parent_profile_id."]}
+                    )
+
+                # If no org explicitly passed, inherit from parent's org
+                student_org = org or parent_profile.organization
+
+                # Optional fields
+                admission_no = (request.data.get("admission_no") or "").strip()
+                dob_str = request.data.get("dob")
+                dob = None
+                if dob_str:
+                    try:
+                        dob = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
+                    except ValueError:
+                        raise ValidationError(
+                            {"dob": ["Invalid date format. Use YYYY-MM-DD."]}
+                        )
+
+                classroom = None
+                classroom_id = request.data.get("classroom_id")
+                if classroom_id:
+                    try:
+                        classroom = Classroom.objects.get(pk=classroom_id)
+                    except Classroom.DoesNotExist:
+                        raise ValidationError(
+                            {"classroom_id": ["Invalid classroom_id."]}
+                        )
+
+                # Create StudentProfile
+                student_profile = StudentProfile.objects.create(
+                    user=user,
+                    organization=student_org,
+                    current_classroom=classroom,
+                    admission_no=admission_no,
+                    dob=dob,
+                )
+
+                # Create ParentChildLink
+                relationship = (request.data.get("relationship") or "").strip()
+                ParentChildLink.objects.create(
+                    parent=parent_profile,
+                    student=student_profile,
+                    relationship=relationship,
+                )
+
+            else:
+                # account_type == "teacher"
+                # Per your note: current setup is OK, so we don't force TeacherProfile creation here.
+                # If you want, you can uncomment this block:
+                #
+                # if org is None:
+                #     raise ValidationError(
+                #         {"primary_org_id": ["primary_org_id is required for teacher accounts."]}
+                #     )
+                # TeacherProfile.objects.create(user=user, organization=org)
+                #
+                # For now, do nothing special.
+                pass
+
+            # 3) Create OTP entry (e.g. 10 minutes validity)
             otp = EmailOTP.create_for_user(user, minutes_valid=10)
 
     except IntegrityError:
@@ -133,10 +258,12 @@ def create_teacher_view(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Send email with OTP (outside of transaction block ideally)
+    # 4) Send OTP email (outside transaction)
     subject = "Verify your email"
-    message = f"Your verification code is: {otp.code}\n\n" \
-              f"This code will expire at {otp.expires_at}."
+    message = (
+        f"Your verification code is: {otp.code}\n\n"
+        f"This code will expire at {otp.expires_at}."
+    )
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
 
     send_mail(
@@ -154,13 +281,15 @@ def create_teacher_view(request):
             "firstName": user.first_name,
             "lastName": user.last_name,
             "phone": user.phone,
-            "primaryOrgId": user.primary_org.id if user.primary_org else None,
+            "primaryOrgId": getattr(user, "primary_org_id", None),
             "emailVerified": False,
+            "accountType": account_type,
+            "parentProfileId": parent_profile.id if parent_profile else None,
+            "studentProfileId": student_profile.id if student_profile else None,
             # do NOT return otp.code in prod; only for debugging if ever needed
         },
         status=status.HTTP_201_CREATED,
     )
-
 
 
 

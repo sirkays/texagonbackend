@@ -31,7 +31,7 @@ class Subject(NamedModel):
 
 class StudentProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
-    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="students")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="students", blank=True, null=True)
     current_classroom = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True)
     admission_no = models.CharField(max_length=64, blank=True)
     dob = models.DateField(null=True, blank=True)
@@ -58,7 +58,8 @@ class TeacherProfile(TimeStampedModel):
 
 class ParentProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="parent_profile")
-    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="parents")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="parents",
+    blank=True, null=True)
     organization_subscription = models.ForeignKey(
         OrganizationSubscription,
         on_delete=models.CASCADE,

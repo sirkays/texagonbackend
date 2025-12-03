@@ -23,6 +23,6 @@ urlpatterns = [
 
     path('api/teacher/overview/', views.teacher_dashboard_overview, name='teacher_dashboard_overview'),
 
-    path("api/teachers/create/", views.create_teacher_view, name="create-teacher"),
+    path("api/account/create/", views.create_account_view, name="create-account"),
     path("api/auth/verify-email/", views.verify_email_view, name="verify-email"),
 ]
