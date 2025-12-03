@@ -116,7 +116,7 @@ def _send_password_reset_email(user, reset_token, request, reset_path=None):
         [user.email],
         fail_silently=True,
     )
-    print("mail_sent....")
+
 
 
 def _find_active_token(key, purpose="password_reset"):

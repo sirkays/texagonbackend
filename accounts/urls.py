@@ -22,4 +22,7 @@ urlpatterns = [
     path('api/fetch-admin/access-orgs/', views.fetch_admin_access_orgs, name='fetch_admin_access_orgs'),
 
     path('api/teacher/overview/', views.teacher_dashboard_overview, name='teacher_dashboard_overview'),
+
+    path("api/teachers/create/", views.create_teacher_view, name="create-teacher"),
+    path("api/auth/verify-email/", views.verify_email_view, name="verify-email"),
 ]

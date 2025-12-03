@@ -7,10 +7,11 @@ from django.db.models import (
 from django.http import (
     JsonResponse
 )
+from django.core.mail import send_mail
 from decimal import Decimal
 from django.shortcuts import render
 from django.utils import timezone
-
+from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -30,7 +31,7 @@ from gamification.models import Badge, BadgeAward, PointTransaction, Streak
 from billing.models import SubscriptionInvoice, SubscriptionPayment
 from notifications.models import Notification
 
-from .models import AdminAccess, User
+from .models import AdminAccess, User,EmailOTP
 from core.utils import _month_bounds, _resolve_org, get_object_or_404_ajax
 
 
@@ -61,6 +62,178 @@ def create_admin(request):
             {"error": str(e)},
             status=400
         )
+
+
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([])  # API key only
+def create_teacher_view(request):
+    """
+    Create a teacher account & send OTP to verify email.
+
+    Request body:
+    {
+        "email": "teacher@example.com",
+        "password": "strongpassword",
+        "first_name": "Jane",
+        "last_name": "Doe",
+        "phone": "+123456789",
+        "primary_org_id": 1   # optional
+    }
+    """
+    email = request.data.get("email")
+    password = request.data.get("password")
+
+    if not email or not password:
+        return Response(
+            {"detail": "email and password are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    first_name = (request.data.get("first_name") or "").strip()
+    last_name = (request.data.get("last_name") or "").strip()
+    phone = (request.data.get("phone") or "").strip()
+    primary_org_id = request.data.get("primary_org_id")
+
+    extra_fields = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "phone": phone,
+        # Mark user inactive until email is verified (optional but recommended)
+        "is_active": False,
+    }
+
+    if primary_org_id:
+        try:
+            org = Organization.objects.get(pk=primary_org_id)
+            extra_fields["primary_org"] = org
+        except Organization.DoesNotExist:
+            return Response(
+                {"detail": "primary_org_id is invalid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    try:
+        with transaction.atomic():
+            user = User.objects.create_user(email=email, password=password, **extra_fields)
+
+            # Create OTP entry (e.g. 10 minutes validity)
+            otp = EmailOTP.create_for_user(user, minutes_valid=10)
+
+    except IntegrityError:
+        return Response(
+            {"detail": "A user with that email already exists."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except ValidationError as e:
+        return Response(
+            {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Send email with OTP (outside of transaction block ideally)
+    subject = "Verify your email"
+    message = f"Your verification code is: {otp.code}\n\n" \
+              f"This code will expire at {otp.expires_at}."
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
+
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=from_email,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
+
+    return Response(
+        {
+            "userId": user.id,
+            "email": user.email,
+            "firstName": user.first_name,
+            "lastName": user.last_name,
+            "phone": user.phone,
+            "primaryOrgId": user.primary_org.id if user.primary_org else None,
+            "emailVerified": False,
+            # do NOT return otp.code in prod; only for debugging if ever needed
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([])  # API key only
+def verify_email_view(request):
+    """
+    Verify a user's email address using an OTP.
+
+    Request body:
+    {
+        "email": "teacher@example.com",
+        "code": "123456"   # or "otp"
+    }
+    """
+    email = request.data.get("email")
+    code = request.data.get("code") or request.data.get("otp")
+
+    if not email or not code:
+        return Response(
+            {"detail": "email and code are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        # Avoid leaking which emails exist
+        return Response(
+            {"detail": "Invalid email or code."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Get latest matching OTP that is not used yet
+    otp = (
+        EmailOTP.objects
+        .filter(user=user, code=code, used=False)
+        .order_by("-created_at")
+        .first()
+    )
+
+    if not otp:
+        return Response(
+            {"detail": "Invalid email or code."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Check expiry
+    if otp.expires_at < timezone.now():
+        return Response(
+            {"detail": "This code has expired."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Mark OTP as used and activate the user
+    with transaction.atomic():
+        otp.used = True
+        otp.save(update_fields=["used"])
+
+        if not user.is_active:
+            user.is_active = True
+            user.save(update_fields=["is_active"])
+
+    return Response(
+        {
+            "userId": user.id,
+            "email": user.email,
+            "emailVerified": True,
+        },
+        status=status.HTTP_200_OK,
+    )
+
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])

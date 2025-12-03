@@ -3,6 +3,13 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
+import random
+import string
+from datetime import timedelta
+from django.conf import settings
+from django.utils import timezone
+
+
 class UserManager(BaseUserManager):
     use_in_migrations = True
 
@@ -69,3 +76,40 @@ class AdminAccess(models.Model):
         # Ensure clean() runs on every save
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+
+
+class EmailOTP(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="email_otps",
+    )
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "code", "used"]),
+        ]
+
+    @classmethod
+    def generate_code(cls, length=6) -> str:
+        # numeric code, e.g. 6 digits
+        return "".join(random.choices(string.digits, k=length))
+
+    @classmethod
+    def create_for_user(cls, user, minutes_valid=10):
+        code = cls.generate_code()
+        expires_at = timezone.now() + timedelta(minutes=minutes_valid)
+        return cls.objects.create(
+            user=user,
+            code=code,
+            expires_at=expires_at,
+        )
+
+    def is_valid(self) -> bool:
+        return (not self.used) and (self.expires_at >= timezone.now())
