@@ -2061,7 +2061,10 @@ def student_performance_detail(request):
         if attempt.submitted_at:
             delta = attempt.submitted_at - attempt.started_at
             completion_time = delta.total_seconds() / 60.0
-        attempt_status = "Passed" if attempt.score >= total_marks * Decimal("0.7") else "Failed"
+
+        PASS_MARK = getattr(app_settings, "pass_mark", Decimal("45"))
+        PASS_MARK = float(PASS_MARK)/100
+        attempt_status = "Passed" if attempt.score >= total_marks * Decimal(f"{PASS_MARK}") else "Failed"
         submitted_at = attempt.submitted_at.isoformat() if attempt.submitted_at else None
 
         test_summary = {
