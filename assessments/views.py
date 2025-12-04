@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any, DefaultDict, Dict, List, Optional
 # ===== Django Imports =====
 from django.conf import settings
+from texagonbackend import settings as app_settings
 from django.db import IntegrityError, transaction
 from django.db.models import (
     Avg,
@@ -915,17 +916,6 @@ def submit_test(request, test_id: int):
                     {"detail": "Server error creating attempt."},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
-        print(            {
-                "attempt_id": attempt.id,
-                "score": float(score),
-                "total_points": float(total_points),
-                "percentage": percentage,
-                "result": result,
-                "answered": answered,
-                "auto_graded": auto_graded_count,
-                "pending_manual": pending_manual,
-                "breakdown": breakdown,
-            },)
         # ------------- FINAL RESPONSE -------------
         return Response(
             {
@@ -1853,15 +1843,18 @@ def student_performance_summary(request):
         attempts = TestAttempt.objects.filter(filters).select_related(
             "test", "test__course", "student", "student__user", "student__current_classroom"
         )
+        PASS_MARK = getattr(app_settings, "pass_mark", Decimal("45"))
 
+        PASS_MARK = float(PASS_MARK)/100
         # Aggregates
         total_attempts = attempts.count()
         avg_score = attempts.aggregate(avg=Coalesce(Avg("score"), Decimal("0"), output_field=DecimalField())).get("avg", Decimal("0"))
-        pass_rate = attempts.filter(score__gte=F("test__total_marks") * Decimal("0.7")).count() / max(1, total_attempts) * 100 if total_attempts else 0
+        pass_rate = attempts.filter(score__gte=F("test__total_marks") * Decimal(f"{PASS_MARK}")).count() / max(1, total_attempts) * 100 if total_attempts else 0
         avg_completion_time = attempts.filter(submitted_at__isnull=False).aggregate(
             avg=Coalesce(Avg(Extract(F("submitted_at") - F("started_at"), 'epoch') / 60), Value(0.0))
         ).get("avg", 0)
 
+        
         payload = {
             "totalAttempts": total_attempts,
             "averageScore": float(avg_score),

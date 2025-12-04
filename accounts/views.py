@@ -24,7 +24,7 @@ from api.retrieve_token import get_token_from_header
 
 from orgs.models import OrganizationMembership, Organization
 from academics.models import (
-    ParentProfile, StudentProfile, ParentChildLink, Classroom, TeacherProfile
+    ParentProfile, StudentProfile, ParentChildLink, Classroom, TeacherProfile,Language, Subject
 )
 from learning.models import Course, Enrollment, Lesson, Bookmark, Material
 from assessments.models import Test, TestAttempt
@@ -382,6 +382,275 @@ def verify_email_view(request):
         },
         status=status.HTTP_200_OK,
     )
+
+
+
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def fetch_user_detail(request):
+    email = request.data.get("email")
+
+    if not email:
+        return Response(
+            {"detail": "Email field is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        # Case-insensitive lookup, since emails are unique
+        user = User.objects.select_related("primary_org").get(email__iexact=email)
+    except User.DoesNotExist:
+        return Response(
+            {"detail": "User with this email does not exist."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Base user payload
+    data = {
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.get_full_name(),
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "phone": user.phone,
+        "avatar": user.avatar.url if getattr(user.avatar, "url", None) else None,
+        "primary_org_id": user.primary_org_id,
+        "is_active": user.is_active,
+        "is_staff": user.is_staff,
+        "profile_type": "user",  # will be overridden below if a profile exists
+    }
+
+    # ---- Teacher profile ----
+    if hasattr(user, "teacher_profile"):
+        tp = user.teacher_profile
+        data["profile_type"] = "teacher"
+        data["teacher_profile"] = {
+            "id": tp.id,
+            "organization_id": tp.organization_id,
+            "bio": tp.bio,
+            "experience": tp.experience,
+            "languages": list(tp.languages.values("id", "language_name")),
+            "specialties": list(tp.specialties.values("id", "name")),
+        }
+        return Response(data)
+
+    # ---- Student profile (with parent links) ----
+    if hasattr(user, "student_profile"):
+        sp = user.student_profile
+        # parent_links is related_name on ParentChildLink from StudentProfile
+        parent_links_qs = sp.parent_links.select_related("parent__user")
+
+        parent_links = []
+        for link in parent_links_qs:
+            parent_profile = link.parent
+            parent_user = parent_profile.user
+            parent_links.append(
+                {
+                    "link_id": link.id,
+                    "relationship": link.relationship,
+                    "parent_profile_id": parent_profile.id,
+                    "parent_user": {
+                        "id": parent_user.id,
+                        "email": parent_user.email,
+                        "full_name": parent_user.get_full_name(),
+                    },
+                }
+            )
+
+        data["profile_type"] = "student"
+        data["student_profile"] = {
+            "id": sp.id,
+            "organization_id": sp.organization_id,
+            "current_classroom_id": sp.current_classroom_id,
+            "admission_no": sp.admission_no,
+            "dob": sp.dob,
+            "parent_links": parent_links,  # requested “parent link”
+        }
+        return Response(data)
+
+    # ---- Parent profile (with child links) ----
+    if hasattr(user, "parent_profile"):
+        pp = user.parent_profile
+        # children_links is related_name on ParentChildLink from ParentProfile
+        children_links_qs = pp.children_links.select_related("student__user", "student__current_classroom")
+
+        child_links = []
+        for link in children_links_qs:
+            student_profile = link.student
+            student_user = student_profile.user
+            child_links.append(
+                {
+                    "link_id": link.id,
+                    "relationship": link.relationship,
+                    "student_profile_id": student_profile.id,
+                    "student_user": {
+                        "id": student_user.id,
+                        "email": student_user.email,
+                        "full_name": student_user.get_full_name(),
+                    },
+                    "admission_no": student_profile.admission_no,
+                    "current_classroom_id": student_profile.current_classroom_id,
+                }
+            )
+
+        data["profile_type"] = "parent"
+        data["parent_profile"] = {
+            "id": pp.id,
+            "organization_id": pp.organization_id,
+            "organization_subscription_id": pp.organization_subscription_id,
+            "address": pp.address,
+            "last_billed_at": pp.last_billed_at,
+            "children_links": child_links,  # requested “childlink”
+        }
+        return Response(data)
+
+    # ---- No profile (just User model) ----
+    # profile_type remains "user"
+    return Response(data)
+
+
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def verify_and_update_user(request):
+    """
+    Body example:
+
+    {
+      "email": "student@example.com",
+      "profile": {
+        "address": "New address",        # ParentProfile
+        "dob": "2010-01-01",             # StudentProfile
+        "bio": "New bio",                # TeacherProfile
+        "experience": 5
+      }
+    }
+    """
+
+    email = request.data.get("email")
+    profile_payload = request.data.get("profile", {}) or {}
+
+    if not email:
+        return Response(
+            {"detail": "Email field is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # 1) Ensure the caller has AdminAccess and a selected_organization
+    try:
+        admin_access = AdminAccess.objects.select_related("selected_organization").get(
+            user=request.user,
+            active=True,
+        )
+    except AdminAccess.DoesNotExist:
+        return Response(
+            {"detail": "You do not have AdminAccess."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    organization = admin_access.selected_organization
+    if not organization:
+        return Response(
+            {"detail": "No selected_organization set on your AdminAccess."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # 2) Find the target user (case-insensitive email)
+    try:
+        user = User.objects.get(email__iexact=email)
+    except User.DoesNotExist:
+        return Response(
+            {"detail": "User with this email does not exist."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # 3) Determine which profile this user has
+    profile = None
+    profile_type = None
+
+
+    if hasattr(user, "parent_profile"):
+        profile = user.parent_profile
+        profile_type = "parent"
+    elif hasattr(user, "teacher_profile"):
+        profile = user.teacher_profile
+        profile_type = "teacher"
+    elif hasattr(user, "student_profile"):
+        profile = user.student_profile
+        profile_type = "student"
+    elif hasattr(user, "adminaccess") is False:
+        profile, stat = TeacherProfile.objects.get_or_create(user=user,organization=organization)
+        profile_type = "teacher"
+        print(profile, " professor...")
+    else:
+        return Response(
+            {"detail": "User does not have a Parent, Teacher, or Student profile."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Attach organization
+    profile.organization = organization
+    # Allowed fields
+    if profile_type == "parent":
+        allowed_fields = {"address", "last_billed_at"}
+    elif profile_type == "teacher":
+        allowed_fields = {"bio", "experience"}
+
+        # 🔹 LANGUAGES (ManyToMany)
+        language_ids = profile_payload.get("language_ids")
+        if language_ids is not None:
+            qs = Language.objects.filter(id__in=language_ids)
+            profile.languages.set(qs)
+
+        # 🔹 SPECIALTIES (ManyToMany)
+        specialty_ids = profile_payload.get("specialty_ids")
+        if specialty_ids is not None:
+            qs = Subject.objects.filter(
+                id__in=specialty_ids,
+                organization=organization  # enforce same org
+            )
+            profile.specialties.set(qs)
+    else:  # student
+        allowed_fields = {"admission_no", "dob"}
+
+        # 🔹 handle classroom specifically
+        classroom_id = profile_payload.get("current_classroom_id")
+        if classroom_id is not None:
+            try:
+                classroom = Classroom.objects.get(
+                    id=classroom_id,
+                    organization=organization,  # ensure classroom belongs to same org
+                )
+            except Classroom.DoesNotExist:
+                return Response(
+                    {"detail": "Classroom not found in your selected organization."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            profile.current_classroom = classroom
+
+    # Update simple fields
+    for field, value in profile_payload.items():
+        if field in allowed_fields:
+            setattr(profile, field, value)
+
+    profile.save()
+
+
+    # 6) Simple response (you can serialize the profile if you have serializers)
+    data = {
+        "user_id": user.id,
+        "email": user.email,
+        "profile_type": profile_type,
+        "organization_id": organization.id,
+        "organization_name": getattr(organization, "name", None),
+    }
+
+    return Response(data, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])

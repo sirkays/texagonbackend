@@ -25,4 +25,8 @@ urlpatterns = [
 
     path("api/account/create/", views.create_account_view, name="create-account"),
     path("api/auth/verify-email/", views.verify_email_view, name="verify-email"),
+
+
+    path("api/auth/fetch-user/", views.fetch_user_detail, name="fetch-user-detail"),
+    path("api/auth/verify-user/", views.verify_and_update_user, name="verify-user"),
 ]
