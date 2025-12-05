@@ -385,131 +385,157 @@ def verify_email_view(request):
 
 
 
-
-
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def fetch_user_detail(request):
-    email = request.data.get("email")
-
-    if not email:
-        return Response(
-            {"detail": "Email field is required."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
     try:
-        # Case-insensitive lookup, since emails are unique
-        user = User.objects.select_related("primary_org").get(email__iexact=email)
-    except User.DoesNotExist:
+        email = request.data.get("email")
+
+        if not email:
+            return Response(
+                {
+                    "success": False,
+                    "error": "VALIDATION_ERROR",
+                    "detail": "Email field is required.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = User.objects.select_related("primary_org").get(email__iexact=email)
+        except User.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "error": "NOT_FOUND",
+                    "detail": "User with this email does not exist.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ---- Safe avatar handling ----
+        avatar_url = None
+        try:
+            # user.avatar may exist but have no file
+            if getattr(user, "avatar", None) and getattr(user.avatar, "name", ""):
+                avatar_url = user.avatar.url
+        except Exception:
+            avatar_url = None  # swallow any avatar-related error
+
+        # Base user payload
+        data = {
+            "success": True,
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.get_full_name(),
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "phone": user.phone,
+            "avatar": avatar_url,
+            "primary_org_id": user.primary_org_id,
+            "is_active": user.is_active,
+            "is_staff": user.is_staff,
+            "profile_type": "user",  # will be overridden below if a profile exists
+        }
+
+        # ---- Teacher profile ----
+        if hasattr(user, "teacher_profile"):
+            tp = user.teacher_profile
+            data["profile_type"] = "teacher"
+            data["teacher_profile"] = {
+                "id": tp.id,
+                "organization_id": tp.organization_id,
+                "bio": tp.bio,
+                "experience": tp.experience,
+                "languages": list(tp.languages.values("id", "language_name")),
+                "specialties": list(tp.specialties.values("id", "name")),
+            }
+            return Response(data, status=status.HTTP_200_OK)
+
+        # ---- Student profile (with parent links) ----
+        if hasattr(user, "student_profile"):
+            sp = user.student_profile
+            parent_links_qs = sp.parent_links.select_related("parent__user")
+
+            parent_links = []
+            for link in parent_links_qs:
+                parent_profile = link.parent
+                parent_user = parent_profile.user
+                parent_links.append(
+                    {
+                        "link_id": link.id,
+                        "relationship": link.relationship,
+                        "parent_profile_id": parent_profile.id,
+                        "parent_user": {
+                            "id": parent_user.id,
+                            "email": parent_user.email,
+                            "full_name": parent_user.get_full_name(),
+                        },
+                    }
+                )
+
+            data["profile_type"] = "student"
+            data["student_profile"] = {
+                "id": sp.id,
+                "organization_id": sp.organization_id,
+                "current_classroom_id": sp.current_classroom_id,
+                "admission_no": sp.admission_no,
+                "dob": sp.dob,
+                "parent_links": parent_links,
+            }
+            return Response(data, status=status.HTTP_200_OK)
+
+        # ---- Parent profile (with child links) ----
+        if hasattr(user, "parent_profile"):
+            pp = user.parent_profile
+            children_links_qs = pp.children_links.select_related(
+                "student__user", "student__current_classroom"
+            )
+
+            child_links = []
+            for link in children_links_qs:
+                student_profile = link.student
+                student_user = student_profile.user
+                child_links.append(
+                    {
+                        "link_id": link.id,
+                        "relationship": link.relationship,
+                        "student_profile_id": student_profile.id,
+                        "student_user": {
+                            "id": student_user.id,
+                            "email": student_user.email,
+                            "full_name": student_user.get_full_name(),
+                        },
+                        "admission_no": student_profile.admission_no,
+                        "current_classroom_id": student_profile.current_classroom_id,
+                    }
+                )
+
+            data["profile_type"] = "parent"
+            data["parent_profile"] = {
+                "id": pp.id,
+                "organization_id": pp.organization_id,
+                "organization_subscription_id": pp.organization_subscription_id,
+                "address": pp.address,
+                "last_billed_at": pp.last_billed_at,
+                "children_links": child_links,
+            }
+            return Response(data, status=status.HTTP_200_OK)
+
+        # ---- No profile (just User model) ----
+        return Response(data, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print("Fetch User API Failed")
         return Response(
-            {"detail": "User with this email does not exist."},
-            status=status.HTTP_404_NOT_FOUND,
+            {
+                "success": False,
+                "error": "SERVER_ERROR",
+                "detail": str(e),
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-
-    # Base user payload
-    data = {
-        "id": user.id,
-        "email": user.email,
-        "full_name": user.get_full_name(),
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "phone": user.phone,
-        "avatar": user.avatar.url if getattr(user.avatar, "url", None) else None,
-        "primary_org_id": user.primary_org_id,
-        "is_active": user.is_active,
-        "is_staff": user.is_staff,
-        "profile_type": "user",  # will be overridden below if a profile exists
-    }
-
-    # ---- Teacher profile ----
-    if hasattr(user, "teacher_profile"):
-        tp = user.teacher_profile
-        data["profile_type"] = "teacher"
-        data["teacher_profile"] = {
-            "id": tp.id,
-            "organization_id": tp.organization_id,
-            "bio": tp.bio,
-            "experience": tp.experience,
-            "languages": list(tp.languages.values("id", "language_name")),
-            "specialties": list(tp.specialties.values("id", "name")),
-        }
-        return Response(data)
-
-    # ---- Student profile (with parent links) ----
-    if hasattr(user, "student_profile"):
-        sp = user.student_profile
-        # parent_links is related_name on ParentChildLink from StudentProfile
-        parent_links_qs = sp.parent_links.select_related("parent__user")
-
-        parent_links = []
-        for link in parent_links_qs:
-            parent_profile = link.parent
-            parent_user = parent_profile.user
-            parent_links.append(
-                {
-                    "link_id": link.id,
-                    "relationship": link.relationship,
-                    "parent_profile_id": parent_profile.id,
-                    "parent_user": {
-                        "id": parent_user.id,
-                        "email": parent_user.email,
-                        "full_name": parent_user.get_full_name(),
-                    },
-                }
-            )
-
-        data["profile_type"] = "student"
-        data["student_profile"] = {
-            "id": sp.id,
-            "organization_id": sp.organization_id,
-            "current_classroom_id": sp.current_classroom_id,
-            "admission_no": sp.admission_no,
-            "dob": sp.dob,
-            "parent_links": parent_links,  # requested “parent link”
-        }
-        return Response(data)
-
-    # ---- Parent profile (with child links) ----
-    if hasattr(user, "parent_profile"):
-        pp = user.parent_profile
-        # children_links is related_name on ParentChildLink from ParentProfile
-        children_links_qs = pp.children_links.select_related("student__user", "student__current_classroom")
-
-        child_links = []
-        for link in children_links_qs:
-            student_profile = link.student
-            student_user = student_profile.user
-            child_links.append(
-                {
-                    "link_id": link.id,
-                    "relationship": link.relationship,
-                    "student_profile_id": student_profile.id,
-                    "student_user": {
-                        "id": student_user.id,
-                        "email": student_user.email,
-                        "full_name": student_user.get_full_name(),
-                    },
-                    "admission_no": student_profile.admission_no,
-                    "current_classroom_id": student_profile.current_classroom_id,
-                }
-            )
-
-        data["profile_type"] = "parent"
-        data["parent_profile"] = {
-            "id": pp.id,
-            "organization_id": pp.organization_id,
-            "organization_subscription_id": pp.organization_subscription_id,
-            "address": pp.address,
-            "last_billed_at": pp.last_billed_at,
-            "children_links": child_links,  # requested “childlink”
-        }
-        return Response(data)
-
-    # ---- No profile (just User model) ----
-    # profile_type remains "user"
-    return Response(data)
 
 
 
