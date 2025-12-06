@@ -35,5 +35,8 @@ urlpatterns = [
     path('api/student-detail/performance/', views.student_performance_detail, name='student_performance_detail'),
 
     path('api/teacher/module-analytics/', views.teacher_module_analytics, name='teacher_module_analytics'),
+
+
+    path('api/teacher/fetch-my-test/', views.fetch_my_tests, name='fetch_my_tests'),
 ]
 

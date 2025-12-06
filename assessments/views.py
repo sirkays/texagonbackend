@@ -1,15 +1,14 @@
 # ===== Standard Library Imports =====
 import logging
 import math
-from rest_framework.permissions import IsAuthenticated
 import traceback
 from collections import defaultdict
 from datetime import datetime, timezone as py_tz
 from decimal import Decimal
 from typing import Any, DefaultDict, Dict, List, Optional
+
 # ===== Django Imports =====
 from django.conf import settings
-from texagonbackend import settings as app_settings
 from django.db import IntegrityError, transaction
 from django.db.models import (
     Avg,
@@ -23,36 +22,52 @@ from django.db.models import (
     Sum,
     Value,
     FloatField,
-    Exists
+    Exists,
 )
-
 from django.db.models.functions import Coalesce, Extract
 from django.db.utils import DataError
 from django.utils import dateparse, timezone
 from django.utils.dateparse import parse_datetime
 
-# ===== Third-Party Imports =====
+# ===== App Settings =====
+from texagonbackend import settings as app_settings
+
+# ===== Third-Party Imports (DRF) =====
 from rest_framework import status
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import (
+    api_view,
+    authentication_classes,
+    permission_classes,
+)
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
 
 # ===== Local App Imports =====
-from api.models import SessionToken
+from accounts.models import User
 from academics.models import StudentProfile, TeacherProfile
+from api.authentication import SessionTokenAuthentication
+from api.models import SessionToken
 from assessments.models import Test, Question, Choice, TestAttempt, TestAnswer
-from learning.models import Course, Enrollment, Lesson, Module
-from orgs.models import Organization, OrganizationMembership
+from core.models import StudentDevice
 from core.utils import (
     _get_student_for_user,
     _is_org_admin_or_teacher,
     _resolve_org,
     get_object_or_404_ajax,
-    get_or_make_device_id, user_agent, client_ip, hash_ip, COOKIE_NAME
+    get_or_make_device_id,
+    user_agent,
+    client_ip,
+    hash_ip,
+    COOKIE_NAME,
 )
+from learning.models import Course, Enrollment, Lesson, Module
+from orgs.models import Organization, OrganizationMembership
+
+# ===== Local Module Imports =====
 from api.authentication import SessionTokenAuthentication
-from .serializers import TestAttemptSerializer
-from core.models import StudentDevice
+from rest_framework_api_key.permissions import HasAPIKey
+from .serializers import TestAttemptSerializer, TestMiniSerializer
 
 
 logger = logging.getLogger(__name__)
@@ -1869,6 +1884,79 @@ def student_performance_summary(request):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def fetch_my_tests(request):
+    """
+    Return all tests created by the authenticated user (teacher),
+    using SessionTokenAuthentication + HasAPIKey.
+    """
+    try:
+        user = request.user
+
+        # ---- Auth guard ----
+        if not user or not user.is_authenticated:
+            return Response(
+                {
+                    "success": False,
+                    "error": "UNAUTHORIZED",
+                    "detail": "Authentication required.",
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # ---- Ensure user is a teacher ----
+        if not hasattr(user, "teacher_profile"):
+            return Response(
+                {
+                    "success": False,
+                    "error": "NO_TEACHER_PROFILE",
+                    "detail": "This user does not have a teacher profile.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        teacher_profile: TeacherProfile = user.teacher_profile
+
+        # ---- Query tests created by this teacher ----
+        # “Created by” = tests whose course.teacher == this teacher_profile
+        qs = (
+            Test.objects
+            .select_related("course", "course__subject", "course__classroom")
+            .filter(course__teacher=teacher_profile)
+            # Optional: restrict to the teacher's organization:
+            .filter(course__organization=teacher_profile.organization)
+            .order_by("-created_at")
+        )
+
+        serializer = TestMiniSerializer(qs, many=True)
+
+        return Response(
+            {
+                "success": True,
+                "count": qs.count(),
+                "results": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception as e:
+        print("Fetch My Tests API Failed:", e)
+        return Response(
+            {
+                "success": False,
+                "error": "SERVER_ERROR",
+                "detail": str(e),
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -1908,6 +1996,8 @@ def student_performance_list(request):
             pass
 
         test_id = request.query_params.get("test_id")
+        if test_id == "all":
+            test_id = None
         student_filter = request.query_params.get("student_filter", "").lower().strip()
         sort_field = request.query_params.get("sort_field", "score")
         if sort_field not in ["score", "completionTime", "submittedAt"]:
