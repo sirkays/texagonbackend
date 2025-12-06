@@ -621,6 +621,11 @@ def verify_and_update_user(request):
 
     # Attach organization
     profile.organization = organization
+    OrganizationMembership.objects.get_or_create(
+        user=user,
+        organization=organization,
+        role=profile_type,
+    )
     # Allowed fields
     if profile_type == "parent":
         allowed_fields = {"address", "last_billed_at"}
