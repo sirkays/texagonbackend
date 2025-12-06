@@ -1953,7 +1953,9 @@ def student_performance_list(request):
             "submittedAt": "submitted_at",
         }
         attempts = attempts_qs.order_by(f"{desc}{sort_map[sort_field]}")[offset:offset + limit]
+        PASS_MARK = getattr(app_settings, "pass_mark", Decimal("45"))
 
+        PASS_MARK = float(PASS_MARK)/100
         performances = []
         for attempt in attempts:
             student = attempt.student
@@ -1963,7 +1965,7 @@ def student_performance_list(request):
             total_marks = attempt.test.total_marks or Decimal("0")
             percentage = (attempt.score / total_marks * 100) if total_marks else Decimal("0")
             completion_time = attempt.completion_time if attempt.submitted_at else 0
-            status = "Passed" if attempt.score >= total_marks * Decimal("0.7") else "Failed"
+            status = "Passed" if attempt.score >= total_marks * Decimal(f"{PASS_MARK}") else "Failed"
             submitted_at = attempt.submitted_at.isoformat() if attempt.submitted_at else ""
 
             performances.append({
