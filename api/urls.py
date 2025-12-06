@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     login_view, logout_view,
     OrganizationViewSet, OrganizationMembershipViewSet, AcademicSessionViewSet,
-    ClassroomViewSet, SubjectViewSet, StudentProfileViewSet, TeacherProfileViewSet,
+    ClassroomViewSet, SubjectViewSet,LanguageViewSet, StudentProfileViewSet, TeacherProfileViewSet,
     ParentProfileViewSet, ParentChildLinkViewSet,
     CourseViewSet, EnrollmentViewSet, ModuleViewSet, LessonViewSet, MaterialViewSet,
     BookmarkViewSet, NoteViewSet,
@@ -29,6 +29,7 @@ router.register(r"organization-memberships", OrganizationMembershipViewSet)
 router.register(r"academic-sessions", AcademicSessionViewSet)
 router.register(r"classrooms", ClassroomViewSet)
 router.register(r"subjects", SubjectViewSet)
+router.register(r"languages", LanguageViewSet)
 router.register(r"students", StudentProfileViewSet)
 router.register(r"teachers", TeacherProfileViewSet)
 router.register(r"parents", ParentProfileViewSet)

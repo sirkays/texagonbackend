@@ -13,6 +13,7 @@ from academics.models import (
     TeacherProfile,
     ParentProfile,
     ParentChildLink,
+    Language
 )
 from learning.models import (
     Course,
@@ -92,6 +93,12 @@ class ClassroomSerializer(serializers.ModelSerializer):
 class SubjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subject
+        fields = "__all__"
+
+
+class LanguageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Language
         fields = "__all__"
 
 

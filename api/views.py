@@ -17,6 +17,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 from accounts.models import User
 from .authentication import SessionTokenAuthentication
 from .models import SessionToken
+from academics.models import Language
 from .serializers import (
     OrganizationSerializer, OrganizationMembershipSerializer, AcademicSessionSerializer,
     ClassroomSerializer, SubjectSerializer, StudentProfileSerializer, TeacherProfileSerializer,
@@ -28,7 +29,7 @@ from .serializers import (
     BadgeSerializer, BadgeAwardSerializer, PointTransactionSerializer, StreakSerializer,
     LiveSessionSerializer, TutoringBookingSerializer,TutoringBookingTeacherSerializer,
     SubscriptionPlanSerializer, OrganizationSubscriptionSerializer, SubscriptionInvoiceSerializer, SubscriptionPaymentSerializer,
-    NotificationSerializer,PrivateTutoringSerializer
+    NotificationSerializer,PrivateTutoringSerializer, LanguageSerializer
 )
 
 from orgs.models import Organization, OrganizationMembership, AcademicSession
@@ -306,6 +307,10 @@ class ClassroomViewSet(APIKeySessionViewSet):
 class SubjectViewSet(APIKeySessionViewSet):
     queryset = Subject.objects.all()
     serializer_class = SubjectSerializer
+
+class LanguageViewSet(APIKeySessionViewSet):
+    queryset = Language.objects.all()
+    serializer_class = LanguageSerializer
 
 class StudentProfileViewSet(APIKeySessionViewSet):
     queryset = StudentProfile.objects.all()
