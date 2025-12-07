@@ -1154,7 +1154,7 @@ def update_test(request, test_id: int):
         except Test.DoesNotExist:
             return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
 
-        data = request.data or {}
+        data = request.data or {} 
         # Core fields
         if "title" in data:
             test.title = (data["title"] or "").strip()
