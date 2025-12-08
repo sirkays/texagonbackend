@@ -1195,6 +1195,7 @@ def create_module(request):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 @api_view(["PUT", "PATCH"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -1205,52 +1206,98 @@ def update_module(request, module_id: int):
         user = request.user
         teacher = _get_teacher_for_user(user)
         if not teacher:
-            return Response({"detail": "No teacher profile found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "No teacher profile found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         try:
             module = Module.objects.get(id=module_id, course__teacher=teacher)
         except Module.DoesNotExist:
-            return Response({"detail": "Module not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Module not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         data = request.data or {}
-        
-        # Update fields if provided
+
+        # ---- Title ----
         if "title" in data:
-            title = data["title"].strip()
+            title = (data["title"] or "").strip()
             if not title:
-                return Response({"detail": "Title cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"detail": "Title cannot be empty."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             module.name = title
-        
+
+        # ---- Description ----
         if "description" in data:
             module.description = data["description"]
-        
-        if "difficulty" in data:
-            if data["difficulty"] in [choice[0] for choice in Module.DifficultyLevel.choices]:
-                module.difficulty = data["difficulty"]
-        
+
+        # ---- Difficulty ----
+        if "difficulty" in data and data["difficulty"]:
+            valid_values = [choice[0].lower() for choice in Module.DifficultyLevel.choices]
+            diff_value = str(data["difficulty"]).lower()
+            if diff_value in valid_values:
+                module.difficulty = diff_value
+
+        # ---- Estimated duration (minutes) ----
         if "estimatedDuration" in data:
-            module.estimated_duration_in_minutes = data["estimatedDuration"] or None
-        
-        if "order" in data:
+            # allow null / empty to clear
+            value = data["estimatedDuration"]
+            module.estimated_duration_in_minutes = value or None
+
+        # ---- Order ----
+        if "order" in data and data["order"] is not None:
             module.order = data["order"]
-        
+
+        # ---- Category ----
         if "categoryId" in data:
-            if data["categoryId"]:
+            category_id = data["categoryId"]
+            if category_id:
                 try:
-                    category = ModuleCategory.objects.get(id=data["categoryId"], active=True)
+                    category = ModuleCategory.objects.get(
+                        id=category_id,
+                        active=True,
+                    )
                     module.category = category
                 except ModuleCategory.DoesNotExist:
-                    return Response({"detail": "Category not found."}, status=status.HTTP_404_NOT_FOUND)
+                    return Response(
+                        {"detail": "Category not found."},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
             else:
+                # explicit null / empty => clear category
                 module.category = None
 
+        # ---- Course ----
+        if "course_id" in data:
+            course_id = data["course_id"]
+            if course_id:
+                try:
+                    course = Course.objects.get(id=course_id, teacher=teacher)
+                except Course.DoesNotExist:
+                    return Response(
+                        {"detail": "Course not found."},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+                module.course = course
+
         module.save()
-        
+
         # Refresh from DB with relations
-        module = Module.objects.select_related('course', 'category').prefetch_related(
-            Prefetch('lessons', queryset=Lesson.objects.filter(active=True).order_by('order', 'id'))
-        ).get(id=module_id)
-        
+        module = (
+            Module.objects.select_related("course", "category")
+            .prefetch_related(
+                Prefetch(
+                    "lessons",
+                    queryset=Lesson.objects.filter(active=True).order_by("order", "id"),
+                )
+            )
+            .get(id=module_id)
+        )
+
         module_data = _serialize_module(module, include_lessons=True)
         return Response({"module": module_data}, status=status.HTTP_200_OK)
 
@@ -1259,10 +1306,11 @@ def update_module(request, module_id: int):
             "detail": "Error while updating module.",
             "error": f"{type(e).__name__}: {e}",
         }
-        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(
+            settings, "DEBUG", False
+        ):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @api_view(["DELETE"])
 @permission_classes([HasAPIKey])

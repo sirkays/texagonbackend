@@ -22,7 +22,7 @@ class Course(NamedModel):
     private_tutor = models.ForeignKey(TutoringBooking, on_delete=models.CASCADE, blank=True, null=True)
 
     def __str__(self):
-        return self.teacher.user.email
+        return f"{self.subject.name} Teacher: {self.teacher.user.email}"
 
     class Meta:
         unique_together = ("organization", "subject", "classroom", "teacher")
