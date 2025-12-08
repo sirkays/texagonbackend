@@ -990,6 +990,7 @@ def list_modules(request):
     
     Query params:
       - course: course id to filter
+      - category: category id to filter
       - active: '1'/'true' for only active, '0'/'false' for inactive, omit for all
       - difficulty: 'beginner' | 'intermediate' | 'advanced' (case-insensitive)
       - include_lessons: '1' to include lessons in response
@@ -1011,16 +1012,25 @@ def list_modules(request):
         if not course_ids:
             return Response({"modules": []}, status=status.HTTP_200_OK)
 
-        # Start with all modules for teacher's courses (no active filter yet)
+        # Start with all modules for teacher's courses
         qs = Module.objects.filter(course_id__in=course_ids)
 
-        # Optional: filter by course
+        # Optional: filter by course id
         course_filter = request.query_params.get("course")
         if course_filter:
             try:
                 qs = qs.filter(course_id=int(course_filter))
             except ValueError:
                 # ignore invalid course id
+                pass
+
+        # Optional: filter by category id
+        category_filter = request.query_params.get("category")
+        if category_filter:
+            try:
+                qs = qs.filter(category_id=int(category_filter))
+            except ValueError:
+                # ignore invalid category id
                 pass
 
         # Optional: filter by active status (accepts 1/0/true/false)
@@ -1037,7 +1047,6 @@ def list_modules(request):
         difficulty_filter = request.query_params.get("difficulty")
         if difficulty_filter:
             diff_value = difficulty_filter.strip().lower()
-            # assuming Module.difficulty stores 'beginner' / 'intermediate' / 'advanced'
             qs = qs.filter(difficulty__iexact=diff_value)
 
         # Include lessons if requested
