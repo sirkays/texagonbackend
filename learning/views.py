@@ -990,7 +990,8 @@ def list_modules(request):
     
     Query params:
       - course: course id to filter
-      - active: '1' to show only active modules, '0' for inactive, omit for all
+      - active: '1'/'true' for only active, '0'/'false' for inactive, omit for all
+      - difficulty: 'beginner' | 'intermediate' | 'advanced' (case-insensitive)
       - include_lessons: '1' to include lessons in response
       - debug: '1' to include traceback on error
     """
@@ -998,16 +999,20 @@ def list_modules(request):
         user = request.user
         teacher = _get_teacher_for_user(user)
         if not teacher:
-            return Response({"modules": [], "detail": "No teacher profile found."}, status=status.HTTP_200_OK)
+            return Response(
+                {"modules": [], "detail": "No teacher profile found."},
+                status=status.HTTP_200_OK,
+            )
 
         # Get teacher's courses
         courses = Course.objects.filter(teacher=teacher, is_active=True)
         course_ids = list(courses.values_list("id", flat=True))
-        
+
         if not course_ids:
             return Response({"modules": []}, status=status.HTTP_200_OK)
 
-        qs = Module.objects.filter(course_id__in=course_ids, active=True)
+        # Start with all modules for teacher's courses (no active filter yet)
+        qs = Module.objects.filter(course_id__in=course_ids)
 
         # Optional: filter by course
         course_filter = request.query_params.get("course")
@@ -1015,24 +1020,40 @@ def list_modules(request):
             try:
                 qs = qs.filter(course_id=int(course_filter))
             except ValueError:
+                # ignore invalid course id
                 pass
 
-        # Optional: filter by active status
+        # Optional: filter by active status (accepts 1/0/true/false)
         active_filter = request.query_params.get("active")
-        if active_filter == "1":
-            qs = qs.filter(active=True)
-        elif active_filter == "0":
-            qs = qs.filter(active=False)
+        if active_filter is not None:
+            normalized = active_filter.strip().lower()
+            if normalized in {"1", "true", "t", "yes"}:
+                qs = qs.filter(active=True)
+            elif normalized in {"0", "false", "f", "no"}:
+                qs = qs.filter(active=False)
+            # else: ignore invalid values and don't filter by active
+
+        # Optional: filter by difficulty (e.g., difficulty=intermediate)
+        difficulty_filter = request.query_params.get("difficulty")
+        if difficulty_filter:
+            diff_value = difficulty_filter.strip().lower()
+            # assuming Module.difficulty stores 'beginner' / 'intermediate' / 'advanced'
+            qs = qs.filter(difficulty__iexact=diff_value)
 
         # Include lessons if requested
         include_lessons = request.query_params.get("include_lessons") == "1"
         if include_lessons:
             qs = qs.prefetch_related(
-                Prefetch('lessons', queryset=Lesson.objects.filter(active=True).order_by('order', 'id'))
+                Prefetch(
+                    "lessons",
+                    queryset=Lesson.objects.filter(active=True).order_by("order", "id"),
+                )
             )
 
         # Order by course, then by order, then by id
-        qs = qs.select_related('course', 'category').order_by('course__name', 'order', 'id')
+        qs = qs.select_related("course", "category").order_by(
+            "course__name", "order", "id"
+        )
 
         modules = [_serialize_module(module, include_lessons) for module in qs]
 
@@ -1043,10 +1064,11 @@ def list_modules(request):
             "detail": "Error while fetching modules.",
             "error": f"{type(e).__name__}: {e}",
         }
-        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
+        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(
+            settings, "DEBUG", False
+        ):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
