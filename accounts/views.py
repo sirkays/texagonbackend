@@ -684,6 +684,168 @@ def verify_and_update_user(request):
     return Response(data, status=status.HTTP_200_OK)
 
 
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def update_parent_child_link(request):
+    """
+    Update ParentChildLink by creating, updating or deleting using an email of parent or student.
+    Request body:
+    {
+        "email": "parent_or_student@example.com",
+        "other_email": "the_other@example.com",
+        "action": "create", "update" or "delete",
+        "relationship": "optional_relationship"  # required for update, optional for create
+    }
+    """
+    try:
+        admin_access = AdminAccess.objects.select_related("selected_organization").get(
+            user=request.user,
+            active=True,
+        )
+    except AdminAccess.DoesNotExist:
+        return Response(
+            {"detail": "You do not have AdminAccess."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+        
+    email = request.data.get("email")
+    other_email = request.data.get("other_email")
+    action = request.data.get("action")
+    relationship = request.data.get("relationship")
+
+    if not email or not other_email or not action:
+        return Response(
+            {"detail": "email, other_email, and action are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if action not in ["create", "update", "delete"]:
+        return Response(
+            {"detail": "action must be 'create', 'update' or 'delete'."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Get user for email
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return Response(
+            {"detail": "Invalid email."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Get profiles for email
+    parent = ParentProfile.objects.filter(user=user).first()
+    student = StudentProfile.objects.filter(user=user).first()
+    if not parent and not student:
+        return Response(
+            {"detail": "No parent or student profile found for the email."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Get other user and profile
+    try:
+        other_user = User.objects.get(email=other_email)
+    except User.DoesNotExist:
+        return Response(
+            {"detail": "Invalid other_email."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if parent:
+        other_profile = StudentProfile.objects.filter(user=other_user).first()
+        if not other_profile:
+            return Response(
+                {"detail": "other_email does not correspond to a student."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        link_parent = parent
+        link_student = other_profile
+    else:
+        other_profile = ParentProfile.objects.filter(user=other_user).first()
+        if not other_profile:
+            return Response(
+                {"detail": "other_email does not correspond to a parent."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        link_parent = other_profile
+        link_student = student
+
+    # Check same organization
+    if link_parent.organization != link_student.organization:
+        return Response(
+            {"detail": "Parent and student must belong to the same organization."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    with transaction.atomic():
+        if action == "create":
+            # Check if student is already linked to another parent
+            if link_student.parent_links.exclude(parent=link_parent).exists():
+                return Response(
+                    {"detail": "This student is already linked to another parent."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            # Check if link already exists
+            if ParentChildLink.objects.filter(parent=link_parent, student=link_student).exists():
+                return Response(
+                    {"detail": "Link already exists."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            ParentChildLink.objects.create(
+                parent=link_parent,
+                student=link_student,
+                relationship=relationship or "",
+            )
+        elif action == "update":
+            if not relationship:
+                return Response(
+                    {"detail": "relationship is required for update."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                link = ParentChildLink.objects.get(parent=link_parent, student=link_student)
+                link.relationship = relationship
+                link.save(update_fields=["relationship"])
+            except ParentChildLink.DoesNotExist:
+                return Response(
+                    {"detail": "Link does not exist."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        elif action == "delete":
+            ParentChildLink.objects.filter(parent=link_parent, student=link_student).delete()
+
+    # Get all links attached to the email
+    if parent:
+        links_qs = parent.children_links.all()
+        links = [
+            {
+                "student_email": link.student.user.email,
+                "relationship": link.relationship,
+            }
+            for link in links_qs
+        ]
+    else:
+        links_qs = student.parent_links.all()
+        links = [
+            {
+                "parent_email": link.parent.user.email,
+                "relationship": link.relationship,
+            }
+            for link in links_qs
+        ]
+
+    return Response(
+        {
+            "email": email,
+            "links": links,
+        },
+        status=status.HTTP_200_OK,
+    )
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -758,7 +920,6 @@ def _level_for_xp(xp: int):
         "xp_to_next": to_next,
         "progress_to_next_pct": pct,
     }
-
 
 
 

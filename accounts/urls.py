@@ -29,4 +29,6 @@ urlpatterns = [
 
     path("api/auth/fetch-user/", views.fetch_user_detail, name="fetch-user-detail"),
     path("api/auth/verify-user/", views.verify_and_update_user, name="verify-user"),
+
+    path("api/update-parent-child-link/", views.update_parent_child_link, name="update_parent_child_link"),
 ]
