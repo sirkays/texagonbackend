@@ -2,6 +2,8 @@ from django.urls import path
 from . import views
 urlpatterns = [
     path("api/materials/mine/", views.my_materials, name="my-materials"),
+    path('api/materials/delete/', views.delete_saved_material, name='delete_saved_material'),
+
     path("api/modules/learning/", views.learning_modules, name="learning-modules"),
     path("api/save/lesson/<int:lesson_id>/", views.save_lesson_to_my_materials, name="save-lesson"),
     path("api/academics/resources/", views.resource_materials, name="resource-materials"),

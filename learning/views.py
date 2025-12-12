@@ -1813,8 +1813,93 @@ def get_module_categories(request):
 
 
 
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def delete_saved_material(request):
+    """
+    Delete a saved Material for the authenticated user (idempotent).
 
+    DELETE /api/materials/delete/
 
+    Accepts identifier in either:
+      - query params: ?material_id=12   OR ?lesson_id=55
+      - JSON body (DELETE): {"material_id": 12} OR {"lesson_id": 55}
+
+    Rules:
+      - Only deletes materials owned by the authenticated user.
+      - If lesson_id is provided, deletes the user's Material linked to that lesson.
+      - Returns 200 even if the record is already missing (detail='not_found') to keep it idempotent.
+    """
+    try:
+        user = request.user
+
+        # ---- read ids from query or body ----
+        material_id = request.query_params.get("material_id") or request.query_params.get("id")
+        lesson_id = request.query_params.get("lesson_id")
+
+        body = {}
+        try:
+            # DRF parses body for DELETE if JSON; safe fallback
+            body = request.data or {}
+        except Exception:
+            body = {}
+
+        material_id = body.get("material_id") if material_id is None else material_id
+        lesson_id = body.get("lesson_id") if lesson_id is None else lesson_id
+
+        # ---- coerce ints ----
+        def _to_int(v):
+            try:
+                return int(v)
+            except Exception:
+                return None
+
+        material_id = _to_int(material_id)
+        lesson_id = _to_int(lesson_id)
+
+        if not material_id and not lesson_id:
+            return Response(
+                {"detail": "Provide material_id or lesson_id."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = Material.objects.select_for_update().filter(owner=user)
+
+        if material_id:
+            qs = qs.filter(id=material_id)
+        else:
+            qs = qs.filter(lesson_id=lesson_id)
+
+        m = qs.first()
+        if not m:
+            return Response(
+                {"detail": "not_found", "deleted": False},
+                status=status.HTTP_200_OK,
+            )
+
+        deleted_id = m.id
+        deleted_lesson_id = m.lesson_id
+
+        m.delete()
+
+        return Response(
+            {
+                "detail": "deleted",
+                "deleted": True,
+                "material_id": deleted_id,
+                "lesson_id": deleted_lesson_id,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception as e:
+        import traceback
+        err = {"detail": "Failed to delete saved material.", "error": f"{type(e).__name__}: {e}"}
+        if request.query_params.get("debug") in {"1", "true", "True"}:
+            err["traceback"] = traceback.format_exc()
+        return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
