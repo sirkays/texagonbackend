@@ -102,6 +102,10 @@ class Material(TimeStampedModel):
     tags = models.JSONField(default=list, blank=True)
     is_public = models.BooleanField(default=False)
     active = models.BooleanField(default=True)
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="materials", 
+        blank=True, null=True
+    )
 
     def __str__(self):
         return self.title

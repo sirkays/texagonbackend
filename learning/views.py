@@ -449,8 +449,12 @@ def learning_modules(request):
                 "host": (s.host.user.get_full_name() or s.host.user.username) if getattr(s, "host", None) and getattr(s.host, "user", None) else None,
                 "isActiveNow": bool(s.scheduled_at <= now <= s.scheduled_at + timezone.timedelta(minutes=dur)),
             })
-
+        saved_lesson_ids = set(
+            Material.objects.filter(owner=user, active=True, lesson__isnull=False)
+            .values_list("lesson_id", flat=True)
+        )
         return Response({
+            "is_saved": ls.id in saved_lesson_ids,
             "videos": videos,
             "audio": audio,
             "pdfs": pdfs,
@@ -517,6 +521,7 @@ def _material_to_dict(request, m: Material, lesson: Lesson) -> Dict[str, Any]:
     }
 
 
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -531,11 +536,10 @@ def save_lesson_to_my_materials(request, lesson_id: int):
       - is_public: bool (default False)
 
     Rules:
-      - Uses the Lesson's course organization for the Material.organization.
-      - kind is derived from Lesson.content_type.
-      - If a Material for this (owner, org) with the same lesson file/url already exists,
-        returns that existing row (detail='already_saved').
-      - Blocks cross-organization save if student's org != lesson's org (403).
+      - Uses Lesson.course.organization as Material.organization
+      - kind is derived from Lesson.content_type
+      - Idempotent by (owner, organization, lesson)
+      - Blocks cross-organization save if student's org != lesson's org (403)
     """
     try:
         user = request.user
@@ -543,9 +547,11 @@ def save_lesson_to_my_materials(request, lesson_id: int):
 
         # Fetch lesson (must be active)
         try:
-            lesson = (Lesson.objects
-                      .select_related("module", "module__course", "module__course__organization")
-                      .get(pk=lesson_id, active=True))
+            lesson = (
+                Lesson.objects
+                .select_related("module", "module__course", "module__course__organization")
+                .get(pk=lesson_id, active=True)
+            )
         except Lesson.DoesNotExist:
             return Response({"detail": "Lesson not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -553,54 +559,83 @@ def save_lesson_to_my_materials(request, lesson_id: int):
         org: Organization = course.organization
 
         # Optional org-guard: only allow saving lessons from user's org
-        if student and student.organization_id != org.id:
+        if student and getattr(student, "organization_id", None) != org.id:
             return Response(
                 {"detail": "You cannot save materials from another organization."},
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # Determine kind + source
+        # Determine kind + sources
         kind = _kind_from_lesson(lesson)
         src_url = (lesson.url or "").strip() or None
-        src_file_name = lesson.file.name if getattr(lesson, "file", None) and lesson.file else None
+        has_file = bool(getattr(lesson, "file", None) and lesson.file)
 
-        if not src_url and not src_file_name:
-            # Nothing to save; require at least a URL or file
+        if not src_url and not has_file:
             return Response({"detail": "Lesson has no file or URL to save."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Idempotent lookup for an existing material owned by the user pointing to same file or url in this org
-        existing = (Material.objects
-                    .filter(owner=user, organization=org, kind=kind)
-                    .filter(Q(url=src_url) | Q(file=src_file_name))
-                    .first())
+        # ✅ Idempotent lookup by lesson FK
+        existing = (
+            Material.objects
+            .filter(owner=user, organization=org, lesson=lesson)
+            .first()
+        )
 
         # Prepare fields
-        title = (request.data.get("title") or lesson.name).strip()
+        title = (request.data.get("title") or lesson.name or "").strip() or lesson.name
         is_public = bool(request.data.get("is_public") or False)
 
-        # Base tags: include type + pointer to lesson id; merge user-supplied tags
+        # Tags
         input_tags = request.data.get("tags") or []
         try:
             input_tags = [str(t) for t in input_tags] if isinstance(input_tags, (list, tuple)) else []
         except Exception:
             input_tags = []
+
         base_tags = [lesson.content_type, f"lesson:{lesson.id}"]
         tags = list(dict.fromkeys(base_tags + input_tags))  # unique, preserve order
 
-        # Create or return existing
         if existing:
-            # Optionally update title/tags/is_public/active if client sent them
-            updated = False
+            updated_fields = []
+
+            # keep lesson link correct
+            if existing.lesson_id != lesson.id:
+                existing.lesson = lesson
+                updated_fields.append("lesson")
+
+            # keep kind in sync with lesson content_type
+            if existing.kind != kind:
+                existing.kind = kind
+                updated_fields.append("kind")
+
             if existing.title != title:
-                existing.title = title; updated = True
-            if tags and existing.tags != tags:
-                existing.tags = tags; updated = True
+                existing.title = title
+                updated_fields.append("title")
+
+            if existing.tags != tags:
+                existing.tags = tags
+                updated_fields.append("tags")
+
             if existing.is_public != is_public:
-                existing.is_public = is_public; updated = True
+                existing.is_public = is_public
+                updated_fields.append("is_public")
+
             if not existing.active:
-                existing.active = True; updated = True
-            if updated:
-                existing.save(update_fields=["title", "tags", "is_public", "active"])
+                existing.active = True
+                updated_fields.append("active")
+
+            # Sync sources (url/file) to match lesson
+            desired_url = src_url or ""
+            if (existing.url or "") != desired_url:
+                existing.url = desired_url
+                updated_fields.append("url")
+
+            if has_file and existing.file != lesson.file:
+                existing.file = lesson.file
+                updated_fields.append("file")
+
+            if updated_fields:
+                existing.save(update_fields=updated_fields)
+
             return Response(
                 {"detail": "already_saved", "material": _material_to_dict(request, existing, lesson)},
                 status=status.HTTP_200_OK
@@ -616,11 +651,12 @@ def save_lesson_to_my_materials(request, lesson_id: int):
             active=True,
             url=src_url or "",
             tags=tags,
+            lesson=lesson,  # ✅ link it
         )
-        # Assign file if present
-        if src_file_name:
-            # Assigning the same file reference (no upload here)
-            m.file = lesson.file
+
+        if has_file:
+            m.file = lesson.file  # reference the same stored file
+
         m.save()
 
         return Response(
