@@ -386,6 +386,10 @@ def learning_modules(request):
             teacher_user = getattr(getattr(c, "teacher", None), "user", None) if c else None
             instructor = (teacher_user.get_full_name() or teacher_user.username) if teacher_user else None
             subject_name = getattr(getattr(c, "subject", None), "name", None) if c else None
+            saved_lesson_ids = set(
+                Material.objects.filter(owner=user, active=True, lesson__isnull=False)
+                .values_list("lesson_id", flat=True)
+            )
             return {
                 "id": ls.id,
                 "title": ls.name,
@@ -403,6 +407,7 @@ def learning_modules(request):
                 "progress": progress_map.get(getattr(c, "id", None), 0),
                 "popularity": size_map.get(getattr(c, "id", None), 0),
                 "updated_at": ls.updated_at.isoformat(),
+                "is_saved": ls.id in saved_lesson_ids,
             }
 
         # -------- per content-type lists --------
@@ -449,12 +454,8 @@ def learning_modules(request):
                 "host": (s.host.user.get_full_name() or s.host.user.username) if getattr(s, "host", None) and getattr(s.host, "user", None) else None,
                 "isActiveNow": bool(s.scheduled_at <= now <= s.scheduled_at + timezone.timedelta(minutes=dur)),
             })
-        saved_lesson_ids = set(
-            Material.objects.filter(owner=user, active=True, lesson__isnull=False)
-            .values_list("lesson_id", flat=True)
-        )
+
         return Response({
-            "is_saved": ls.id in saved_lesson_ids,
             "videos": videos,
             "audio": audio,
             "pdfs": pdfs,
