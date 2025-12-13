@@ -46,25 +46,16 @@ def _fmt_size(file_obj) -> Optional[str]:
     return None
 
 
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def my_materials(request):
     """
-    My Materials (Material-based)
-
-    Buckets:
-      - saved.videos  (Material.kind == "video")
-      - saved.audio   (Material.kind == "audio")
-      - saved.pdfs    (Material.kind == "pdf")
-      - notes         (from Note)  -> force tags: ["Java","Python"]
-      - bookmarks     (from Bookmark pointing to Lesson)
-
     Query params:
-      - q: search over Material.title / Material.tags and Note.content/title line / Lesson.name (bookmarks)
-      - my_only: '1' => only user's materials (otherwise (owner=user) ∪ (org public))
+      - q: search term
+      - my_only: '1' => only user's materials
       - videos_limit, audio_limit, pdfs_limit, notes_limit, bookmarks_limit (ints; default 12)
-      - debug=1 -> include traceback on error
     """
     try:
         user = request.user
@@ -94,116 +85,102 @@ def my_materials(request):
             )
 
         if q:
-            # Simple search across title and tags (JSON list)
-            m_base = m_base.filter(Q(title__icontains=q) | Q(tags__icontains=q))
+            # title + tags (tags is JSON/list => contains text in DB)
+            m_base = m_base.filter(
+                Q(title__icontains=q) |
+                Q(tags__icontains=q)
+            )
 
         m_base = m_base.select_related("owner").order_by("-updated_at", "-created_at")
 
-        # Videos
-        videos_qs = m_base.filter(kind=Material.Kind.VIDEO)[:v_lim]
-        videos: List[Dict[str, Any]] = []
-        for m in videos_qs:
+        def _owner_name(m):
             owner = getattr(m, "owner", None)
-            instructor = (owner.get_full_name() or owner.username) if owner else None
-            try:
-                video_url = m.file.url if m.file else (m.url or None)
-            except ValueError:
-                video_url = m.url or None
+            return (owner.get_full_name() or owner.username) if owner else None
 
+        def _safe_url(file_field, fallback_url):
             try:
-                thumb_nail = m.cover_image.url if m.cover_image else None
-            except ValueError:
-                thumb_nail = None
+                return file_field.url if file_field else (fallback_url or None)
+            except Exception:
+                return fallback_url or None
 
+        # Videos
+        videos = []
+        for m in m_base.filter(kind=Material.Kind.VIDEO)[:v_lim]:
             videos.append({
                 "id": str(m.id),
                 "title": m.title,
-                "instructor": instructor,
-                "duration": "—",         # No duration on Material
-                "progress": 0,           # No progress tracking for Material
-                "thumbnail": thumb_nail, # UI falls back to placeholder
-                "videoUrl": video_url,
-                
+                "instructor": _owner_name(m),
+                "duration": "—",
+                "progress": 0,
+                "thumbnail": _safe_url(getattr(m, "cover_image", None), None),
+                "videoUrl": _safe_url(getattr(m, "file", None), getattr(m, "url", None)),
             })
 
         # Audio
-        audio_qs = m_base.filter(kind=Material.Kind.AUDIO)[:a_lim]
-        audio: List[Dict[str, Any]] = []
-        for m in audio_qs:
-            owner = getattr(m, "owner", None)
-            speaker = (owner.get_full_name() or owner.username) if owner else None
-            try:
-                audio_url = m.file.url if m.file else (m.url or None)
-            except ValueError:
-                audio_url = m.url or None
+        audio = []
+        for m in m_base.filter(kind=Material.Kind.AUDIO)[:a_lim]:
             audio.append({
                 "id": str(m.id),
                 "title": m.title,
-                "speaker": speaker,
+                "speaker": _owner_name(m),
                 "duration": "—",
                 "progress": 0,
-                "audioUrl": audio_url,
+                "audioUrl": _safe_url(getattr(m, "file", None), getattr(m, "url", None)),
             })
 
-        # PDFs (Downloads)
-        pdf_qs = m_base.filter(kind=Material.Kind.PDF)[:p_lim]
-        pdfs: List[Dict[str, Any]] = []
-        for m in pdf_qs:
-            owner = getattr(m, "owner", None)
-            author = (owner.get_full_name() or owner.username) if owner else None
-            try:
-                download_url = m.file.url if m.file else (m.url or None)
-            except ValueError:
-                download_url = m.url or None
+        # PDFs
+        pdfs = []
+        for m in m_base.filter(kind=Material.Kind.PDF)[:p_lim]:
             pdfs.append({
                 "id": str(m.id),
                 "title": m.title,
-                "author": author,
-                "pages": None,                      # Not tracked on Material
+                "author": _owner_name(m),
+                "pages": None,
                 "size": _fmt_size(m.file),
-                "downloadUrl": download_url,
+                "downloadUrl": _safe_url(getattr(m, "file", None), getattr(m, "url", None)),
             })
 
-        # ---------- Notes (force tags ["Java","Python"]) ----------
-        notes_out: List[Dict[str, Any]] = []
+        # ---------- Notes ----------
+        notes_out = []
         if student:
             notes_qs = Note.objects.filter(student=student).order_by("-updated_at")
             if q:
-                notes_qs = notes_qs.filter(Q(content__icontains=q))
+                notes_qs = notes_qs.filter(
+                    Q(title__icontains=q) | Q(content__icontains=q)
+                )
+
             for n in notes_qs[:n_lim]:
-                content = n.content or ""
-                first_line = (content.splitlines()[0] if content else "").strip()
-                title = n.title
                 notes_out.append({
                     "id": str(n.id),
-                    "title": title,
-                    "content": content,
-                    "tags": ["Java", "Python"],   # <- forced tags as requested
-                    "createdAt": n.created_at.isoformat(),
-                    "updatedAt": n.updated_at.isoformat(),
+                    "title": n.title or "",
+                    "content": n.content or "",
+                    "tags": ["Java", "Python"],  # forced
+                    "created_at": n.created_at.isoformat(),
+                    "updated_at": n.updated_at.isoformat(),
                 })
 
-        # ---------- Bookmarks (Bookmark -> Lesson) ----------
+        # ---------- Bookmarks ----------
         bookmarks_qs = Bookmark.objects.filter(student=student) if student else Bookmark.objects.none()
+        bookmarks_qs = bookmarks_qs.select_related("lesson")
+
         if q:
-            bookmarks_qs = bookmarks_qs.select_related("lesson").filter(
+            bookmarks_qs = bookmarks_qs.filter(
                 Q(lesson__name__icontains=q) | Q(note__icontains=q)
             )
-        else:
-            bookmarks_qs = bookmarks_qs.select_related("lesson")
+
         bookmarks_qs = bookmarks_qs.order_by("-created_at")[:b_lim]
 
-        bookmarks_out: List[Dict[str, Any]] = []
+        bookmarks_out = []
         for b in bookmarks_qs:
-            lesson: Optional[Lesson] = getattr(b, "lesson", None)
+            lesson = getattr(b, "lesson", None)
             bookmarks_out.append({
                 "id": str(b.id),
                 "lessonId": lesson.id if lesson else None,
                 "lessonTitle": getattr(lesson, "name", None),
-                "positionSeconds": b.position_seconds,
+                "position_seconds": b.position_seconds,
                 "note": b.note or "",
-                "createdAt": b.created_at.isoformat(),
-                "updatedAt": b.updated_at.isoformat(),
+                "created_at": b.created_at.isoformat(),
+                "updated_at": b.updated_at.isoformat(),
             })
 
         return Response({
@@ -217,7 +194,6 @@ def my_materials(request):
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
             err["traceback"] = traceback.format_exc()
         return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 
 def _fmt_duration(seconds: int) -> str:

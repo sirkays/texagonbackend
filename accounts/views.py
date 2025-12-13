@@ -31,7 +31,7 @@ from assessments.models import Test, TestAttempt
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak
 from billing.models import SubscriptionInvoice, SubscriptionPayment
 from notifications.models import Notification
-
+import traceback
 from .models import AdminAccess, User,EmailOTP
 from core.utils import _month_bounds, _resolve_org, get_object_or_404_ajax
 
@@ -65,252 +65,126 @@ def create_admin(request):
         )
 
 
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
-@authentication_classes([])  # API key only
+@authentication_classes([])
 def create_account_view(request):
-    """
-    Create account & send OTP to verify email.
-
-    Request body (base):
-    {
-        "email": "teacher@example.com",
-        "password": "strongpassword",
-        "first_name": "Jane",
-        "last_name": "Doe",
-        "phone": "+123456789",
-        "primary_org_id": 1,           # optional
-        "account_type": "teacher"      # "teacher" | "parent" | "student" (default: "teacher")
-    }
-
-    Extra for PARENT account:
-    {
-        "account_type": "parent",
-        "address": "Parent home address",                 # optional
-        "organization_subscription_id": 5                 # optional
-    }
-
-    Extra for STUDENT account:
-    {
-        "account_type": "student",
-        "parent_profile_id": 10,                          # REQUIRED
-        "admission_no": "STU-001",                        # optional
-        "dob": "2012-09-15",                              # optional (YYYY-MM-DD)
-        "classroom_id": 3,                                # optional
-        "relationship": "Father"                          # optional (for ParentChildLink)
-    }
-    """
-    email = request.data.get("email")
+    email = (request.data.get("email") or "").strip().lower()
     password = request.data.get("password")
+    account_type = (request.data.get("account_type") or "teacher").strip().lower()
 
     if not email or not password:
-        return Response(
-            {"detail": "email and password are required."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        return Response({"detail": "email and password are required."}, status=400)
 
-    # account_type: teacher / parent / student
-    account_type = (request.data.get("account_type") or "teacher").strip().lower()
     if account_type not in ("teacher", "parent", "student"):
-        return Response(
-            {"detail": "account_type must be one of: 'teacher', 'parent', 'student'."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        return Response({"detail": "Invalid account_type"}, status=400)
 
-    first_name = (request.data.get("first_name") or "").strip()
-    last_name = (request.data.get("last_name") or "").strip()
-    phone = (request.data.get("phone") or "").strip()
+    # ✅ clean "already exists" check
+    if User.objects.filter(email=email).exists():
+        return Response({"detail": "A user with this email already exists."}, status=400)
     primary_org_id = request.data.get("primary_org_id")
-
-    extra_fields = {
-        "first_name": first_name,
-        "last_name": last_name,
-        "phone": phone,
-        # Mark user inactive until email is verified
-        "is_active": False,
-    }
-
     org = None
+
     if primary_org_id:
         try:
             org = Organization.objects.get(pk=primary_org_id)
-            extra_fields["primary_org"] = org
         except Organization.DoesNotExist:
-            return Response(
-                {"detail": "primary_org_id is invalid."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "Invalid primary_org_id"}, status=400)
+
+    user = None
+    parent_profile = None
+    student_profile = None
+    otp = None
 
     try:
         with transaction.atomic():
-            # 1) Create the base user
-            user = User.objects.create_user(email=email, password=password, **extra_fields)
+            # Create user (inactive until OTP verification)
+            user = User.objects.create_user(
+                email=email,
+                password=password,
+                first_name=request.data.get("first_name", ""),
+                last_name=request.data.get("last_name", ""),
+                phone=request.data.get("phone", ""),
+                is_active=False,
+                primary_org=org,
+            )
 
-            parent_profile = None
-            student_profile = None
-
-            # 2) Create appropriate profile(s) based on account_type
             if account_type == "parent":
-                # Optional fields for parent
-                address = (request.data.get("address") or "").strip()
-                org_sub_id = request.data.get("organization_subscription_id")
-                subscription = None
-
-                if org_sub_id:
-                    try:
-                        subscription = OrganizationSubscription.objects.get(pk=org_sub_id)
-                    except OrganizationSubscription.DoesNotExist:
-                        return Response(
-                            {"detail": "organization_subscription_id is invalid."},
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
-
                 parent_profile = ParentProfile.objects.create(
                     user=user,
                     organization=org,
-                    organization_subscription=subscription,
-                    address=address,
+                    address=request.data.get("address", ""),
                 )
 
             elif account_type == "student":
-                # We must have a ParentProfile to link to
                 parent_profile_id = request.data.get("parent_profile_id")
+
                 if not parent_profile_id:
-                    return Response(
-                        {
-                            "detail": {
-                                "parent_profile_id": [
-                                    "This field is required for student accounts."
-                                ]
-                            }
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+                    # raising triggers atomic rollback
+                    raise ValidationError({"detail": "parent_profile_id is required"})
 
                 try:
-                    parent_profile = (
-                        ParentProfile.objects.select_related("organization")
-                        .get(pk=parent_profile_id)
-                    )
+                    parent_profile = ParentProfile.objects.get(pk=parent_profile_id)
                 except ParentProfile.DoesNotExist:
-                    return Response(
-                        {"detail": {"parent_profile_id": ["Invalid parent_profile_id."]}},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+                    raise ValidationError({"detail": "Invalid parent_profile_id"})
 
-                # If no org explicitly passed, inherit from parent's org
-                student_org = org or parent_profile.organization
-
-                # Optional fields
-                admission_no = (request.data.get("admission_no") or "").strip()
-                dob_str = request.data.get("dob")
-                dob = None
-                if dob_str:
-                    try:
-                        dob = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
-                    except ValueError:
-                        return Response(
-                            {"detail": {"dob": ["Invalid date format. Use YYYY-MM-DD."]}},
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
-
-                classroom = None
-                classroom_id = request.data.get("classroom_id")
-                if classroom_id:
-                    try:
-                        classroom = Classroom.objects.get(pk=classroom_id)
-                    except Classroom.DoesNotExist:
-                        return Response(
-                            {"detail": {"classroom_id": ["Invalid classroom_id."]}},
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
-
-                # Create StudentProfile
                 student_profile = StudentProfile.objects.create(
                     user=user,
-                    organization=student_org,
-                    current_classroom=classroom,
-                    admission_no=admission_no,
-                    dob=dob,
+                    organization=org or parent_profile.organization,
+                    admission_no=request.data.get("admission_no", ""),
                 )
 
-                # Create ParentChildLink
-                relationship = (request.data.get("relationship") or "").strip()
                 ParentChildLink.objects.create(
                     parent=parent_profile,
                     student=student_profile,
-                    relationship=relationship,
+                    relationship=request.data.get("relationship", ""),
                 )
 
-            else:
-                # account_type == "teacher"
-                # Current setup: just the User (no TeacherProfile forced).
-                # You can enforce org here if you want, but use Response not raise:
-                #
-                # if org is None:
-                #     return Response(
-                #         {"detail": {"primary_org_id": ["primary_org_id is required for teacher accounts."]}},
-                #         status=status.HTTP_400_BAD_REQUEST,
-                #     )
-                #
-                # TeacherProfile.objects.create(user=user, organization=org)
-                pass
-
-            # 3) Create OTP entry (e.g. 10 minutes validity)
+            # Create OTP inside transaction
             otp = EmailOTP.create_for_user(user, minutes_valid=10)
 
+        # Send OTP email after transaction is committed
+        try:
+            send_mail(
+                subject="Verify your email",
+                message=f"Your OTP is {otp.code}",
+                from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+        except Exception as e:
+            return Response(
+                {"detail": "Failed to send email", "error": str(e)},
+                status=500,
+            )
+
+        return Response(
+            {
+                "userId": user.id,
+                "email": user.email,
+                "accountType": account_type,
+                "parentProfileId": parent_profile.id if parent_profile else None,
+                "studentProfileId": student_profile.id if student_profile else None,
+            },
+            status=201,
+        )
+
     except IntegrityError:
-        # Most common: duplicate email (unique constraint on User.email)
-        return Response(
-            {"detail": "A user with that email already exists."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        # Fallback safety (race conditions / DB uniqueness)
+        return Response({"detail": "A user with this email already exists."}, status=400)
+
     except ValidationError as e:
-        # In case any model.save() or full_clean() throws ValidationError
-        detail = e.message_dict if hasattr(e, "message_dict") else e.messages
+        # e can be dict-like or string; normalize
         return Response(
-            {"detail": detail},
-            status=status.HTTP_400_BAD_REQUEST,
+            e.message_dict if hasattr(e, "message_dict") else {"detail": str(e)},
+            status=400,
         )
+
     except Exception as e:
-        # Optional: log e somewhere (Sentry, logger, etc.)
-        return Response(
-            {"detail": str(e)},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        return Response({"detail": "Server error", "error": str(e)}, status=500)
 
-    # 4) Send OTP email (outside transaction)
-    subject = "Verify your email"
-    message = (
-        f"Your verification code is: {otp.code}\n\n"
-        f"This code will expire at {otp.expires_at}."
-    )
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
 
-    send_mail(
-        subject=subject,
-        message=message,
-        from_email=from_email,
-        recipient_list=[user.email],
-        fail_silently=False,
-    )
-
-    return Response(
-        {
-            "userId": user.id,
-            "email": user.email,
-            "firstName": user.first_name,
-            "lastName": user.last_name,
-            "phone": user.phone,
-            "primaryOrgId": getattr(user, "primary_org_id", None),
-            "emailVerified": False,
-            "accountType": account_type,
-            "parentProfileId": parent_profile.id if parent_profile else None,
-            "studentProfileId": student_profile.id if student_profile else None,
-            # do NOT return otp.code in prod; only for debugging if ever needed
-        },
-        status=status.HTTP_201_CREATED,
-    )
 
 
 @api_view(["POST"])
