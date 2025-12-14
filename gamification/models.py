@@ -1,53 +1,140 @@
-
-# achievements/models.py (or inside your existing composite models file)
+# achievements/models.py
 from django.db import models
-from django.conf import settings
+from django.utils import timezone
 from core.models import TimeStampedModel, NamedModel
 from orgs.models import Organization
 
+
+class ActivityEvent(TimeStampedModel):
+    """
+    Generic event log for gamification.
+
+    You will record these events whenever a student does something:
+    - exercise_solved
+    - quiz_attempted
+    - quiz_passed
+    - course_completed
+    - daily_active
+    - time_spent_minutes
+    etc.
+
+    Achievements are computed from these events using JSON rules.
+    """
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="activity_events"
+    )
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="activity_events",
+    )
+
+    event_type = models.CharField(max_length=64, db_index=True)
+    value = models.IntegerField(default=1)  # score, minutes, count=1, etc
+    meta = models.JSONField(default=dict, blank=True)
+
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "event_type", "occurred_at"]),
+            models.Index(fields=["student", "event_type", "occurred_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} ({self.student_id})"
+
+
 class AchievementDefinition(TimeStampedModel):
     """
-    DB-driven configuration for each achievement tile in the UI.
-    code: a stable key your backend uses to compute progress.
-    target_value: the numeric goal (e.g. 30 days streak, 3 courses, 10 exercises, 5 quizzes @≥90%).
-    points: how many points the student gets for unlocking this achievement (UI display + award logic if you add).
-    """
-    class Code(models.TextChoices):
-        FIRST_STEPS       = "first_steps", "First Steps"
-        CODE_WARRIOR      = "code_warrior", "Code Warrior"
-        QUIZ_MASTER       = "quiz_master", "Quiz Master"
-        STREAK_CHAMPION   = "streak_champion", "Streak Champion"
-        COURSE_CONQUEROR  = "course_conqueror", "Course Conqueror"
+    Fully dynamic achievement definition.
+    Admin can add NEW achievements by creating rows with `rule` JSON.
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="achievement_defs", null=True, blank=True)
-    code = models.CharField(max_length=64, choices=Code.choices, unique=True)
+    code: stable key for frontend / API.
+    rule: describes how to compute progress from ActivityEvent.
+    """
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="achievement_defs",
+        null=True,
+        blank=True,
+    )
+
+    code = models.CharField(max_length=64)
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
-    icon = models.CharField(max_length=64, default="star")      # e.g. 'trophy', 'target', 'zap'
+    icon = models.CharField(max_length=64, default="star")
     category = models.CharField(max_length=64, default="General")
-    target_value = models.PositiveIntegerField(null=True, blank=True)  # the numeric goal; NULL for achievements without a numeric target
-    points = models.PositiveIntegerField(default=0)             # points shown for this achievement
+    points = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+
+    # Fully dynamic rule (admin-editable)
+    # Examples are shown below.
+    rule = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "code"],
+                name="uniq_org_achievement_code",
+            )
+        ]
 
     def __str__(self):
-        return f"{self.code} ({self.title})"
+        org = self.organization_id or "GLOBAL"
+        return f"{org}:{self.code} ({self.title})"
 
 
-# Expand your Badge to carry UI + threshold info (keep existing rows compatible).
-# If you already have a second Badge class, merge them and run a migration.
+class AchievementAcquired(TimeStampedModel):
+    """
+    Created automatically when an achievement is unlocked.
+    """
+    definition = models.ForeignKey(
+        AchievementDefinition,
+        on_delete=models.CASCADE,
+        related_name="acquired",
+    )
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="achievements_acquired",
+    )
+    acquired_at = models.DateTimeField(default=timezone.now)
+
+    # store computed progress at time of unlock (useful for debugging)
+    value_at_unlock = models.IntegerField(default=0)
+    meta = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        unique_together = ("definition", "student")
+        indexes = [
+            models.Index(fields=["student", "definition"]),
+            models.Index(fields=["definition", "acquired_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.student_id} → {self.definition.code}"
+
+
 class Badge(NamedModel):
-    organization = models.ForeignKey(Organization,
-     on_delete=models.CASCADE, 
-     related_name="badges", blank=True, null=True)
-    # keep existing file/icon if you like; we add string-based icon/color for your UI:
-    icon_name = models.CharField(max_length=64, default="medal")     # e.g. 'gem', 'crown', 'trophy'
-    color = models.CharField(max_length=64, default="bg-gray-400")   # Tailwind class used in UI
-    points = models.PositiveIntegerField(default=0)                   # points threshold (for progress bar)
+    """
+    Dynamic badges based on points threshold.
+    Admin can add new badges anytime.
+    """
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="badges",
+        blank=True,
+        null=True,
+    )
+    icon_name = models.CharField(max_length=64, default="medal")
+    color = models.CharField(max_length=64, default="bg-gray-400")
+    points = models.PositiveIntegerField(default=0)  # threshold
     criteria = models.TextField(blank=True)
-    rules = models.JSONField(default=dict, blank=True)               # optional, if you want rule JSON
+    rules = models.JSONField(default=dict, blank=True)
 
     class Meta:
         verbose_name = "Badge"
@@ -60,7 +147,11 @@ class Badge(NamedModel):
 
 class BadgeAward(TimeStampedModel):
     badge = models.ForeignKey(Badge, on_delete=models.CASCADE, related_name="awards")
-    student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="badge_awards")
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="badge_awards",
+    )
     awarded_at = models.DateTimeField(auto_now_add=True)
     reason = models.CharField(max_length=255, blank=True)
 
@@ -70,14 +161,32 @@ class BadgeAward(TimeStampedModel):
 
 
 class PointTransaction(TimeStampedModel):
-    student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="point_transactions")
+    """
+    A ledger of points. (Recommended)
+    """
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="point_transactions",
+    )
     points = models.IntegerField()
     reason = models.CharField(max_length=255, blank=True)
     balance_after = models.IntegerField(default=0)
 
+    class Meta:
+        indexes = [models.Index(fields=["student", "created_at"])]
+
+
 class Streak(TimeStampedModel):
-    student = models.OneToOneField("academics.StudentProfile", on_delete=models.CASCADE, related_name="streak")
+    """
+    Optional: keep streak calculated from daily activity,
+    or update it directly when logging 'daily_active' events.
+    """
+    student = models.OneToOneField(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="streak",
+    )
     current_days = models.PositiveIntegerField(default=0)
     longest_days = models.PositiveIntegerField(default=0)
     last_activity = models.DateField(null=True, blank=True)
-
