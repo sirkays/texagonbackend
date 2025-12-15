@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from django.db import IntegrityError, transaction
 from rest_framework_api_key.permissions import HasAPIKey
 from api.authentication import SessionTokenAuthentication
+import logging
 
 from core.utils import _get_student_for_user, _get_teacher_for_user, _resolve_org
 from learning.models import Lesson
@@ -29,7 +30,7 @@ from .serializers import (
 )
 from .utils import user_is_submission_student, user_teaches_lesson, user_is_teacher
 
-
+logger = logging.getLogger(__name__)
 # ---------- SNIPPETS ----------
 
 @api_view(["DELETE"])
@@ -612,7 +613,6 @@ def teacher_submission_grade(request, pk: int):
                 },
                 dedupe_key=f"exercise_graded:{submission.id}",
             )
-
             # optional: mastery threshold
             if submission.score is not None and float(submission.score) >= 80:
                 log_event(
@@ -623,7 +623,6 @@ def teacher_submission_grade(request, pk: int):
                     meta={"submission_id": submission.id, "score": submission.score},
                     dedupe_key=f"exercise_mastered:{submission.id}",
                 )
-
             log_event(
                 student=student,
                 org=org,
@@ -632,7 +631,6 @@ def teacher_submission_grade(request, pk: int):
                 meta={"source": "teacher_submission_grade", "submission_id": submission.id},
                 dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
             )
-
         except Exception:
             logger.exception(
                 "Gamification on_commit failed (non-fatal)",
@@ -640,7 +638,7 @@ def teacher_submission_grade(request, pk: int):
             )
             return
 
-        transaction.on_commit(_log_after_commit)
+    transaction.on_commit(_log_after_commit)
     # --------------------------------------------------------------
 
     return Response(TeacherCodeSubmissionDetailSerializer(submission).data, status=200)
