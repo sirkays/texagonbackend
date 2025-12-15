@@ -9,7 +9,7 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-
+from django.db import IntegrityError, transaction
 from rest_framework_api_key.permissions import HasAPIKey
 from api.authentication import SessionTokenAuthentication
 
@@ -160,29 +160,37 @@ def submission_create(request):
     )
     org = getattr(student, "organization", None)
     today = timezone.localdate()
-
     def _log_after_commit():
-        log_event(
-            student=student,
-            org=org,
-            event_type="exercise_submitted",
-            value=1,
-            meta={
-                "submission_id": submission.id,
-                "lesson_id": lesson.id,
-                "language": language,
-            },
-            dedupe_key=f"exercise_submitted:{submission.id}",
-        )
+        try:
+            log_event(
+                student=student,
+                org=org,
+                event_type="exercise_submitted",
+                value=1,
+                meta={
+                    "submission_id": submission.id,
+                    "lesson_id": lesson.id,
+                    "language": language,
+                },
+                dedupe_key=f"exercise_submitted:{submission.id}",
+            )
 
-        log_event(
-            student=student,
-            org=org,
-            event_type="daily_active",
-            value=1,
-            meta={"source": "submission_create", "submission_id": submission.id},
-            dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
-        )
+            log_event(
+                student=student,
+                org=org,
+                event_type="daily_active",
+                value=1,
+                meta={"source": "submission_create", "submission_id": submission.id},
+                dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
+            )
+
+        except Exception:
+            logger.exception(
+                "Gamification on_commit failed (non-fatal)",
+                extra={"submission_id": submission.id, "lesson_id": lesson.id},
+            )
+            return
+
 
     transaction.on_commit(_log_after_commit)
 
@@ -590,7 +598,8 @@ def teacher_submission_grade(request, pk: int):
         org = getattr(student, "organization", None)
         today = timezone.localdate()
 
-        def _log_after_commit():
+    def _log_after_commit():
+        try:
             log_event(
                 student=student,
                 org=org,
@@ -624,6 +633,13 @@ def teacher_submission_grade(request, pk: int):
                 meta={"source": "teacher_submission_grade", "submission_id": submission.id},
                 dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
             )
+
+        except Exception:
+            logger.exception(
+                "Gamification on_commit failed (non-fatal)",
+                extra={"submission_id": submission.id, "lesson_id": submission.lesson_id},
+            )
+            return
 
         transaction.on_commit(_log_after_commit)
     # --------------------------------------------------------------
