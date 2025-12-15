@@ -597,7 +597,6 @@ def teacher_submission_grade(request, pk: int):
         student = submission.student
         org = getattr(student, "organization", None)
         today = timezone.localdate()
-
     def _log_after_commit():
         try:
             log_event(
