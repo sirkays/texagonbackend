@@ -32,7 +32,7 @@ class ActivityEvent(TimeStampedModel):
     event_type = models.CharField(max_length=64, db_index=True)
     value = models.IntegerField(default=1)  # score, minutes, count=1, etc
     meta = models.JSONField(default=dict, blank=True)
-
+    dedupe_key = models.CharField(max_length=128, unique=True, db_index=True, blank=True, null=True)
     occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
 
     class Meta:

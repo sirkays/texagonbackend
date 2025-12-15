@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone as py_tz
 from decimal import Decimal
 from typing import Any, DefaultDict, Dict, List, Optional
-
+from gamification.services.engine import log_event 
 # ===== Django Imports =====
 from django.conf import settings
 from django.db import IntegrityError, transaction
@@ -932,6 +932,62 @@ def submit_test(request, test_id: int):
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
         # ------------- FINAL RESPONSE -------------
+        # ---------- GAMIFICATION EVENT LOG (AFTER FACT) ----------
+        org = getattr(student, "organization", None)
+        today = timezone.localdate()
+        def _log_after_commit():
+            try:
+                log_event(
+                    student=student,
+                    org=org,
+                    event_type="quiz_attempted",
+                    value=1,
+                    meta={
+                        "test_id": test.id,
+                        "attempt_id": attempt.id,
+                        "score": float(score),
+                        "total_points": float(total_points),
+                        "percentage": percentage,
+                        "result": result,
+                        "pass_mark": pass_mark,
+                    },
+                    dedupe_key=f"quiz_attempted:{attempt.id}",
+                )
+
+                if result == "PASS":
+                    log_event(
+                        student=student,
+                        org=org,
+                        event_type="quiz_passed",
+                        value=1,
+                        meta={
+                            "test_id": test.id,
+                            "attempt_id": attempt.id,
+                            "percentage": percentage,
+                        },
+                        dedupe_key=f"quiz_passed:{attempt.id}",
+                    )
+
+                log_event(
+                    student=student,
+                    org=org,
+                    event_type="daily_active",
+                    value=1,
+                    meta={"source": "submit_test", "attempt_id": attempt.id},
+                    dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
+                )
+
+            except Exception:
+                logger.exception(
+                    "Gamification on_commit failed (non-fatal)",
+                    extra={"attempt_id": attempt.id},
+                )
+                return
+
+
+        transaction.on_commit(_log_after_commit)
+        # --------------------------------------------------------
+
         return Response(
             {
                 "attempt_id": attempt.id,

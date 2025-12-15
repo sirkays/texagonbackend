@@ -1,42 +1,29 @@
-# api/views.py
 from typing import Any, Dict, List, Optional
 import traceback
 from decimal import Decimal
 from datetime import timedelta, datetime
-
 from django.http import JsonResponse
 from django.conf import settings
 from django.db.models import Q, Sum, Count, Avg, Max, Min
 from django.utils import timezone
 from django.contrib.auth.decorators import login_required
-
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_api_key.permissions import HasAPIKey
-
 from api.authentication import SessionTokenAuthentication
-
-# 🔧 adjust imports to your app labels/namespaces
 from orgs.models import Organization, OrganizationMembership
 from academics.models import StudentProfile, ParentProfile, TeacherProfile, Classroom, Subject
 from learning.models import Course, Enrollment
 from assessments.models import Test, TestAttempt, TestAnswer, Question
-from gamification.models import Badge, BadgeAward, PointTransaction, Streak, AchievementDefinition
+from gamification.models import (Badge, BadgeAward, PointTransaction, Streak, 
+    AchievementDefinition,AchievementAcquired,ActivityEvent
+)
 from attendance.models import AttendanceRecord, AttendanceSession
 from core.utils import _get_student_for_user, _to_int, _sum_points
+from django.db.models.functions import Cast
 
 
-def _completed_courses(student: StudentProfile) -> int:
-    return int(
-        Enrollment.objects
-        .filter(student=student)
-        .filter(Q(status="completed") | Q(progress_pct__gte=100))
-        .count()
-    )
-
-
-# ---------------- endpoint ----------------
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -45,22 +32,26 @@ def achievements_overview(request):
         user = request.user
         student = _get_student_for_user(user)
         if not student:
-            return Response(_dummy_payload(), status=status.HTTP_200_OK)
+            return Response({}, status=status.HTTP_404_NOT_FOUND)
 
         org = getattr(student, "organization", None)
+        org_id = getattr(org, "id", None)
+
         total_points = _sum_points(student)
         streak_obj = getattr(student, "streak", None)
         streak_current = int(getattr(streak_obj, "current_days", 0) or 0)
         streak_best = int(getattr(streak_obj, "longest_days", 0) or 0)
 
-        # ---------- badge side (fully DB-driven) ----------
+        # ---------------------------
+        # BADGES (unchanged response)
+        # ---------------------------
         badges_qs = Badge.objects.all()
         if org:
-            badges_qs = badges_qs.filter(organization=org)
+            badges_qs = badges_qs.filter(Q(organization=org) | Q(organization__isnull=True))
         badges_qs = badges_qs.order_by("points", "id")
-
         awarded_ids = set(
-            BadgeAward.objects.filter(student=student, badge__in=badges_qs).values_list("badge_id", flat=True)
+            BadgeAward.objects.filter(student=student, badge__in=badges_qs)
+            .values_list("badge_id", flat=True)
         )
         badges_total = badges_qs.count()
         badges_earned = len(awarded_ids)
@@ -80,38 +71,73 @@ def achievements_overview(request):
                 item["progress"] = int(total_points)
                 item["total"] = int(b.points)
             badges.append(item)
-
-        # ---------- achievements (DB-driven definitions) ----------
+        # -----------------------------------------
+        # ACHIEVEMENTS (rule-driven + acquired)
+        # -----------------------------------------
         defs_qs = AchievementDefinition.objects.filter(is_active=True)
         if org:
-            # org-specific rows first; fallback to global (org NULL) if org row missing
-            # We’ll fetch both then prefer org matches in code below.
-            defs_qs = AchievementDefinition.objects.filter(is_active=True).filter(Q(organization__isnull=True) | Q(organization=org))
+            defs_qs = defs_qs.filter(Q(organization__isnull=True) | Q(organization=org))
+
         defs_map = {}
-        for d in defs_qs.order_by("-organization"):  # org-specific overwrites globals with same code
+        for d in defs_qs.order_by("-organization_id", "id"):
             defs_map.setdefault(d.code, d)
+        defs = list(defs_map.values())
+        acquired_qs = (
+            AchievementAcquired.objects
+            .filter(student=student, definition__in=defs)
+            .select_related("definition")
+        )
+        acquired_by_def_id = {a.definition_id: a for a in acquired_qs}
+        def _rule_target(rule: dict) -> int:
+            try:
+                return int((rule or {}).get("target") or 0)
+            except Exception:
+                return 0
 
-        # live data we need for progress computations
-        has_progress = Enrollment.objects.filter(student=student, progress_pct__gt=0).exists()
-        has_attempt = TestAttempt.objects.filter(student=student).exists()
-        first_steps_earned = bool(has_progress or has_attempt)
+        def _apply_rule_filters(ev_qs, rule: dict):
+            filters = (rule or {}).get("filters") or {}
+            for k, v in filters.items():
+                ev_qs = ev_qs.filter(**{f"meta__{k}": v})
+            return ev_qs
 
-        attempts = list(TestAttempt.objects.filter(student=student).select_related("test"))
-        test_ids = {a.test_id for a in attempts}
-        totals_map = {
-            tid: (Question.objects.filter(test_id=tid).aggregate(t=Sum("points")).get("t") or Decimal(0))
-            for tid in test_ids
-        }
-        ninety_or_more = 0
-        for a in attempts:
-            total = float(totals_map.get(a.test_id) or 0.0)
-            if total > 0 and float(a.score or 0) >= 0.9 * total:  # 90% threshold (keep constant, or move to JSON later)
-                ninety_or_more += 1
+        def _apply_window(ev_qs, rule: dict):
+            window_days = (rule or {}).get("window_days")
+            if not window_days:
+                return ev_qs
+            try:
+                days = int(window_days)
+            except Exception:
+                return ev_qs
+            since = timezone.now() - timedelta(days=days)  # ✅ FIX
+            return ev_qs.filter(occurred_at__gte=since)
 
-        completed_courses = _completed_courses(student)
-        exercises_done = TestAttempt.objects.filter(student=student, status="submitted").count()
+        def _compute_value(student_id: int, org_id: int, rule: dict) -> int:
+            metric = (rule or {}).get("metric")
+            event_type = (rule or {}).get("event_type")
+            if not metric or not event_type:
+                return 0
 
-        # Helper to build an achievement from a def + computed progress
+            ev_qs = ActivityEvent.objects.filter(
+                student_id=student_id,
+                organization_id=org_id,
+                event_type=event_type,
+            )
+            ev_qs = _apply_window(ev_qs, rule)
+            ev_qs = _apply_rule_filters(ev_qs, rule)
+            if metric == "count":
+                return int(ev_qs.count())
+            if metric == "sum":
+                return int(ev_qs.aggregate(s=Sum("value"))["s"] or 0)
+            if metric == "max":
+                return int(ev_qs.aggregate(m=Max("value"))["m"] or 0)
+            if metric == "distinct_count":
+                distinct_key = (rule or {}).get("distinct_key")
+                if not distinct_key:
+                    return 0
+                return int(ev_qs.values(f"meta__{distinct_key}").distinct().count())
+
+            return 0
+
         def build(defn: AchievementDefinition, earned: bool, progress: int = None, total: int = None, earned_date=None):
             return {
                 "id": defn.id,
@@ -122,44 +148,32 @@ def achievements_overview(request):
                 "earnedDate": (earned_date or (timezone.now().date().isoformat() if earned else None)),
                 "points": int(defn.points or 0),
                 "category": defn.category or "General",
-                **({ "progress": int(progress) } if progress is not None else {}),
-                **({ "total": int(total) } if total is not None else {}),
+                **({"progress": int(progress)} if progress is not None else {}),
+                **({"total": int(total)} if total is not None else {}),
             }
 
         achievements = []
-        
-        # FIRST_STEPS (no numeric target)
-        d = defs_map.get("first_steps")
-        if d:
-            achievements.append(build(d, first_steps_earned))
+        for defn in defs:
+            acquired = acquired_by_def_id.get(defn.id)
+            earned = bool(acquired)
 
-        # CODE_WARRIOR (uses target_value)
-        d = defs_map.get("code_warrior")
-        if d:
-            goal = int(d.target_value or 0)
-            earned = (goal > 0 and exercises_done >= goal)
-            achievements.append(build(d, earned, min(exercises_done, goal) if goal else None, goal or None))
+            earned_date = acquired.acquired_at.date().isoformat() if (acquired and acquired.acquired_at) else None
+            
+            rule = defn.rule or {}
+            target = _rule_target(rule)
 
-        # QUIZ_MASTER (target_value is the “N quizzes ≥90%” number)
-        d = defs_map.get("quiz_master")
-        if d:
-            goal = int(d.target_value or 0)
-            earned = (goal > 0 and ninety_or_more >= goal)
-            achievements.append(build(d, earned, min(ninety_or_more, goal) if goal else None, goal or None))
+            value = 0
+            if org_id:
+                # special-case: allow streak without events if you use event_type="streak_current"
+                if (rule or {}).get("event_type") == "streak_current":
+                    value = int(streak_current)
+                else:
+                    value = _compute_value(student.id, org_id, rule)
 
-        # STREAK_CHAMPION (target_value is streak days)
-        d = defs_map.get("streak_champion")
-        if d:
-            goal = int(d.target_value or 0)
-            earned = (goal > 0 and streak_current >= goal)
-            achievements.append(build(d, earned, min(streak_current, goal) if goal else None, goal or None))
-
-        # COURSE_CONQUEROR (target_value is courses count)
-        d = defs_map.get("course_conqueror")
-        if d:
-            goal = int(d.target_value or 0)
-            earned = (goal > 0 and completed_courses >= goal)
-            achievements.append(build(d, earned, min(completed_courses, goal) if goal else None, goal or None))
+            if target > 0:
+                achievements.append(build(defn, earned, progress=min(value, target), total=target, earned_date=earned_date))
+            else:
+                achievements.append(build(defn, earned, earned_date=earned_date))
 
         achievements_total = len(achievements)
         achievements_unlocked = sum(1 for a in achievements if a.get("earned"))
@@ -185,6 +199,7 @@ def achievements_overview(request):
             import traceback
             err["traceback"] = traceback.format_exc()
         return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 # ---------------- dummy fallback (no student) ----------------
 def _dummy_payload() -> Dict[str, Any]:

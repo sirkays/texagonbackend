@@ -7,7 +7,8 @@ from gamification.models import (
     PointTransaction,
     ActivityEvent,
 )
-
+from django.utils import timezone
+from django.db import IntegrityError
 
 def get_points_balance(student) -> int:
     # simplest: sum of transactions
@@ -68,14 +69,33 @@ def unlock_badge_if_eligible(student, badge) -> bool:
     return created
 
 
-def log_event(*, org, student, event_type: str, value: int = 1, meta: dict | None = None):
-    """
-    Use this helper throughout your app whenever something happens.
-    """
-    return ActivityEvent.objects.create(
-        organization=org,
-        student=student,
-        event_type=event_type,
-        value=int(value),
-        meta=meta or {},
-    )
+
+def log_event(*, student, org, event_type, value=1, meta=None, dedupe_key=None, occurred_at=None):
+    if not org:
+        return None  # skip safely
+
+    meta = meta or {}
+    occurred_at = occurred_at or timezone.now()
+
+    # If you have a UniqueConstraint on (student, dedupe_key) or (org, student, dedupe_key),
+    # then get_or_create is perfect:
+    try:
+        obj, created = ActivityEvent.objects.get_or_create(
+            student=student,
+            organization=org,
+            dedupe_key=dedupe_key,   # must exist in DB schema
+            defaults={
+                "event_type": event_type,
+                "value": value,
+                "meta": meta,
+                "occurred_at": occurred_at,
+            },
+        )
+        if not created:
+            return obj  # already logged
+        return obj
+    except IntegrityError:
+        # Another worker/thread logged it first
+        return ActivityEvent.objects.filter(
+            student=student, organization=org, dedupe_key=dedupe_key
+        ).first()

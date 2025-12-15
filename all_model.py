@@ -19,6 +19,8 @@ from django.core.exceptions import ValidationError
 from orgs.models import OrganizationMembership, Organization
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db.models import Q
+import random
+import string
 from core.models import TimeStampedModel
 from django.core.validators import MinValueValidator
 from orgs.models import OrganizationMembership
@@ -107,6 +109,16 @@ import uuid
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.postgres.fields import ArrayField
 from store.models import Product, Payment
+from academics.models import (
+    Classroom,
+    Subject,
+    StudentProfile,
+    TeacherProfile,
+    ParentProfile,
+    ParentChildLink,
+    Language
+)
+from academics.models import StudentProfile
 
 
 # --- Model classes collected from project ---
@@ -132,7 +144,7 @@ class Subject(NamedModel):
 
 class StudentProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
-    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="students")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="students", blank=True, null=True)
     current_classroom = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True)
     admission_no = models.CharField(max_length=64, blank=True)
     dob = models.DateField(null=True, blank=True)
@@ -163,7 +175,8 @@ class TeacherProfile(TimeStampedModel):
 
 class ParentProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="parent_profile")
-    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="parents")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="parents",
+    blank=True, null=True)
     organization_subscription = models.ForeignKey(
         OrganizationSubscription,
         on_delete=models.CASCADE,
@@ -349,6 +362,164 @@ class AdminAccess(models.Model):
         # Ensure clean() runs on every save
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+
+class EmailOTP(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="email_otps",
+    )
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "code", "used"]),
+        ]
+
+    @classmethod
+    def generate_code(cls, length=6) -> str:
+        # numeric code, e.g. 6 digits
+        return "".join(random.choices(string.digits, k=length))
+
+    @classmethod
+    def create_for_user(cls, user, minutes_valid=10):
+        code = cls.generate_code()
+        expires_at = timezone.now() + timedelta(minutes=minutes_valid)
+        return cls.objects.create(
+            user=user,
+            code=code,
+            expires_at=expires_at,
+        )
+
+    def is_valid(self) -> bool:
+        return (not self.used) and (self.expires_at >= timezone.now())
+
+
+
+class StudentProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="students")
+    current_classroom = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True)
+    admission_no = models.CharField(max_length=64, blank=True)
+    dob = models.DateField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Student: {self.user.get_full_name() or self.user.username}"
+
+
+
+class ParentProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="parent_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="parents")
+    organization_subscription = models.ForeignKey(
+        OrganizationSubscription,
+        on_delete=models.CASCADE,
+        related_name="parent_subs",
+        blank=True,
+        null=True,
+    )
+    address = models.TextField(blank=True)
+
+    # use TimeStampedModel.created_at (no new field needed)
+    last_billed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Parent: {self.user.get_full_name() or self.user.username}"
+
+    def _billing_period_days(self):
+        """Return billing period in days (int). default to 30 if parsing fails."""
+        plan = getattr(self.organization_subscription, "plan", None)
+        if not plan:
+            return 30
+        try:
+            return int(plan.billing_period)
+        except Exception:
+            return 30
+
+    def _invoice_number_for(self, issued_at):
+        """Generate a unique invoice number — change format if desired."""
+        ts = int(time.time())
+        token = secrets.token_hex(4)
+        sub_id = self.organization_subscription.id if self.organization_subscription else "none"
+        return f"PINV-{sub_id}-{self.id}-{ts}-{token}"
+
+    def generate_subscription_invoices(self, now=None):
+        now = now or timezone.now()
+
+        subscription = self.organization_subscription
+        if not subscription:
+            return []
+
+        if subscription.status != OrganizationSubscription.Status.ACTIVE:
+            return []
+
+        plan = subscription.plan
+        billing_days = self._billing_period_days()
+
+        if self.last_billed_at:
+            next_due = self.last_billed_at + timedelta(days=billing_days)
+        else:
+            next_due = getattr(self, "created_at", None) or now
+
+        if timezone.is_naive(next_due):
+            next_due = timezone.make_aware(next_due)
+
+        created_invoices = []
+        max_iterations = 24
+        iterations = 0
+        
+        """
+        sub_end_datetime = None
+        if subscription.end_date:
+            sub_end_datetime = timezone.make_aware(
+                datetime.datetime.combine(subscription.end_date, datetime.time.max)
+            )
+
+        """
+        # Prepare/get parent membership once (we'll attach it to all created invoices)
+        # Option: create membership automatically if not present.
+        membership, _ = OrganizationMembership.objects.get_or_create(
+            user=self.user,
+            organization=self.organization,
+            role=OrganizationMembership.Role.PARENT,
+            defaults={"is_active": True}
+        )
+        # Note: get_or_create honors the unique_together ("user","organization","role")
+        print(iterations, " iterations ",max_iterations)
+        while iterations < max_iterations and next_due <= now:
+            #if sub_end_datetime and next_due > sub_end_datetime:
+                #break
+
+            issued_at = next_due
+            amount = Decimal(getattr(plan, "price", 0) or 0)
+
+            inv = SubscriptionInvoice(
+                organization_membership=membership,   # attach parent membership
+                subscription=subscription,
+                number=self._invoice_number_for(issued_at),
+                amount=amount,
+                currency=getattr(subscription, "currency", "NGN") if hasattr(subscription, "currency") else "NGN",
+                issued_at=issued_at,
+                due_at=issued_at + timedelta(days=billing_days),
+                status=SubscriptionInvoice.Status.ACTIVE,
+                meta={"generated_for": "parent_profile", "parent_profile_id": self.id},
+            )
+
+            with transaction.atomic():
+                inv.save()                    # validation will now accept parent role
+                created_invoices.append(inv)
+                self.last_billed_at = issued_at
+                self.save(update_fields=["last_billed_at"])
+
+            next_due = next_due + timedelta(days=billing_days)
+            iterations += 1
+
+        return created_invoices
 
 
 
@@ -2731,3 +2902,496 @@ class ComplaintAttachment(models.Model):
 
     original_name = models.CharField(max_length=255, blank=True)
     content_type = models.CharField(max_length=100, blank=True)
+
+
+
+class TestMiniSerializer(serializers.ModelSerializer):
+    # No need for 'source' here; DRF automatically maps course_id
+    course_id = serializers.IntegerField(read_only=True)
+    course_name = serializers.CharField(source="course.name", read_only=True)
+
+    class Meta:
+        model = Test
+        fields = [
+            "id",
+            "title",
+            "duration_minutes",
+            "total_marks",
+            "visibility",
+            "start_at",
+            "end_at",
+            "course_id",
+            "course_name",
+        ]
+        read_only_fields = fields
+
+
+
+class TestAttemptSerializer(serializers.ModelSerializer):
+    # Compact info about the test (read-only)
+    test = TestMiniSerializer(read_only=True)
+
+    # Also expose test_id directly for convenience
+    test_id = serializers.IntegerField(source="test.id", read_only=True)
+
+    # Useful computed flags/fields
+    is_submitted = serializers.SerializerMethodField()
+    is_graded = serializers.SerializerMethodField()
+    is_open_now = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TestAttempt
+        fields = [
+            "id",
+            "test_id",
+            "test",
+            "student",        # will render the student id; mark write-only if you never want to expose it
+            "started_at",
+            "submitted_at",
+            "score",
+            "status",
+            "answers",        # JSON of answers; keep if you want to show what the student picked
+            "is_submitted",
+            "is_graded",
+            "is_open_now",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "test_id",
+            "test",
+            "student",
+            "started_at",
+            "submitted_at",
+            "score",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_is_submitted(self, obj):
+        return bool(obj.submitted_at) or obj.status in {"submitted", "graded"}
+
+    def get_is_graded(self, obj):
+        return obj.status == "graded"
+
+    def get_is_open_now(self, obj):
+        """
+        Mirrors the filter used in the endpoint:
+        (start_at is null or <= now) AND (end_at is null or >= now)
+        """
+        now = timezone.now()
+        t = obj.test
+        start_ok = (t.start_at is None) or (t.start_at <= now)
+        end_ok = (t.end_at is None) or (t.end_at >= now)
+        return start_ok and end_ok
+
+
+
+class SubmissionListSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    lesson_title = serializers.CharField(source="lesson.name", read_only=True)
+    course_name = serializers.SerializerMethodField()
+    class_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id",
+            "created_at",
+            "updated_at",
+            "status",
+            "language",
+            "student_name",
+            "lesson_title",
+            "course_name",
+            "class_name",
+            "score",
+        ]
+
+    def get_student_name(self, obj: CodeSubmission) -> str:
+        u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
+        if u.strip():
+            return u
+        return getattr(getattr(obj.student, "user", None), "email", "") or f"student-{obj.student_id}"
+
+    def get_course_name(self, obj: CodeSubmission) -> str:
+        try:
+            return obj.lesson.module.course.name
+        except Exception:
+            return ""
+
+    def get_class_name(self, obj: CodeSubmission) -> str:
+        # Prefer course.classroom if available; fall back to student's classroom
+        try:
+            room = obj.lesson.module.course.classroom
+            if room:
+                return room.name
+        except Exception:
+            pass
+        try:
+            room = obj.student.classroom
+            if room:
+                return room.name
+        except Exception:
+            pass
+        return ""
+
+
+
+class TeacherCodeCommentSerializer(serializers.ModelSerializer):
+    author_name = serializers.SerializerMethodField()
+    class Meta:
+        model = CodeComment
+        fields = ["id", "created_at", "author", "author_role", "author_name", "message"]
+
+    def get_author_name(self, obj):
+        u = getattr(obj, "author", None)
+        if not u:
+            return ""
+        full = (getattr(u, "get_full_name", lambda: "")() or "").strip()
+        return full or u.email or f"user-{getattr(u, 'pk', '')}"
+
+
+
+class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    student_id = serializers.IntegerField(source="student.id", read_only=True)
+    lesson = serializers.SerializerMethodField()
+    course = serializers.SerializerMethodField()
+    classroom = serializers.SerializerMethodField()
+    comments = TeacherCodeCommentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id", "created_at", "updated_at",
+            "status", "language", "code_text",
+            "score", "feedback", "correction_code",
+            "graded_at", "graded_by_id",
+            "student_id", "student_name",
+            "lesson", "course", "classroom",
+            "comments",
+        ]
+
+    def get_student_name(self, obj: CodeSubmission) -> str:
+        u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
+        if u.strip():
+            return u
+        return getattr(getattr(obj.student, "user", None), "email", "") or f"student-{obj.student_id}"
+
+    def get_lesson(self, obj):
+        l = obj.lesson
+        return {"id": getattr(l, "id", None), "title": getattr(l, "name", "")} if l else {"id": None, "title": ""}
+
+    def get_course(self, obj):
+        try:
+            c = obj.lesson.module.course
+        except Exception:
+            c = None
+        return {"id": getattr(c, "id", None), "name": getattr(c, "name", "")} if c else {"id": None, "name": ""}
+
+    def get_classroom(self, obj):
+        # Prefer course.classroom
+        try:
+            room = obj.lesson.module.course.classroom
+            if room:
+                return {"id": room.id, "name": room.name}
+        except Exception:
+            pass
+        # Fallback student.classroom
+        try:
+            room = obj.student.classroom
+            if room:
+                return {"id": room.id, "name": room.name}
+        except Exception:
+            pass
+        return {"id": None, "name": ""}
+
+
+
+class StudentDevice(models.Model):
+    student = models.ForeignKey('academics.StudentProfile', on_delete=models.CASCADE, related_name='devices')
+    device_id = models.CharField(max_length=64, unique=True)
+    user_agent = models.TextField(blank=True)
+    ip_hash = models.CharField(max_length=64, blank=True)
+    first_seen = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["student", "device_id"]),
+        ]
+
+    def __str__(self):
+        return f"{self.student_id}:{self.device_id[:8]}"
+
+
+
+class ActivityEvent(TimeStampedModel):
+    """
+    Generic event log for gamification.
+
+    You will record these events whenever a student does something:
+    - exercise_solved
+    - quiz_attempted
+    - quiz_passed
+    - course_completed
+    - daily_active
+    - time_spent_minutes
+    etc.
+
+    Achievements are computed from these events using JSON rules.
+    """
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="activity_events"
+    )
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="activity_events",
+    )
+
+    event_type = models.CharField(max_length=64, db_index=True)
+    value = models.IntegerField(default=1)  # score, minutes, count=1, etc
+    meta = models.JSONField(default=dict, blank=True)
+
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "event_type", "occurred_at"]),
+            models.Index(fields=["student", "event_type", "occurred_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} ({self.student_id})"
+
+
+
+class AchievementDefinition(TimeStampedModel):
+    """
+    Fully dynamic achievement definition.
+    Admin can add NEW achievements by creating rows with `rule` JSON.
+
+    code: stable key for frontend / API.
+    rule: describes how to compute progress from ActivityEvent.
+    """
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="achievement_defs",
+        null=True,
+        blank=True,
+    )
+
+    code = models.CharField(max_length=64)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    icon = models.CharField(max_length=64, default="star")
+    category = models.CharField(max_length=64, default="General")
+    points = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    # Fully dynamic rule (admin-editable)
+    # Examples are shown below.
+    rule = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "code"],
+                name="uniq_org_achievement_code",
+            )
+        ]
+
+    def __str__(self):
+        org = self.organization_id or "GLOBAL"
+        return f"{org}:{self.code} ({self.title})"
+
+
+
+class AchievementAcquired(TimeStampedModel):
+    """
+    Created automatically when an achievement is unlocked.
+    """
+    definition = models.ForeignKey(
+        AchievementDefinition,
+        on_delete=models.CASCADE,
+        related_name="acquired",
+    )
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="achievements_acquired",
+    )
+    acquired_at = models.DateTimeField(default=timezone.now)
+
+    # store computed progress at time of unlock (useful for debugging)
+    value_at_unlock = models.IntegerField(default=0)
+    meta = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        unique_together = ("definition", "student")
+        indexes = [
+            models.Index(fields=["student", "definition"]),
+            models.Index(fields=["definition", "acquired_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.student_id} → {self.definition.code}"
+
+
+
+class Badge(NamedModel):
+    """
+    Dynamic badges based on points threshold.
+    Admin can add new badges anytime.
+    """
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="badges",
+        blank=True,
+        null=True,
+    )
+    icon_name = models.CharField(max_length=64, default="medal")
+    color = models.CharField(max_length=64, default="bg-gray-400")
+    points = models.PositiveIntegerField(default=0)  # threshold
+    criteria = models.TextField(blank=True)
+    rules = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Badge"
+        verbose_name_plural = "Badges"
+        indexes = [models.Index(fields=["organization", "points"])]
+
+    def __str__(self):
+        return self.name
+
+
+
+class BadgeAward(TimeStampedModel):
+    badge = models.ForeignKey(Badge, on_delete=models.CASCADE, related_name="awards")
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="badge_awards",
+    )
+    awarded_at = models.DateTimeField(auto_now_add=True)
+    reason = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        unique_together = ("badge", "student")
+        indexes = [models.Index(fields=["student", "badge"])]
+
+
+
+class PointTransaction(TimeStampedModel):
+    """
+    A ledger of points. (Recommended)
+    """
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="point_transactions",
+    )
+    points = models.IntegerField()
+    reason = models.CharField(max_length=255, blank=True)
+    balance_after = models.IntegerField(default=0)
+
+    class Meta:
+        indexes = [models.Index(fields=["student", "created_at"])]
+
+
+
+class Streak(TimeStampedModel):
+    """
+    Optional: keep streak calculated from daily activity,
+    or update it directly when logging 'daily_active' events.
+    """
+    student = models.OneToOneField(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="streak",
+    )
+    current_days = models.PositiveIntegerField(default=0)
+    longest_days = models.PositiveIntegerField(default=0)
+    last_activity = models.DateField(null=True, blank=True)
+
+
+
+class Course(NamedModel):
+    USAGE_CHOICE = (
+        ('public','public'),
+        ('private','private'),
+    )
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="courses")
+    subject = models.ForeignKey("academics.Subject", on_delete=models.PROTECT)
+    classroom = models.ForeignKey("academics.Classroom", on_delete=models.PROTECT)
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="courses")
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    usage_type = models.CharField(
+        max_length=20,
+        choices=USAGE_CHOICE,
+        default='public',
+    )
+    private_tutor = models.ForeignKey(TutoringBooking, on_delete=models.CASCADE, blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.subject.name} Teacher: {self.teacher.user.email}"
+
+    class Meta:
+        unique_together = ("organization", "subject", "classroom", "teacher")
+
+
+
+class Material(TimeStampedModel):
+    class Kind(models.TextChoices):
+        VIDEO = "video", "Video"
+        AUDIO = "audio", "Audio"
+        PDF = "pdf", "PDF"
+        DOC = "doc", "Document"
+        IMAGE = "image", "Image"
+        OTHER = "other", "Other"
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="materials")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="materials")
+    title = models.CharField(max_length=255)
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    file = models.FileField(upload_to="materials/files/", blank=True, null=True)
+    cover_image = models.ImageField(upload_to="materials/covers/", blank=True, null=True)
+    url = models.URLField(blank=True)
+    tags = models.JSONField(default=list, blank=True)
+    is_public = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="materials", 
+        blank=True, null=True
+    )
+
+    def __str__(self):
+        return self.title
+
+
+
+class Note(TimeStampedModel):
+    title = models.CharField(max_length=100, default="No title")
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="notes")
+    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="notes")
+    content = models.TextField()
+    is_private = models.BooleanField(default=True)
+
+
+
+class PrivateTutoring(TimeStampedModel):
+    title = models.CharField(max_length=250, default="My Private Tutoring")
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="private_tutoring")
+    course = models.ForeignKey("learning.Course", on_delete=models.PROTECT, related_name="private_tutoring")
+    rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
+    tutoring_duration_days = models.PositiveIntegerField(default=24) # NUMBER OF DAYS THE TUTORING WILL LAST
+    notes = models.CharField(max_length=225)
+    active = models.BooleanField(default=True)

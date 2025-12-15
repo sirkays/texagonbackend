@@ -3,7 +3,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-
+from gamification.services.engine import log_event 
 from rest_framework import status, pagination
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -158,6 +158,34 @@ def submission_create(request):
         code_text=code_text,
         status=CodeSubmission.Status.SUBMITTED,
     )
+    org = getattr(student, "organization", None)
+    today = timezone.localdate()
+
+    def _log_after_commit():
+        log_event(
+            student=student,
+            org=org,
+            event_type="exercise_submitted",
+            value=1,
+            meta={
+                "submission_id": submission.id,
+                "lesson_id": lesson.id,
+                "language": language,
+            },
+            dedupe_key=f"exercise_submitted:{submission.id}",
+        )
+
+        log_event(
+            student=student,
+            org=org,
+            event_type="daily_active",
+            value=1,
+            meta={"source": "submission_create", "submission_id": submission.id},
+            dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
+        )
+
+    transaction.on_commit(_log_after_commit)
+
     return Response(CodeSubmissionSerializer(submission).data, status=201)
 
 
@@ -528,6 +556,8 @@ def teacher_submission_grade(request, pk: int):
         return err
     submission = get_object_or_404(qs, pk=pk)
 
+    was_graded_before = (submission.status == CodeSubmission.Status.GRADED)
+
     # data
     score = request.data.get("score")
     feedback = request.data.get("feedback", "")
@@ -554,5 +584,48 @@ def teacher_submission_grade(request, pk: int):
     submission.save(update_fields=[
         "score", "feedback", "correction_code", "status", "graded_by", "graded_at", "updated_at"
     ])
+    # ---------- GAMIFICATION EVENT LOG (GRADE TRANSITION) ----------
+    if not was_graded_before:
+        student = submission.student
+        org = getattr(student, "organization", None)
+        today = timezone.localdate()
+
+        def _log_after_commit():
+            log_event(
+                student=student,
+                org=org,
+                event_type="exercise_graded",
+                value=1,
+                meta={
+                    "submission_id": submission.id,
+                    "lesson_id": submission.lesson_id,
+                    "score": submission.score,
+                    "graded_by": getattr(teacher, "id", None),
+                },
+                dedupe_key=f"exercise_graded:{submission.id}",
+            )
+
+            # optional: mastery threshold
+            if submission.score is not None and float(submission.score) >= 80:
+                log_event(
+                    student=student,
+                    org=org,
+                    event_type="exercise_mastered",
+                    value=1,
+                    meta={"submission_id": submission.id, "score": submission.score},
+                    dedupe_key=f"exercise_mastered:{submission.id}",
+                )
+
+            log_event(
+                student=student,
+                org=org,
+                event_type="daily_active",
+                value=1,
+                meta={"source": "teacher_submission_grade", "submission_id": submission.id},
+                dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
+            )
+
+        transaction.on_commit(_log_after_commit)
+    # --------------------------------------------------------------
 
     return Response(TeacherCodeSubmissionDetailSerializer(submission).data, status=200)
