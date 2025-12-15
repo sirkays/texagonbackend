@@ -937,6 +937,7 @@ def submit_test(request, test_id: int):
         today = timezone.localdate()
         def _log_after_commit():
             try:
+                # 1) quiz attempted (always)
                 log_event(
                     student=student,
                     org=org,
@@ -954,6 +955,7 @@ def submit_test(request, test_id: int):
                     dedupe_key=f"quiz_attempted:{attempt.id}",
                 )
 
+                # 2) quiz passed (based on pass_mark)
                 if result == "PASS":
                     log_event(
                         student=student,
@@ -968,6 +970,22 @@ def submit_test(request, test_id: int):
                         dedupe_key=f"quiz_passed:{attempt.id}",
                     )
 
+                # 3) quiz 90%+ (achievement-friendly event)
+                if percentage >= 90:
+                    log_event(
+                        student=student,
+                        org=org,
+                        event_type="quiz_90_plus",
+                        value=1,
+                        meta={
+                            "test_id": test.id,
+                            "attempt_id": attempt.id,
+                            "percentage": percentage,
+                        },
+                        dedupe_key=f"quiz_90_plus:{attempt.id}",
+                    )
+
+                # 4) daily activity (streak-safe)
                 log_event(
                     student=student,
                     org=org,
@@ -980,9 +998,10 @@ def submit_test(request, test_id: int):
             except Exception:
                 logger.exception(
                     "Gamification on_commit failed (non-fatal)",
-                    extra={"attempt_id": attempt.id},
+                    extra={"attempt_id": attempt.id, "test_id": test.id},
                 )
                 return
+
 
 
         transaction.on_commit(_log_after_commit)
