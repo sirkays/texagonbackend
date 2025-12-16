@@ -966,7 +966,7 @@ def dashboard_overview(request):
     unlocked_achievements = 0
     total_achievements = 0
     org_rank = None
-
+    global_rank = None
     if student:
         total_xp = (
             PointTransaction.objects
@@ -998,6 +998,22 @@ def dashboard_overview(request):
                     org_rank = rank
                     break
                 rank += 1
+
+
+        leaderboard = (
+            PointTransaction.objects
+            .all()
+            .values("student_id")
+            .annotate(xp=Sum("points"))
+            .order_by("-xp")
+        )
+        # Compute rank by walking the ordered list once
+        rank = 1
+        for row in leaderboard:
+            if row["student_id"] == student.id:
+                global_rank = rank
+                break
+            rank += 1
 
     level_info = _level_for_xp(total_xp)
 
@@ -1096,7 +1112,7 @@ def dashboard_overview(request):
             },
             "leaderboard": {
                 "org_rank": org_rank,
-                # "global_rank": None,  # add if you maintain a global board
+                "global_rank": global_rank,  # add if you maintain a global board
             },
         },
         "recent_courses": recent_courses,     # [{title, progress, duration, nextLesson}]
