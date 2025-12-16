@@ -29,7 +29,7 @@ from academics.models import (
 )
 from learning.models import Course, Enrollment, Lesson, Bookmark, Material
 from assessments.models import Test, TestAttempt
-from gamification.models import Badge, BadgeAward, PointTransaction, Streak
+from gamification.models import Badge, BadgeAward, PointTransaction, Streak, AchievementDefinition, AchievementAcquired
 from billing.models import SubscriptionInvoice, SubscriptionPayment
 from notifications.models import Notification
 import traceback
