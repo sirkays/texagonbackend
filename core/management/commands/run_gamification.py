@@ -43,13 +43,11 @@ class Command(BaseCommand):
                     target = get_target(rule)
                     if target <= 0:
                         continue
-
                     value = compute_rule_value(
                         org_id=org.id,
                         student_id=student.id,
                         rule=rule,
                     )
-                    print(student, " value: ",value, " definition: ",definition)
                     if value >= target:
                         unlock_achievement(
                             student,

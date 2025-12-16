@@ -7,6 +7,7 @@ from datetime import datetime, timezone as py_tz
 from decimal import Decimal
 from typing import Any, DefaultDict, Dict, List, Optional
 from gamification.services.engine import log_event 
+from gamification.models import Streak
 # ===== Django Imports =====
 from django.conf import settings
 from django.db import IntegrityError, transaction
@@ -994,6 +995,8 @@ def submit_test(request, test_id: int):
                     meta={"source": "submit_test", "attempt_id": attempt.id},
                     dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
                 )
+
+                Streak.set_student_streak(student, org, 'daily_active', 'streak_champion')
 
             except Exception:
                 logger.exception(

@@ -22,7 +22,7 @@ from gamification.models import (Badge, BadgeAward, PointTransaction, Streak,
 from attendance.models import AttendanceRecord, AttendanceSession
 from core.utils import _get_student_for_user, _to_int, _sum_points
 from django.db.models.functions import Cast
-
+from gamification.services.streaks import build_streak
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -35,6 +35,8 @@ def achievements_overview(request):
             return Response({}, status=status.HTTP_404_NOT_FOUND)
 
         org = getattr(student, "organization", None)
+
+
         org_id = getattr(org, "id", None)
 
         total_points = _sum_points(student)
@@ -135,7 +137,8 @@ def achievements_overview(request):
                 if not distinct_key:
                     return 0
                 return int(ev_qs.values(f"meta__{distinct_key}").distinct().count())
-
+            if metric == "consecutive":
+                return build_streak(ev_qs).count()
             return 0
 
         def build(defn: AchievementDefinition, earned: bool, progress: int = None, total: int = None, earned_date=None):
@@ -164,11 +167,7 @@ def achievements_overview(request):
 
             value = 0
             if org_id:
-                # special-case: allow streak without events if you use event_type="streak_current"
-                if (rule or {}).get("event_type") == "streak_current":
-                    value = int(streak_current)
-                else:
-                    value = _compute_value(student.id, org_id, rule)
+                value = _compute_value(student.id, org_id, rule)
 
             if target > 0:
                 achievements.append(build(defn, earned, progress=min(value, target), total=target, earned_date=earned_date))

@@ -4,6 +4,7 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from gamification.services.engine import log_event 
+from gamification.models import Streak
 from rest_framework import status, pagination
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -13,7 +14,6 @@ from django.db import IntegrityError, transaction
 from rest_framework_api_key.permissions import HasAPIKey
 from api.authentication import SessionTokenAuthentication
 import logging
-
 from core.utils import _get_student_for_user, _get_teacher_for_user, _resolve_org
 from learning.models import Lesson
 
@@ -631,6 +631,7 @@ def teacher_submission_grade(request, pk: int):
                 meta={"source": "teacher_submission_grade", "submission_id": submission.id},
                 dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
             )
+            Streak.set_student_streak(student, org, 'daily_active', 'streak_champion')
         except Exception:
             logger.exception(
                 "Gamification on_commit failed (non-fatal)",

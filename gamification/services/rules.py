@@ -2,10 +2,11 @@
 from datetime import timedelta
 from django.db.models import Sum, Max
 from django.utils import timezone
-from gamification.models import ActivityEvent
+from gamification.models import ActivityEvent,Streak
+from django.db.models.functions import TruncDate
+from .streaks import build_streak
 
-
-SUPPORTED_METRICS = {"count", "sum", "max", "distinct_count"}
+SUPPORTED_METRICS = {"count", "sum", "max", "distinct_count", "consecutive"}
 
 
 def _apply_window(qs, window_days):
@@ -34,6 +35,7 @@ def compute_rule_value(*, org_id: int, student_id: int, rule: dict) -> int:
     metric = (rule or {}).get("metric")
     event_type = (rule or {}).get("event_type")
 
+
     if metric not in SUPPORTED_METRICS:
         return 0
     if not event_type:
@@ -44,7 +46,6 @@ def compute_rule_value(*, org_id: int, student_id: int, rule: dict) -> int:
         student_id=student_id,
         event_type=event_type,
     )
-
     qs = _apply_window(qs, rule.get("window_days"))
     qs = _apply_filters(qs, rule.get("filters") or {})
 
@@ -63,7 +64,9 @@ def compute_rule_value(*, org_id: int, student_id: int, rule: dict) -> int:
             return 0
         # count distinct values of meta[distinct_key]
         return qs.values(f"meta__{distinct_key}").distinct().count()
-
+    
+    if metric == "consecutive":
+        return build_streak(qs).count()
     return 0
 
 
@@ -72,3 +75,4 @@ def get_target(rule: dict) -> int:
         return int((rule or {}).get("target") or 0)
     except Exception:
         return 0
+

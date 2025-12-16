@@ -7,7 +7,7 @@ from gamification.models import AchievementDefinition
 
 
 DEFAULT_ACHIEVEMENTS = [
-    # 1) First Steps (boolean-style)
+    # 1) First Steps (first activity day)
     {
         "code": "first_steps",
         "title": "First Steps",
@@ -16,73 +16,114 @@ DEFAULT_ACHIEVEMENTS = [
         "category": "General",
         "points": 10,
         "is_active": True,
-        # Rule example: at least 1 learning activity event
-        "rule": {
-            "metric": "count",
-            "event_type": "daily_active",
-            "target": 1,
-            "window_days": None,
-        },
+        "rule": {"metric": "count", "event_type": "daily_active", "target": 1, "window_days": None},
     },
 
-    # 2) Code Warrior (solve N exercises)
+    # 2) Code Starter (submit first exercise)
+    {
+        "code": "code_starter",
+        "title": "Code Starter",
+        "description": "Submit your first coding exercise.",
+        "icon": "zap",
+        "category": "Coding",
+        "points": 15,
+        "is_active": True,
+        "rule": {"metric": "count", "event_type": "exercise_submitted", "target": 1, "window_days": None},
+    },
+
+    # 3) Code Warrior (submit many exercises)
     {
         "code": "code_warrior",
         "title": "Code Warrior",
-        "description": "Solve coding exercises to prove your skills.",
+        "description": "Submit lots of coding exercises to prove your skills.",
         "icon": "zap",
         "category": "Coding",
         "points": 50,
         "is_active": True,
-        "rule": {
-            "metric": "count",
-            "event_type": "exercise_solved",
-            "target": 30,
-            "window_days": None,
-            # optional meta filters (enable if you want):
-            # "filters": {"skill": "python"}
-        },
+        "rule": {"metric": "count", "event_type": "exercise_submitted", "target": 30, "window_days": None},
     },
 
-    # 3) Quiz Master (score >= 90 in N quizzes)
-    # Recommended approach: log an event_type="quiz_90_plus" when score>=90%,
-    # then the rule is a simple count.
+    # 4) Mastery Badge (get 10 mastered exercises)
+    {
+        "code": "mastery_badge",
+        "title": "Mastery Badge",
+        "description": "Score 80+ on multiple graded exercises.",
+        "icon": "trophy",
+        "category": "Coding",
+        "points": 60,
+        "is_active": True,
+        "rule": {"metric": "count", "event_type": "exercise_mastered", "target": 10, "window_days": None},
+    },
+
+    # 5) Quiz Rookie (attempt first quiz)
+    {
+        "code": "quiz_rookie",
+        "title": "Quiz Rookie",
+        "description": "Attempt your first quiz.",
+        "icon": "book",
+        "category": "Quizzes",
+        "points": 15,
+        "is_active": True,
+        "rule": {"metric": "count", "event_type": "quiz_attempted", "target": 1, "window_days": None},
+    },
+
+    # 6) Quiz Passer (pass 5 quizzes)
+    {
+        "code": "quiz_passer",
+        "title": "Quiz Passer",
+        "description": "Pass multiple quizzes.",
+        "icon": "check",
+        "category": "Quizzes",
+        "points": 40,
+        "is_active": True,
+        "rule": {"metric": "count", "event_type": "quiz_passed", "target": 5, "window_days": None},
+    },
+
+    # 7) Quiz Master (90%+ in 5 quizzes)
     {
         "code": "quiz_master",
         "title": "Quiz Master",
         "description": "Score 90% or higher in multiple quizzes.",
         "icon": "trophy",
         "category": "Quizzes",
-        "points": 75,
+        "points": 120,
         "is_active": True,
-        "rule": {
-            "metric": "count",
-            "event_type": "quiz_90_plus",
-            "target": 5,
-            "window_days": None,
-        },
+        "rule": {"metric": "count", "event_type": "quiz_90_plus", "target": 5, "window_days": None},
+    },
+    {
+        "code": "streak_newbie",
+        "title": "Streak Newbie",
+        "description": "Maintain a learning streak for 3 consecutive days.",
+        "icon": "flame",
+        "category": "Consistency",
+        "points": 20,
+        "is_active": True,
+        "rule": {"metric": "max", "event_type": "streak_current", "target": 3, "window_days": None},
+    },
+    # 8) Streak Champion (30 day streak)
+    {
+        "code": "streak_geek",
+        "title": "Streak Geek",
+        "description": "Maintain a learning streak for 15 consecutive days.",
+        "icon": "flame",
+        "category": "Consistency",
+        "points": 50,
+        "is_active": True,
+        "rule": {"metric": "max", "event_type": "streak_current", "target": 15, "window_days": None},
     },
 
-    # 4) Streak Champion (30 day streak)
-    # If you're not logging streak events, your view special-cases "streak_current".
-    # You can also choose to log daily_active and compute streak differently later.
     {
         "code": "streak_champion",
         "title": "Streak Champion",
-        "description": "Maintain a learning streak for consecutive days.",
+        "description": "Maintain a learning streak for 30 consecutive days.",
         "icon": "flame",
         "category": "Consistency",
         "points": 100,
         "is_active": True,
-        "rule": {
-            "metric": "max",
-            "event_type": "streak_current",  # view maps this to Streak.current_days
-            "target": 30,
-            "window_days": None,
-        },
+        "rule": {"metric": "max", "event_type": "streak_current", "target": 30, "window_days": None},
     },
 
-    # 5) Course Conqueror (complete N courses)
+    # 9) Course Conqueror (complete 3 courses)
     {
         "code": "course_conqueror",
         "title": "Course Conqueror",

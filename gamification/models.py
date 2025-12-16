@@ -3,6 +3,7 @@ from django.db import models
 from django.utils import timezone
 from core.models import TimeStampedModel, NamedModel
 from orgs.models import Organization
+from gamification.services.streaks import build_streak
 
 
 class ActivityEvent(TimeStampedModel):
@@ -190,3 +191,25 @@ class Streak(TimeStampedModel):
     current_days = models.PositiveIntegerField(default=0)
     longest_days = models.PositiveIntegerField(default=0)
     last_activity = models.DateField(null=True, blank=True)
+
+    @classmethod
+    def set_student_streak(cls, student, org, event_type, code):
+        ev_qs = ActivityEvent.objects.filter(
+            student=student,
+            organization=org,
+            event_type=event_type,
+        )
+        if event_type == "daily_active" and code == "streak_champion":
+            total = build_streak(ev_qs).count()
+            streak, is_created = Streak.objects.update_or_create(
+                student=student,
+                defaults={
+                    "current_days":total,
+                    "last_activity":timezone.localdate()
+                }
+            )
+
+            if streak.longest_days < total:
+                streak.longest_days = total
+                streak.save()
+

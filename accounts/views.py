@@ -7,6 +7,7 @@ from django.db.models import (
 from django.http import (
     JsonResponse
 )
+from core.models import Tier
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from decimal import Decimal
@@ -764,37 +765,54 @@ def _fmt_duration(total_seconds: int) -> str:
     return f"{hours:.1f} hours"
 
 
+
+
 def _level_for_xp(xp: int):
     """
-    Simple leveling curve. Adjust thresholds/names as you like.
+    Leveling curve backed by Tier model.
     """
-    tiers = [
-        (0, "Newbie"),
-        (2500, "Bronze Beginner"),
-        (5000, "Silver Scholar"),
-        (10000, "Gold Graduate"),
-        (20000, "Platinum Prodigy"),
-    ]
-    current = tiers[0]
-    next_threshold = None
-    for i, (threshold, name) in enumerate(tiers):
-        if xp >= threshold:
-            current = (threshold, name)
-            next_threshold = tiers[i + 1][0] if i + 1 < len(tiers) else None
-        else:
-            break
-    to_next = max((next_threshold - xp), 0) if next_threshold is not None else 0
-    # Percent progress within current tier
-    floor = current[0]
-    span = (next_threshold - floor) if next_threshold is not None else None
-    pct = int(((xp - floor) / span) * 100) if span else 100
+    xp = max(int(xp or 0), 0)
+
+    # Current tier = highest threshold <= xp
+    current = (
+        Tier.objects
+        .filter(threshold_xp__lte=xp)
+        .order_by("-threshold_xp")
+        .first()
+    )
+
+    if not current:
+        return {
+            "level_name": "Newbie",
+            "next_threshold": None,
+            "xp_to_next": 0,
+            "progress_to_next_pct": 100,
+        }
+
+    # Next tier = smallest threshold > current threshold
+    next_tier = (
+        Tier.objects
+        .filter(threshold_xp__gt=current.threshold_xp)
+        .order_by("threshold_xp")
+        .first()
+    )
+
+    next_threshold = next_tier.threshold_xp if next_tier else None
+    xp_to_next = max(next_threshold - xp, 0) if next_threshold else 0
+
+    floor = current.threshold_xp
+    if next_threshold:
+        span = max(next_threshold - floor, 1)
+        pct = int(((xp - floor) / span) * 100)
+    else:
+        pct = 100
+
     return {
-        "level_name": current[1],
+        "level_name": current.name,
         "next_threshold": next_threshold,
-        "xp_to_next": to_next,
+        "xp_to_next": xp_to_next,
         "progress_to_next_pct": pct,
     }
-
 
 
 
@@ -1054,7 +1072,7 @@ def dashboard_overview(request):
                 "duration": f"{t.duration_minutes} mins" if getattr(t, "duration_minutes", None) else None,
                 "course": t.course.name if t.course_id else None,
             })
-
+    badges = BadgeAward.objects.filter(student=student).count()
     # ---- Response ----
     payload = {
         "user": {
@@ -1062,7 +1080,7 @@ def dashboard_overview(request):
         },
         "stats": {
             "courses_enrolled": courses_enrolled,
-            "hours_learned": round(hours_learned, 1),
+            "badges_earned": badges,
             "certificates": completed_count,   # treating completed courses as certificates
             "streak_days": streak_days,
         },
