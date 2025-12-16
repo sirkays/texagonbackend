@@ -976,9 +976,9 @@ def dashboard_overview(request):
         )
 
         # Achievements
-        unlocked_achievements = BadgeAward.objects.filter(student=student).count()
+        unlocked_achievements = AchievementAcquired.objects.filter(student=student).count()
         if org:
-            total_achievements = Badge.objects.filter(organization=org).count()
+            total_achievements = AchievementDefinition.objects.filter(is_active=True).count()
         recent_badge = BadgeAward.objects.filter(student=student).select_related("badge").order_by("-awarded_at", "-id").first()
         recent_badge_name = recent_badge.badge.name if recent_badge and recent_badge.badge else None
 
