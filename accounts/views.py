@@ -4,6 +4,8 @@ from django.db import models
 from django.db.models import (
     Avg, Sum, Count, Min, Max, F, Q, Case, When, FloatField, DecimalField
 )
+
+
 from django.http import (
     JsonResponse
 )
@@ -820,76 +822,219 @@ def _level_for_xp(xp: int):
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def teacher_dashboard_overview(request):
+    def format_datetime(dt):
+        return timezone.localtime(dt).strftime("%b %d, %Y · %I:%M %p")
+        
+    def safe_file_size_mb(file_field):
+        try:
+            if file_field and file_field.name:
+                return file_field.size / (1024 * 1024)
+        except (OSError, FileNotFoundError, ValueError):
+            pass
+        return 0
+
     try:
         user = request.user
         org, err = _resolve_org(request)
         if err:
             return err
+
         teacher = get_object_or_404_ajax(TeacherProfile, user=user, organization=org)
         if not teacher:
             return Response({"detail": "Teacher profile not found."}, status=status.HTTP_400_BAD_REQUEST)
+
         now = timezone.now()
         current_first, current_last = _month_bounds(now)
-        prev_last = current_first - timedelta(seconds=1)
-        prev_first, _ = _month_bounds(prev_last)
+        recent_days = now - timedelta(days=7)
+
+        # ---------- STATS ----------
         stats = []
-        current_students = Enrollment.objects.filter(course__teacher=teacher).values('student').distinct().count()
-        prev_students = Enrollment.objects.filter(course__teacher=teacher, created_at__lt=current_first).values('student').distinct().count()
+
+        current_students = (
+            Enrollment.objects.filter(course__teacher=teacher)
+            .values("student").distinct().count()
+        )
+        prev_students = (
+            Enrollment.objects.filter(course__teacher=teacher, created_at__lt=current_first)
+            .values("student").distinct().count()
+        )
         growth_students = current_students - prev_students
         change_students = f"+{growth_students}" if growth_students > 0 else str(growth_students)
         stats.append({"title": "Total Students", "value": str(current_students), "change": change_students})
+
         current_courses = Course.objects.filter(teacher=teacher, is_active=True).count()
-        new_courses = Course.objects.filter(teacher=teacher, is_active=True, created_at__range=(current_first, current_last)).count()
-        change_courses = f"+{new_courses}"
-        stats.append({"title": "Active Courses", "value": str(current_courses), "change": change_courses})
+        new_courses = Course.objects.filter(
+            teacher=teacher, is_active=True, created_at__range=(current_first, current_last)
+        ).count()
+        stats.append({"title": "Active Courses", "value": str(current_courses), "change": f"+{new_courses}"})
+
         current_tests = Test.objects.filter(course__teacher=teacher).count()
-        new_tests = Test.objects.filter(course__teacher=teacher, created_at__range=(current_first, current_last)).count()
-        change_tests = f"+{new_tests}"
-        stats.append({"title": "CBT Tests Created", "value": str(current_tests), "change": change_tests})
-        current_materials = Material.objects.filter(owner=user).count()
-        new_materials = Material.objects.filter(owner=user, created_at__range=(current_first, current_last)).count()
-        change_materials = f"+{new_materials}"
-        stats.append({"title": "Materials Uploaded", "value": str(current_materials), "change": change_materials})
-        recent_days = now - timedelta(days=7)
+        new_tests = Test.objects.filter(
+            course__teacher=teacher, created_at__range=(current_first, current_last)
+        ).count()
+        stats.append({"title": "CBT Tests Created", "value": str(current_tests), "change": f"+{new_tests}"})
+
+        # ✅ CONTENT UPLOADED now comes from Lesson (instead of Material)
+        # If Lesson doesn't have created_at, replace created_at with whatever timestamp field exists.
+        current_content = Lesson.objects.filter(module__course__teacher=teacher).count()
+        new_content = Lesson.objects.filter(
+            module__course__teacher=teacher,
+            created_at__range=(current_first, current_last),
+        ).count()
+        stats.append({"title": "Content Uploaded", "value": str(current_content), "change": f"+{new_content}"})
+
+        # ---------- RECENT ACTIVITY ----------
         activities = []
-        for mat in Material.objects.filter(owner=user, created_at__gte=recent_days).order_by('-created_at')[:5]:
-            activities.append({"type": "upload", "title": mat.title, "action": "uploaded successfully", "time": mat.created_at.isoformat()})
-        enroll_qs = Enrollment.objects.filter(course__teacher=teacher, created_at__gte=recent_days).values('course_id').annotate(count=Count('id'), last_time=Max('created_at')).order_by('-last_time')
+
+        # ✅ Lesson “uploads” (new content created)
+        recent_lessons = (
+            Lesson.objects.filter(module__course__teacher=teacher, created_at__gte=recent_days)
+            .select_related("module__course")
+            .order_by("-created_at")[:5]
+        )
+        for lesson in recent_lessons:
+            course_name = ""
+            try:
+                course_name = lesson.module.course.name
+            except Exception:
+                pass
+
+            activities.append({
+                "type": "upload",
+                "title": lesson.name,  # Lesson inherits NamedModel => name field
+                "action": f"added new content{f' in {course_name}' if course_name else ''}",
+                "time": format_datetime(lesson.created_at),
+                "_dt": lesson.created_at,  # internal sort key
+            })
+
+        # enrollments (unchanged)
+        enroll_qs = (
+            Enrollment.objects.filter(course__teacher=teacher, created_at__gte=recent_days)
+            .values("course_id")
+            .annotate(count=Count("id"), last_time=Max("created_at"))
+            .order_by("-last_time")
+        )
         for row in enroll_qs[:5]:
-            course = Course.objects.filter(id=row['course_id']).first()
-            if course:
-                activities.append({"type": "course", "title": course.name, "action": f"new enrollment: {row['count']} students", "time": row['last_time'].isoformat()})
-        attempt_qs = TestAttempt.objects.filter(test__course__teacher=teacher, submitted_at__gte=recent_days).values('test_id').annotate(count=Count('id'), last_time=Max('submitted_at')).order_by('-last_time')
+            course = Course.objects.filter(id=row["course_id"]).first()
+            if course and row["last_time"]:
+                activities.append({
+                    "type": "course",
+                    "title": course.name,
+                    "action": f"new enrollment: {row['count']} students",
+                    "time": format_datetime(row["last_time"]),
+                    "_dt": row["last_time"],
+                })
+
+        # attempts (unchanged)
+        attempt_qs = (
+            TestAttempt.objects.filter(test__course__teacher=teacher, submitted_at__gte=recent_days)
+            .values("test_id")
+            .annotate(count=Count("id"), last_time=Max("submitted_at"))
+            .order_by("-last_time")
+        )
         for row in attempt_qs[:5]:
-            test = Test.objects.filter(id=row['test_id']).first()
-            if test:
-                activities.append({"type": "test", "title": test.title, "action": f"completed by {row['count']} students", "time": row['last_time'].isoformat()})
-        activities.sort(key=lambda x: x['time'], reverse=True)
+            test = Test.objects.filter(id=row["test_id"]).first()
+            if test and row["last_time"]:
+                activities.append({
+                    "type": "test",
+                    "title": test.title,
+                    "action": f"completed by {row['count']} students",
+                    "time": format_datetime(row["last_time"]),
+                    "_dt": row["last_time"],
+                })
+
+        # sort by actual datetime, not formatted string
+        activities.sort(key=lambda x: x.get("_dt") or timezone.make_aware(timezone.datetime.min), reverse=True)
+        for a in activities:
+            a.pop("_dt", None)
+
         recent_activity = activities[:3]
-        course_completion_rate = Enrollment.objects.filter(course__teacher=teacher).aggregate(avg=Avg('progress_pct'))['avg'] or 0
+
+        # ---------- PERFORMANCE ----------
+        course_completion_rate = (
+            Enrollment.objects.filter(course__teacher=teacher)
+            .aggregate(avg=Avg("progress_pct"))["avg"] or 0
+        )
         course_completion_rate = int(course_completion_rate)
+
         student_satisfaction = 4.8
-        pass_rate = TestAttempt.objects.filter(test__course__teacher=teacher).aggregate(pass_rate=Avg(Case(When(score__gte=F('test__total_marks') * Decimal('0.5'), then=1.0), default=0.0, output_field=FloatField())))['pass_rate'] or 0
+
+        pass_rate = (
+            TestAttempt.objects.filter(test__course__teacher=teacher)
+            .aggregate(
+                pass_rate=Avg(
+                    Case(
+                        When(score__gte=F("test__total_marks") * Decimal("0.5"), then=1.0),
+                        default=0.0,
+                        output_field=FloatField(),
+                    )
+                )
+            )["pass_rate"] or 0
+        )
         test_pass_rate = int(pass_rate * 100)
-        performance = {"course_completion_rate": course_completion_rate, "student_satisfaction": student_satisfaction, "test_pass_rate": test_pass_rate}
-        top_qs = Course.objects.filter(teacher=teacher).annotate(students=Count('enrollments', distinct=True), progress=Avg('enrollments__progress_pct')).order_by('-students')[:3]
+
+        performance = {
+            "course_completion_rate": course_completion_rate,
+            "student_satisfaction": student_satisfaction,
+            "test_pass_rate": test_pass_rate,
+        }
+
+        # ---------- TOP COURSES ----------
+        top_qs = (
+            Course.objects.filter(teacher=teacher)
+            .annotate(
+                students=Count("enrollments", distinct=True),
+                progress=Avg("enrollments__progress_pct"),
+            )
+            .order_by("-students")[:3]
+        )
+
         top_courses = []
         for c in top_qs:
-            top_courses.append({"title": c.name, "students": c.students, "rating": 4.8, "revenue": None, "progress": int(c.progress or 0)})
-        recent_mats = Material.objects.filter(owner=user).order_by('-created_at')[:3]
+            top_courses.append({
+                "title": c.name,
+                "students": c.students,
+                "rating": 4.8,
+                "revenue": None,
+                "progress": int(c.progress or 0),
+            })
+
+        # ---------- RECENT CONTENT (LESSONS) ----------
+        recent_lessons = (
+            Lesson.objects.filter(module__course__teacher=teacher)
+            .select_related("module__course")
+            .order_by("-created_at")[:3]
+        )
+
         recent_materials = []
-        for m in recent_mats:
-            size_mb = m.file.size / (1024 * 1024) if m.file and hasattr(m.file, 'size') else 0
+
+        for l in recent_lessons:
+            size_mb = safe_file_size_mb(getattr(l, "file", None))
             size_str = f"{size_mb:.1f} MB" if size_mb else "0 MB"
-            views = 0
-            recent_materials.append({"title": m.title, "type": m.kind.capitalize(), "size": size_str, "views": views if m.kind in ['video', 'audio'] else None, "downloads": views if m.kind not in ['video', 'audio'] else None})
-        payload = {"stats": stats, "recent_activity": recent_activity, "performance": performance, "top_courses": top_courses, "recent_materials": recent_materials}
+
+            views = 0  # placeholder
+
+            recent_materials.append({
+                "title": l.name,
+                "type": l.content_type.capitalize() if l.content_type else "Content",
+                "size": size_str,
+                "views": views if l.content_type in ["video", "audio"] else None,
+                "downloads": views if l.content_type not in ["video", "audio"] else None,
+            })
+
+
+        payload = {
+            "stats": stats,
+            "recent_activity": recent_activity,
+            "performance": performance,
+            "top_courses": top_courses,
+            "recent_materials": recent_materials,
+        }
         return Response(payload, status=status.HTTP_200_OK)
+
     except Exception as e:
         print(e)
-    return Response({}, status=status.HTTP_401_UNAUTHORIZED)
-
-
+        return Response({"detail": "Server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["GET"])

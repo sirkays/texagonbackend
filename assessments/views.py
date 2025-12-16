@@ -1950,7 +1950,7 @@ def student_performance_summary(request):
         
         payload = {
             "totalAttempts": total_attempts,
-            "averageScore": float(avg_score),
+            "averageScore": round(float(avg_score), 2),
             "passRate": round(pass_rate, 1),
             "averageCompletionTime": round(avg_completion_time),
         }
@@ -2130,7 +2130,12 @@ def student_performance_list(request):
             user = student.user
             name = user.get_full_name() or user.email
             class_grade = student.current_classroom.name if student.current_classroom else "N/A"
-            total_marks = attempt.test.total_marks or Decimal("0")
+            total_marks = (
+                Question.objects
+                .filter(test=attempt.test)
+                .aggregate(total=Sum("points"))["total"]
+                or Decimal("0")
+            )
             percentage = (attempt.score / total_marks * 100) if total_marks else Decimal("0")
             completion_time = attempt.completion_time if attempt.submitted_at else 0
             status = "Passed" if attempt.score >= total_marks * Decimal(f"{PASS_MARK}") else "Failed"
@@ -2225,16 +2230,32 @@ def student_performance_detail(request):
             "classGrade": student.current_classroom.name if student.current_classroom else "N/A",
         }
 
-        total_marks = test.total_marks or Decimal("0")
-        percentage = (attempt.score / total_marks * 100) if total_marks else Decimal("0")
+        total_marks = (
+            Question.objects
+            .filter(test=test)
+            .aggregate(total=Sum("points"))["total"]
+            or Decimal("0")
+        )
+
+        percentage = (
+            (attempt.score / total_marks * 100)
+            if total_marks > 0
+            else Decimal("0")
+        )
+
         completion_time = 0
         if attempt.submitted_at:
             delta = attempt.submitted_at - attempt.started_at
             completion_time = delta.total_seconds() / 60.0
 
         PASS_MARK = getattr(app_settings, "pass_mark", Decimal("45"))
-        PASS_MARK = float(PASS_MARK)/100
-        attempt_status = "Passed" if attempt.score >= total_marks * Decimal(f"{PASS_MARK}") else "Failed"
+        PASS_MARK = Decimal(PASS_MARK) / Decimal("100")
+
+        attempt_status = (
+            "Passed"
+            if attempt.score >= total_marks * PASS_MARK
+            else "Failed"
+        )
         submitted_at = attempt.submitted_at.isoformat() if attempt.submitted_at else None
 
         test_summary = {
@@ -2246,7 +2267,6 @@ def student_performance_detail(request):
             "completionTime": round(completion_time),
             "submittedAt": submitted_at,
         }
-
         # ===========================
         # Answer details via TestAnswer
         # ===========================

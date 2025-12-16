@@ -243,170 +243,249 @@ def _dummy_payload() -> Dict[str, Any]:
 
 
 
+def r2(value, default=Decimal("0.00")) -> float:
+    """
+    Safe rounding helper:
+    - accepts Decimal/float/int/None
+    - returns float rounded to 2dp for JSON
+    """
+    if value is None:
+        value = default
+    try:
+        return float(Decimal(str(value)).quantize(Decimal("0.01")))
+    except (InvalidOperation, ValueError, TypeError):
+        return float(Decimal(str(default)).quantize(Decimal("0.01")))
+
+
+def get_test_difficulty(avg_score: Decimal | float | int) -> str:
+    """
+    Basic heuristic from actual data (no dummy).
+    You can tweak thresholds anytime.
+    """
+    s = float(avg_score or 0)
+    if s >= 80:
+        return "Easy"
+    if s >= 50:
+        return "Medium"
+    return "Hard"
+
+
+def get_top_students_for_teacher_courses(teacher_courses_qs, limit=10):
+    """
+    Top students across the teacher's courses by average TestAttempt.score (graded only).
+    Returns minimal fields the UI can use.
+    """
+    # All students who have graded attempts in tests belonging to the teacher's courses
+    qs = (
+        TestAttempt.objects.filter(
+            status="graded",
+            test__course__in=teacher_courses_qs,
+        )
+        .values("student_id", "student__user__first_name", "student__user__last_name", "student__user__email")
+        .annotate(
+            avg_score=Avg("score"),
+            attempts=Count("id"),
+        )
+        .order_by("-avg_score", "-attempts")[:limit]
+    )
+
+    out = []
+    for row in qs:
+        full_name = f"{row.get('student__user__first_name') or ''} {row.get('student__user__last_name') or ''}".strip()
+        out.append(
+            {
+                "id": str(row["student_id"]),
+                "name": full_name or row.get("student__user__email") or f"student-{row['student_id']}",
+                "avgScore": r2(row.get("avg_score")),
+                "attempts": int(row.get("attempts") or 0),
+            }
+        )
+    return out
+
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def teacher_analytics_view(request):
     """
-    Comprehensive analytics endpoint for teacher dashboard
-    Returns all data needed by the teacher-student-analytics frontend component
+    Real analytics endpoint for teacher dashboard.
+    No dummy data. All decimal outputs rounded to 2dp.
     """
     user = request.user
-    
+
     # Get teacher profile and organization
     try:
-        teacher_profile = TeacherProfile.objects.get(user=user)
-        organization = teacher_profile.organization
+        teacher_profile = TeacherProfile.objects.select_related("organization").get(user=user)
     except TeacherProfile.DoesNotExist:
         return Response({"detail": "Teacher profile not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    # Get teacher's courses
-    teacher_courses = Course.objects.filter(
-        teacher=teacher_profile,
-        organization=organization,
-        is_active=True
-    ).select_related('subject', 'classroom')
+    organization = teacher_profile.organization
 
-    # Calculate overall statistics
+    # Get teacher's courses
+    teacher_courses = (
+        Course.objects.filter(
+            teacher=teacher_profile,
+            organization=organization,
+            is_active=True,
+        )
+        .select_related("subject", "classroom")
+    )
+
+    # --- Overall statistics (no dummy "change") ---
+
+    # total students in org
     total_students = StudentProfile.objects.filter(organization=organization).count()
-    
-    # Active students (those with activity in last 30 days)
+
+    # active students (logged in last 30 days)
     thirty_days_ago = timezone.now() - timedelta(days=30)
     active_students = StudentProfile.objects.filter(
         organization=organization,
-        user__last_login__gte=thirty_days_ago
+        user__last_login__gte=thirty_days_ago,
     ).count()
-    
-    # Course completions (students with >90% progress)
+
+    # course completions for teacher courses:
+    # Enrollment.status == "completed" OR progress >= 90 (use whichever you prefer; here I use status completed)
     course_completions = Enrollment.objects.filter(
         course__in=teacher_courses,
-        progress_pct__gte=90,
-        status='completed'
+        status=Enrollment.Status.COMPLETED,
     ).count()
 
     overall_stats = [
         {
             "title": "Total Students",
             "value": str(total_students),
-            "change": "+12%",  # Dummy data as requested
             "icon": "Users",
-            "color": "text-blue-600"
+            "color": "text-blue-600",
         },
         {
-            "title": "Active This Month", 
+            "title": "Active This Month",
             "value": str(active_students),
-            "change": "+8%",
             "icon": "TrendingUp",
-            "color": "text-green-600"
+            "color": "text-green-600",
         },
         {
             "title": "Course Completions",
             "value": str(course_completions),
-            "change": "+23",
-            "icon": "Award", 
-            "color": "text-orange-600"
-        }
+            "icon": "Award",
+            "color": "text-orange-600",
+        },
     ]
 
-    # Course performance data
+    # --- Course performance (real metrics only) ---
     course_performance = []
+
+    # Prefetch enrollments counts/averages efficiently
+    # We'll compute per-course stats in a loop but with aggregates.
     for course in teacher_courses:
-        enrollments = Enrollment.objects.filter(course=course, status='active')
-        student_count = enrollments.count()
-        
-        if student_count > 0:
-            avg_progress = enrollments.aggregate(avg_progress=Avg('progress_pct'))['avg_progress'] or 0
-            
-            # Get test scores for this course
-            test_attempts = TestAttempt.objects.filter(
-                test__course=course,
-                status='graded'
+        enrollments_qs = Enrollment.objects.filter(course=course)
+        student_count = enrollments_qs.count()
+
+        if student_count == 0:
+            # If you want to still show empty courses, keep them; otherwise skip.
+            course_performance.append(
+                {
+                    "id": str(course.id),
+                    "name": course.name,
+                    "students": 0,
+                    "avgProgress": 0.00,
+                    "avgScore": 0.00,
+                    "completionRate": 0.00,
+                }
             )
-            avg_score = test_attempts.aggregate(avg_score=Avg('score'))['avg_score'] or 0
-            
-            completion_rate = enrollments.filter(progress_pct__gte=90).count() / student_count * 100
-            
-            # Generate dummy data for missing fields
-            course_data = {
+            continue
+
+        avg_progress = enrollments_qs.aggregate(v=Avg("progress_pct"))["v"] or Decimal("0")
+        completed_count = enrollments_qs.filter(status=Enrollment.Status.COMPLETED).count()
+        completion_rate = (Decimal(completed_count) / Decimal(student_count)) * Decimal("100")
+
+        # tests and attempts for this course
+        attempts_qs = TestAttempt.objects.filter(
+            test__course=course,
+            status="graded",
+        )
+        avg_score = attempts_qs.aggregate(v=Avg("score"))["v"] or Decimal("0")
+
+        course_performance.append(
+            {
                 "id": str(course.id),
                 "name": course.name,
-                "students": student_count,
-                "avgProgress": round(float(avg_progress), 1),
-                "avgScore": round(float(avg_score), 1),
-                "completionRate": round(completion_rate, 1),
-                "rating": 4.7,  # Dummy data
-                "totalLessons": 45,  # Dummy data
-                "completedLessons": 35,  # Dummy data
-                "enrollmentTrend": [20, 35, 45, 52, 48, 56, 62],  # Dummy data
-                "weeklyActivity": [
-                    {"day": "Monday", "active": 89},
-                    {"day": "Tuesday", "active": 76}, 
-                    {"day": "Wednesday", "active": 94},
-                    {"day": "Thursday", "active": 82},
-                    {"day": "Friday", "active": 67},
-                    {"day": "Saturday", "active": 34},
-                    {"day": "Sunday", "active": 45}
-                ],
-                "topPerformers": get_top_performers(course),
-                "strugglingStudents": get_struggling_students(course)
+                "students": int(student_count),
+                "avgProgress": r2(avg_progress),
+                "avgScore": r2(avg_score),
+                "completionRate": r2(completion_rate),
             }
-            course_performance.append(course_data)
+        )
 
-    # Top students across all courses
-    top_students = get_overall_top_students(teacher_courses)
+    # --- Top students across teacher courses (real) ---
+    top_students = get_top_students_for_teacher_courses(teacher_courses, limit=10)
 
-    # Test analytics
+    # --- Test analytics (real) ---
     test_analytics = []
-    tests = Test.objects.filter(course__in=teacher_courses, visibility='published')
-    
-    for test in tests[:10]:  # Limit to 10 tests
+    tests = Test.objects.filter(course__in=teacher_courses, visibility=Test.Visibility.PUBLISHED)
+
+    for test in tests[:10]:
         attempts = TestAttempt.objects.filter(test=test)
         total_attempts = attempts.count()
-        
-        if total_attempts > 0:
-            avg_score = attempts.aggregate(avg_score=Avg('score'))['avg_score'] or 0
-            pass_rate = attempts.filter(score__gte=60).count() / total_attempts * 100
-            
-            # Score distribution
-            score_distribution = [
-                {"range": "90-100", "count": attempts.filter(score__gte=90).count()},
-                {"range": "80-89", "count": attempts.filter(score__gte=80, score__lt=90).count()},
-                {"range": "70-79", "count": attempts.filter(score__gte=70, score__lt=80).count()},
-                {"range": "60-69", "count": attempts.filter(score__gte=60, score__lt=70).count()},
-                {"range": "Below 60", "count": attempts.filter(score__lt=60).count()}
-            ]
-            
-            test_data = {
+
+        if total_attempts == 0:
+            test_analytics.append(
+                {
+                    "id": str(test.id),
+                    "name": test.title,
+                    "attempts": 0,
+                    "avgScore": 0.00,
+                    "passRate": 0.00,
+                    "difficulty": "N/A",
+                    "questions": test.questions.count(),
+                    "timeLimit": f"{test.duration_minutes} minutes",
+                    "scoreDistribution": [
+                        {"range": "90-100", "count": 0},
+                        {"range": "80-89", "count": 0},
+                        {"range": "70-79", "count": 0},
+                        {"range": "60-69", "count": 0},
+                        {"range": "Below 60", "count": 0},
+                    ],
+                }
+            )
+            continue
+
+        avg_score = attempts.aggregate(v=Avg("score"))["v"] or Decimal("0")
+        pass_rate = (Decimal(attempts.filter(score__gte=60).count()) / Decimal(total_attempts)) * Decimal("100")
+
+        score_distribution = [
+            {"range": "90-100", "count": attempts.filter(score__gte=90).count()},
+            {"range": "80-89", "count": attempts.filter(score__gte=80, score__lt=90).count()},
+            {"range": "70-79", "count": attempts.filter(score__gte=70, score__lt=80).count()},
+            {"range": "60-69", "count": attempts.filter(score__gte=60, score__lt=70).count()},
+            {"range": "Below 60", "count": attempts.filter(score__lt=60).count()},
+        ]
+
+        test_analytics.append(
+            {
                 "id": str(test.id),
                 "name": test.title,
-                "attempts": total_attempts,
-                "avgScore": round(float(avg_score), 1),
-                "passRate": round(pass_rate, 1),
+                "attempts": int(total_attempts),
+                "avgScore": r2(avg_score),
+                "passRate": r2(pass_rate),
                 "difficulty": get_test_difficulty(avg_score),
                 "questions": test.questions.count(),
                 "timeLimit": f"{test.duration_minutes} minutes",
                 "scoreDistribution": score_distribution,
-                "commonMistakes": get_common_mistakes(test),  # Dummy data
-                "performanceByTime": get_performance_by_time()  # Dummy data
             }
-            test_analytics.append(test_data)
+        )
 
-    # Popular content (dummy data as requested)
-    popular_content = [
-        {"title": "React Hooks Tutorial", "views": 1234, "type": "Video"},
-        {"title": "Python Cheat Sheet", "downloads": 890, "type": "PDF"},
-        {"title": "JavaScript Fundamentals", "views": 756, "type": "Course"},
-        {"title": "CSS Grid Guide", "views": 645, "type": "Tutorial"},
-        {"title": "Database Design Principles", "views": 523, "type": "Video"}
-    ]
+    # No dummy content
+    popular_content = []
 
-    return Response({
-        "overallStats": overall_stats,
-        "coursePerformance": course_performance,
-        "topStudents": top_students,
-        "testAnalytics": test_analytics,
-        "popularContent": popular_content
-    })
+    return Response(
+        {
+            "overallStats": overall_stats,
+            "coursePerformance": course_performance,
+            "topStudents": top_students,
+            "testAnalytics": test_analytics,
+            "popularContent": popular_content,
+        }
+    )
 
 
 def get_top_performers(course):
