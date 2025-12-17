@@ -975,6 +975,7 @@ def _serialize_module(module: Module, include_lessons: bool = False) -> Dict[str
             "name": module.category.name
         } if module.category else None,
         "estimatedDuration": module.estimated_duration_in_minutes or 0,
+        "duration": module.estimated_duration_in_minutes or 0,
         "order": module.order,
         "active": module.active,
         "isPublished": module.active,  # Using active as published status
@@ -1027,7 +1028,11 @@ def list_modules(request):
 
         # Start with all modules for teacher's courses
         qs = Module.objects.filter(course_id__in=course_ids)
-
+        search_filter = request.query_params.get("search")
+        if search_filter:
+            s = search_filter.strip()
+            if s:
+                qs = qs.filter(Q(name__icontains=s) | Q(description__icontains=s))
         # Optional: filter by course id
         course_filter = request.query_params.get("course")
         if course_filter:
@@ -1091,6 +1096,8 @@ def list_modules(request):
         ):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
