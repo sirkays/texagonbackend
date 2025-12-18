@@ -20,7 +20,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
 from academics.models import ParentProfile
-from billing.models import SubscriptionInvoice, SubscriptionPayment
+from billing.models import SubscriptionInvoice, SubscriptionPayment, InvoiceType
 from core.utils import _is_org_admin_or_teacher, _resolve_org, get_object_or_404_ajax
 from orgs.models import OrganizationMembership
 from store.models import Order, Payment

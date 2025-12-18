@@ -717,6 +717,15 @@ def upsert_tutoring_booking(request):
             return Response({"detail": "Parent Membership not found."}, status=status.HTTP_403_FORBIDDEN)
 
         membership = membership.last()
+
+        subscription = OrganizationSubscription.objects.filter(
+            organization=parent.organization,
+        )
+        if subscription.exists() is False:
+            return Response({"detail": "Parent orgs subscription not found."}, status=status.HTTP_403_FORBIDDEN)
+        
+        subscription = subscription.last()
+
         data = request.data
 
         # ---- Validate child (must be linked to parent) ----
@@ -857,12 +866,14 @@ def upsert_tutoring_booking(request):
                     status=status_choice,
                     notes=notes,
                 )
-                amount = price 
+                amount = price
+
                 invoice = SubscriptionInvoice.objects.create(
                     organization_membership=membership,
                     amount=amount,
                     due_at=timezone.now(),
                     status="open",
+                    subscription=subscription
 
                 )
 
