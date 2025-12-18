@@ -14,7 +14,7 @@ class Course(NamedModel):
     teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="courses")
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
-    usage_type = models.CharField(
+    course_type = models.CharField(
         max_length=20,
         choices=USAGE_CHOICE,
         default='public',

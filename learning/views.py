@@ -1730,6 +1730,8 @@ def delete_lesson(request, module_id: int, lesson_id: int):
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -1738,31 +1740,53 @@ def get_teacher_courses(request):
     try:
         user = request.user
         teacher = _get_teacher_for_user(user)
-        if not teacher:
-            return Response({"courses": [], "detail": "No teacher profile found."}, status=status.HTTP_200_OK)
 
-        courses = Course.objects.filter(teacher=teacher, is_active=True).select_related('subject', 'classroom')
-        
-        courses_data = []
-        for course in courses:
-            courses_data.append({
+        if not teacher:
+            return Response(
+                {"courses": [], "detail": "No teacher profile found."},
+                status=status.HTTP_200_OK
+            )
+
+        # ✅ Read course_type from query params
+        course_type = request.query_params.get("course_type")
+
+        # Base queryset
+        courses = Course.objects.filter(
+            teacher=teacher,
+            is_active=True,
+        ).select_related("subject", "classroom")
+
+        # ✅ Apply course_type filter if provided
+        if course_type in dict(Course.USAGE_CHOICE):
+            courses = courses.filter(course_type=course_type)
+
+        courses_data = [
+            {
                 "id": course.id,
                 "name": course.name,
                 "subject": course.subject.name if course.subject else None,
                 "classroom": course.classroom.name if course.classroom else None,
                 "description": course.description,
-                "isActive": course.is_active
-            })
+                "isActive": course.is_active,
+                "course_type": course.course_type,
+            }
+            for course in courses
+        ]
 
-        return Response({"courses": courses_data}, status=status.HTTP_200_OK)
+        return Response(
+            {"courses": courses_data},
+            status=status.HTTP_200_OK
+        )
 
     except Exception as e:
         payload = {
             "detail": "Error while fetching courses.",
             "error": f"{type(e).__name__}: {e}",
         }
+
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
+
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
