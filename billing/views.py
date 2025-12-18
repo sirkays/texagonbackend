@@ -29,6 +29,7 @@ from .utils import confirm_transaction, generate_payment_link
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
 from django.core.files.uploadedfile import UploadedFile
 from live.models import TutoringBooking
+from learning.models import Enrollment
 
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25MB per file
 ALLOWED_CONTENT_TYPES = None  # e.g. {"image/png","image/jpeg","application/pdf"}
@@ -352,6 +353,14 @@ def confirm_payement(request):
                 if booking:
                     booking.status = "confirmed"
                     booking.save()
+
+                    course = booking.private_tutoring.course
+
+                    Enrollment.objects.get_or_create(
+                        student=booking.student,
+                        course=course,
+                        status="active"
+                    )
 
     except Exception as e:
         pass
