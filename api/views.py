@@ -42,7 +42,7 @@ from learning.models import Course, Enrollment, Module, Lesson, Material, Bookma
 from assessments.models import Test, Question, Choice, TestAttempt, Assignment, Submission
 from attendance.models import AttendanceSession, AttendanceRecord
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak
-from live.models import PrivateTutoring, AvailableDay, TutoringBooking, LiveSession
+from live.models import (PrivateTutoring, AvailableDay, TutoringBooking, LiveSession,PrivateTutoringRating)
 from billing.models import (
     SubscriptionPlan, OrganizationSubscription, SubscriptionInvoice, SubscriptionPayment,
     InvoiceType,
