@@ -44,6 +44,7 @@ from gamification.models import Badge, BadgeAward, PointTransaction, Streak
 from live.models import PrivateTutoring, AvailableDay, TutoringBooking, LiveSession
 from billing.models import (
     SubscriptionPlan, OrganizationSubscription, SubscriptionInvoice, SubscriptionPayment,
+    InvoiceType,
 )
 from notifications.models import Notification
 from django.shortcuts import get_object_or_404
@@ -710,6 +711,12 @@ def upsert_tutoring_booking(request):
         if not parent:
             return Response({"detail": "Parent profile not found."}, status=status.HTTP_403_FORBIDDEN)
 
+        membership = user.memberships.filter(is_active=True)
+
+        if membership.exists() is False:
+            return Response({"detail": "Parent Membership not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        membership = membership.last()
         data = request.data
 
         # ---- Validate child (must be linked to parent) ----
@@ -850,6 +857,20 @@ def upsert_tutoring_booking(request):
                     status=status_choice,
                     notes=notes,
                 )
+                amount = price 
+                invoice = SubscriptionInvoice.objects.create(
+                    organization_membership=membership,
+                    amount=amount,
+                    due_at=timezone.now(),
+                    status="open",
+
+                )
+
+                InvoiceType.objects.create(
+                    invoice=invoice,
+                    invoice_type = "tutor"
+                )
+
 
         return Response(_serialize_booking(booking),
                         status=status.HTTP_200_OK if booking_id else status.HTTP_201_CREATED)

@@ -13,6 +13,7 @@ from .models import (
     Complaint,
     ComplaintResponse,
     ComplaintAttachment,
+    InvoiceType
 )
 
 # ---------- Helpers ----------
@@ -245,3 +246,48 @@ class ComplaintAttachmentAdmin(admin.ModelAdmin):
     autocomplete_fields = ("complaint", "uploaded_by")
     date_hierarchy = "uploaded_at"
     list_select_related = ("complaint", "uploaded_by")
+
+
+
+def _admin_change_url(obj):
+    """Admin change URL for any model instance, or None if obj is falsy."""
+    if not obj:
+        return None
+    opts = obj._meta
+    return reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[obj.pk])
+
+
+@admin.register(InvoiceType)
+class InvoiceTypeAdmin(admin.ModelAdmin):
+    # ---- list page ----
+    list_display = ("invoice_link", "invoice_number", "invoice_type")
+    list_filter = ("invoice_type",)
+    search_fields = (
+        "invoice__number",
+        "invoice__transaction_id",
+        "invoice__subscription__organization__name",
+    )
+    autocomplete_fields = ("invoice",)
+    list_select_related = (
+        "invoice",
+        "invoice__subscription",
+        "invoice__subscription__organization",
+    )
+    ordering = ("invoice_type",)
+
+    # ---- display helpers ----
+    @admin.display(description=_("Invoice"))
+    def invoice_link(self, obj: InvoiceType):
+        inv = obj.invoice
+        if not inv:
+            return "—"
+        url = _admin_change_url(inv)
+        label = getattr(inv, "number", None) or str(inv.pk)
+        if url:
+            return format_html('<a href="{}">{}</a>', url, label)
+        return label
+
+    @admin.display(description=_("Invoice #"))
+    def invoice_number(self, obj: InvoiceType):
+        inv = obj.invoice
+        return getattr(inv, "number", "—") if inv else "—"

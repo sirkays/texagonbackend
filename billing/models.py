@@ -10,7 +10,7 @@ from core.models import TimeStampedModel, NamedModel
 from orgs.models import OrganizationMembership
 from store.models import Product, Payment
 from live.models import TutoringBooking
-
+from nanoid import generate
 
 class SubscriptionPlan(NamedModel):
     price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
@@ -41,9 +41,21 @@ class SubscriptionInvoice(TimeStampedModel):
         VOID = "void", "void"
         UNCOLLECTIBLE = "uncollectible", "uncollectible"
         ACTIVE = "active", "active"
-    organization_membership = models.ForeignKey(OrganizationMembership, on_delete=models.CASCADE, related_name="my_invoices", blank=True, null=True)
-    subscription = models.ForeignKey(OrganizationSubscription, on_delete=models.CASCADE, related_name="invoices")
-    number = models.CharField(max_length=64, unique=True)
+
+
+    def invoice_number():
+        return f"INV-{generate('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 10)}"
+
+    organization_membership = models.ForeignKey(OrganizationMembership, on_delete=models.CASCADE, 
+    related_name="my_invoices", blank=True, null=True)
+    subscription = models.ForeignKey(OrganizationSubscription, on_delete=models.CASCADE, related_name="invoices",
+    blank=True, null=True)
+    number = models.CharField(
+        max_length=20,
+        unique=True,
+        default=invoice_number,
+        editable=False
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=8, default="NGN")
     issued_at = models.DateTimeField(default=timezone.now)
@@ -102,6 +114,13 @@ class SubscriptionPayment(TimeStampedModel):
         self.paid_at = timezone.now()
         self.save()
 
+
+class InvoiceType(models.Model):
+    class Paytype(models.TextChoices):
+        TUTOR = "tutor","tutor",
+        SUBSCRIPTION = "subscription","subscription"
+    invoice = models.OneToOneField(SubscriptionInvoice, on_delete=models.CASCADE)
+    invoice_type = models.CharField(max_length=16, choices=Paytype.choices, default=Paytype.SUBSCRIPTION)
 
 
 class Complaint(models.Model):  # or inherit your TimeStampedModel
