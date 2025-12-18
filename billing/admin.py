@@ -249,8 +249,8 @@ class ComplaintAttachmentAdmin(admin.ModelAdmin):
 
 
 
+
 def _admin_change_url(obj):
-    """Admin change URL for any model instance, or None if obj is falsy."""
     if not obj:
         return None
     opts = obj._meta
@@ -259,23 +259,39 @@ def _admin_change_url(obj):
 
 @admin.register(InvoiceType)
 class InvoiceTypeAdmin(admin.ModelAdmin):
-    # ---- list page ----
-    list_display = ("invoice_link", "invoice_number", "invoice_type")
-    list_filter = ("invoice_type",)
+    # ---------- List view ----------
+    list_display = (
+        "invoice_link",
+        "invoice_type",
+        "object_type",
+        "object_id",
+    )
+    list_filter = (
+        "invoice_type",
+        "object_type",
+    )
     search_fields = (
         "invoice__number",
         "invoice__transaction_id",
-        "invoice__subscription__organization__name",
+        "object_type",
+        "object_id",
     )
+    ordering = ("invoice_type", "object_type")
     autocomplete_fields = ("invoice",)
-    list_select_related = (
-        "invoice",
-        "invoice__subscription",
-        "invoice__subscription__organization",
-    )
-    ordering = ("invoice_type",)
+    list_select_related = ("invoice",)
 
-    # ---- display helpers ----
+    # ---------- Field layout ----------
+    fieldsets = (
+        (_("Invoice"), {
+            "fields": ("invoice", "invoice_type"),
+        }),
+        (_("Linked Object"), {
+            "description": _("Optional reference to the source object (e.g Tutor, Booking, Subscription)"),
+            "fields": ("object_type", "object_id"),
+        }),
+    )
+
+    # ---------- Readable invoice link ----------
     @admin.display(description=_("Invoice"))
     def invoice_link(self, obj: InvoiceType):
         inv = obj.invoice
@@ -286,8 +302,3 @@ class InvoiceTypeAdmin(admin.ModelAdmin):
         if url:
             return format_html('<a href="{}">{}</a>', url, label)
         return label
-
-    @admin.display(description=_("Invoice #"))
-    def invoice_number(self, obj: InvoiceType):
-        inv = obj.invoice
-        return getattr(inv, "number", "—") if inv else "—"
