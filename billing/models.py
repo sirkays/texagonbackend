@@ -121,6 +121,8 @@ class InvoiceType(models.Model):
         SUBSCRIPTION = "subscription","subscription"
     invoice = models.OneToOneField(SubscriptionInvoice, on_delete=models.CASCADE)
     invoice_type = models.CharField(max_length=16, choices=Paytype.choices, default=Paytype.SUBSCRIPTION)
+    object_id = models.PositiveIntegerField(blank=True, null=True)
+    object_type = models.CharField(max_length=10, blank=True, null=True)
 
 
 class Complaint(models.Model):  # or inherit your TimeStampedModel

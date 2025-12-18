@@ -868,7 +868,9 @@ def upsert_tutoring_booking(request):
 
                 InvoiceType.objects.create(
                     invoice=invoice,
-                    invoice_type = "tutor"
+                    invoice_type = "tutor",
+                    object_id = booking.id,
+                    object_type="booking"
                 )
 
 

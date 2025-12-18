@@ -28,6 +28,7 @@ from .models import Complaint, ComplaintResponse,ComplaintAttachment
 from .utils import confirm_transaction, generate_payment_link
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
 from django.core.files.uploadedfile import UploadedFile
+from live.models import TutoringBooking
 
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25MB per file
 ALLOWED_CONTENT_TYPES = None  # e.g. {"image/png","image/jpeg","application/pdf"}
@@ -343,7 +344,17 @@ def confirm_payement(request):
     subscription_payment.invoice.status = "paid"
     subscription_payment.invoice.transaction_id = transaction_id
     subscription_payment.invoice.save()
-    
+    try:
+        invoice_type = InvoiceType.objects.get(invoice=subscription_payment.invoice)
+        if invoice_type.invoice_type == "tutor":
+            if invoice_type.object_type == "booking":
+                booking = TutoringBooking.objects.get(pk=invoice_type.object_id)
+                if booking:
+                    booking.status = "completed"
+                    booking.save()
+
+    except Exception as e:
+        pass
     
     return Response({"status":"success"}, status=status.HTTP_200_OK)
 
