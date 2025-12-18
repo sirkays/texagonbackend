@@ -822,7 +822,7 @@ def upsert_tutoring_booking(request):
         except Exception:
             return Response({"detail": "Invalid rate on PrivateTutoring."},
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        price = rate * Decimal(duration_hours)
+        price = rate 
 
         # ---- Create or Update ----
         booking_id = data.get("booking_id")
@@ -978,6 +978,9 @@ def _paginate(qs, request, default_size=10, max_size=50):
 
 def _teacher_card_dict(pt: PrivateTutoring):
     """Flatten data for tutor cards in the UI."""
+    def shorten(text, max_len=15):
+        return text if len(text) <= max_len else text[:max_len - 3] + "..."
+
     teacher = pt.teacher
     course = pt.course
     # Modules under the course (names only)
@@ -1017,7 +1020,7 @@ def _teacher_card_dict(pt: PrivateTutoring):
         "verified": True,
         "premiumTutor": False,
         "sessionTypes": ["One-on-One"],
-        "technologies": ["Interactive Whiteboard", "Screen Sharing", "Recording"],
+        "technologies": [f"{shorten(pt.notes)}",],
         "avatar": None,  # plug your avatar URL if you store it (e.g. teacher.user.avatar.url)
         "specialization": ", ".join(list(teacher.specialties.values_list("name", flat=True)[:5])),
         "totalSessions": total_sessions,

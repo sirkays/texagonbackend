@@ -350,7 +350,7 @@ def confirm_payement(request):
             if invoice_type.object_type == "booking":
                 booking = TutoringBooking.objects.get(pk=invoice_type.object_id)
                 if booking:
-                    booking.status = "completed"
+                    booking.status = "confirmed"
                     booking.save()
 
     except Exception as e:
