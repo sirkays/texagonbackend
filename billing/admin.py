@@ -261,7 +261,6 @@ def _admin_change_url(obj):
 class InvoiceTypeAdmin(admin.ModelAdmin):
     # ---------- List view ----------
     list_display = (
-        "invoice_link",
         "invoice_type",
         "object_type",
         "object_id",
@@ -290,15 +289,3 @@ class InvoiceTypeAdmin(admin.ModelAdmin):
             "fields": ("object_type", "object_id"),
         }),
     )
-
-    # ---------- Readable invoice link ----------
-    @admin.display(description=_("Invoice"))
-    def invoice_link(self, obj: InvoiceType):
-        inv = obj.invoice
-        if not inv:
-            return "—"
-        url = _admin_change_url(inv)
-        label = getattr(inv, "number", None) or str(inv.pk)
-        if url:
-            return format_html('<a href="{}">{}</a>', url, label)
-        return label
