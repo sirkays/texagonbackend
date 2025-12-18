@@ -6,7 +6,7 @@ from .permissions import IsStudent
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.db import transaction
-from django.db.models import Q, Sum, Count, F
+from django.db.models import Q, Sum, Count, F,Avg
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework import status, viewsets
@@ -31,6 +31,7 @@ from .serializers import (
     SubscriptionPlanSerializer, OrganizationSubscriptionSerializer, SubscriptionInvoiceSerializer, SubscriptionPaymentSerializer,
     NotificationSerializer,PrivateTutoringSerializer, LanguageSerializer
 )
+
 
 from orgs.models import Organization, OrganizationMembership, AcademicSession
 from academics.models import (
@@ -978,7 +979,7 @@ def _paginate(qs, request, default_size=10, max_size=50):
 
 def _teacher_card_dict(pt: PrivateTutoring):
     """Flatten data for tutor cards in the UI."""
-    def shorten(text, max_len=15):
+    def shorten(text, max_len=50):
         return text if len(text) <= max_len else text[:max_len - 3] + "..."
 
     teacher = pt.teacher
@@ -1000,9 +1001,18 @@ def _teacher_card_dict(pt: PrivateTutoring):
     )
     availability_days = [day_map.get(d, d) for d in days]
 
-    # (Optional) derived/fake metrics if you don’t store them yet
-    # You can replace these with real aggregates (ratings, total sessions, etc.)
-    rating = 1.0
+
+    rating = (
+        PrivateTutoringRating.objects
+        .filter(
+            tutoring_booking__private_tutoring=pt,
+            is_active=True,
+            tutoring_booking__status=TutoringBooking.Status.COMPLETED,
+        )
+        .aggregate(avg=Avg("rating"))
+    )["avg"] or 0
+
+
     total_sessions = TutoringBooking.objects.filter(teacher=teacher).count()
     return {
         "id": pt.id,

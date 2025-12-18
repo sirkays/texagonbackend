@@ -638,8 +638,8 @@ def teacher_submission_grade(request, pk: int):
                 extra={"submission_id": submission.id, "lesson_id": submission.lesson_id},
             )
             return
-
-    transaction.on_commit(_log_after_commit)
+    if submission.lesson.module.course.course_type == "public":
+        transaction.on_commit(_log_after_commit)
     # --------------------------------------------------------------
 
     return Response(TeacherCodeSubmissionDetailSerializer(submission).data, status=200)

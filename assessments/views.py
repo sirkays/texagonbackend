@@ -936,6 +936,7 @@ def submit_test(request, test_id: int):
         # ---------- GAMIFICATION EVENT LOG (AFTER FACT) ----------
         org = getattr(student, "organization", None)
         today = timezone.localdate()
+
         def _log_after_commit():
             try:
                 # 1) quiz attempted (always)
@@ -1006,9 +1007,9 @@ def submit_test(request, test_id: int):
                 return
 
 
-
-        transaction.on_commit(_log_after_commit)
-        # --------------------------------------------------------
+        if test.course.course_type == 'public':
+            transaction.on_commit(_log_after_commit)
+            # --------------------------------------------------------
 
         return Response(
             {
