@@ -1002,7 +1002,7 @@ def _teacher_card_dict(pt: PrivateTutoring):
 
     # (Optional) derived/fake metrics if you don’t store them yet
     # You can replace these with real aggregates (ratings, total sessions, etc.)
-    rating = 4.8
+    rating = 1.0
     total_sessions = TutoringBooking.objects.filter(teacher=teacher).count()
     return {
         "id": pt.id,

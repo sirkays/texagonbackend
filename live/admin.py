@@ -1,5 +1,7 @@
 from django.contrib import admin
-from .models import LiveSession, TutoringBooking, PrivateTutoring, AvailableDay
+from .models import (LiveSession, TutoringBooking, 
+    PrivateTutoring, AvailableDay,PrivateTutoringRating
+)
 
 # --------------------
 # LiveSession
@@ -135,4 +137,36 @@ class PrivateTutoringAdmin(admin.ModelAdmin):
             "fields": ("created_at", "updated_at"),
             "classes": ("collapse",),
         }),
+    )
+
+
+
+@admin.register(PrivateTutoringRating)
+class PrivateTutoringRatingAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "parent",
+        "tutoring_booking",
+        "rating",
+        "is_active",
+        "created_at",
+        "updated_at",
+    )
+    list_filter = ("is_active",)
+    search_fields = (
+        "parent__user__email",
+        "parent__user__first_name",
+        "parent__user__last_name",
+        "tutoring_booking__id",
+        "comment",
+    )
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at")
+    list_select_related = ("parent", "tutoring_booking")
+    autocomplete_fields = ("parent", "tutoring_booking")
+
+    fieldsets = (
+        (None, {"fields": ("parent", "tutoring_booking", "rating", "comment")}),
+        ("Status", {"fields": ("is_active",)}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )

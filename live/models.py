@@ -29,7 +29,7 @@ class PrivateTutoring(TimeStampedModel):
     tutoring_duration_days = models.PositiveIntegerField(default=24) # NUMBER OF DAYS THE TUTORING WILL LAST
     notes = models.CharField(max_length=225)
     active = models.BooleanField(default=True)
-    
+
 
 class AvailableDay(models.Model):
     class Day(models.TextChoices):
@@ -63,5 +63,10 @@ class TutoringBooking(TimeStampedModel):
 
 
 
-
+class PrivateTutoringRating(TimeStampedModel):
+    parent = models.ForeignKey("academics.ParentProfile", on_delete=models.CASCADE)
+    tutoring_booking = models.OneToOneField(TutoringBooking, on_delete=models.CASCADE)
+    rating = models.FloatField()
+    comment = models.CharField(max_length=2500)
+    is_active = models.BooleanField(default=True)
 

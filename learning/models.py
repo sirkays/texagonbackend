@@ -19,7 +19,7 @@ class Course(NamedModel):
         choices=USAGE_CHOICE,
         default='public',
     )
-    private_tutor = models.ForeignKey(TutoringBooking, on_delete=models.CASCADE, blank=True, null=True)
+
 
     def __str__(self):
         return f"{self.subject.name} Teacher: {self.teacher.user.email}"
