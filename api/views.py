@@ -1010,8 +1010,7 @@ def _teacher_card_dict(pt: PrivateTutoring):
             tutoring_booking__status=TutoringBooking.Status.COMPLETED,
         )
         .aggregate(avg=Avg("rating"))
-    )["avg"] or 0
-
+    )["avg"] or 1.0
 
     total_sessions = TutoringBooking.objects.filter(teacher=teacher).count()
     return {

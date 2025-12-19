@@ -1267,7 +1267,6 @@ def dashboard_overview(request):
 
 
 
-
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -1276,160 +1275,315 @@ def parent_overview(request):
     Parent dashboard overview endpoint.
     Returns aggregated data for all children linked to the authenticated parent.
     """
+
     try:
-        # Get the parent profile for the authenticated user
-        parent_profile = ParentProfile.objects.get(user=request.user)
+        parent_profile = ParentProfile.objects.select_related("organization").get(user=request.user)
     except ParentProfile.DoesNotExist:
         return Response(
-            {"detail": "Parent profile not found for this user."}, 
-            status=status.HTTP_404_NOT_FOUND
+            {"detail": "Parent profile not found for this user."},
+            status=status.HTTP_404_NOT_FOUND,
         )
 
     # Get all children linked to this parent
-    children_links = ParentChildLink.objects.filter(parent=parent_profile).select_related(
-        'student__user', 'student__current_classroom'
+    children_links = (
+        ParentChildLink.objects
+        .filter(parent=parent_profile)
+        .select_related("student__user", "student__current_classroom")
     )
-    
+
     if not children_links.exists():
         return Response(
-            {"detail": "No children found for this parent."}, 
-            status=status.HTTP_404_NOT_FOUND
+            {"detail": "No children found for this parent."},
+            status=status.HTTP_404_NOT_FOUND,
         )
 
+    students = [link.student for link in children_links]
+    org = parent_profile.organization
+
+    # --- Precompute / batch queries for accuracy & performance ---
+
+    # Enrollment counts per student
+    enrollments_qs = Enrollment.objects.filter(student__in=students)
+    active_counts = (
+        enrollments_qs.filter(status=Enrollment.Status.ACTIVE)
+        .values("student_id")
+        .annotate(c=Count("id"))
+    )
+    completed_counts = (
+        enrollments_qs.filter(status=Enrollment.Status.COMPLETED)
+        .values("student_id")
+        .annotate(c=Count("id"))
+    )
+    active_map = {r["student_id"]: r["c"] for r in active_counts}
+    completed_map = {r["student_id"]: r["c"] for r in completed_counts}
+
+    # Average test score per student (graded)
+    avg_scores = (
+        TestAttempt.objects.filter(student__in=students, status="graded")
+        .values("student_id")
+        .annotate(avg=Avg("score"))
+    )
+    avg_score_map = {r["student_id"]: (r["avg"] or 0) for r in avg_scores}
+
+    # Badges count per student
+    badge_counts = (
+        BadgeAward.objects.filter(student__in=students)
+        .values("student_id")
+        .annotate(c=Count("id"))
+    )
+    badge_count_map = {r["student_id"]: r["c"] for r in badge_counts}
+
+    # Achievements count per student
+    achievement_counts = (
+        AchievementAcquired.objects.filter(student__in=students)
+        .values("student_id")
+        .annotate(c=Count("id"))
+    )
+    achievement_count_map = {r["student_id"]: r["c"] for r in achievement_counts}
+
+    # Latest points balance per student (preferred), fallback to sum(points)
+    latest_pt = (
+        PointTransaction.objects.filter(student__in=students)
+        .order_by("student_id", "-created_at")
+        .values("student_id", "balance_after", "created_at")
+    )
+    points_balance_map = {}
+    seen = set()
+    for row in latest_pt:
+        sid = row["student_id"]
+        if sid in seen:
+            continue
+        seen.add(sid)
+        points_balance_map[sid] = row["balance_after"]
+
+    # Fallback sums for students with no balance entries
+    missing_points_students = [s.id for s in students if s.id not in points_balance_map]
+    if missing_points_students:
+        sums = (
+            PointTransaction.objects.filter(student_id__in=missing_points_students)
+            .values("student_id")
+            .annotate(total=Sum("points"))
+        )
+        for r in sums:
+            points_balance_map[r["student_id"]] = r["total"] or 0
+
+    # Last activity per student from ActivityEvent
+    last_activity_rows = (
+        ActivityEvent.objects.filter(student__in=students, organization=org)
+        .order_by("student_id", "-occurred_at")
+        .values("student_id", "occurred_at", "event_type")
+    )
+    last_activity_map = {}
+    seen = set()
+    for r in last_activity_rows:
+        sid = r["student_id"]
+        if sid in seen:
+            continue
+        seen.add(sid)
+        last_activity_map[sid] = {
+            "occurred_at": r["occurred_at"],
+            "event_type": r["event_type"],
+        }
+
+    # Streak map (OneToOne, safe to query in bulk)
+    streak_rows = (
+        Streak.objects.filter(student__in=students)
+        .values("student_id", "current_days", "longest_days", "last_activity")
+    )
+    streak_map = {r["student_id"]: r for r in streak_rows}
+
+    # Upcoming tests (global list for events + per-child next test)
+    upcoming_tests_qs = (
+        Test.objects.filter(
+            course__enrollments__student__in=students,
+            visibility=Test.Visibility.PUBLISHED,
+            start_at__gt=timezone.now(),
+        )
+        .select_related("course")
+        .distinct()
+        .order_by("start_at")
+    )
+
+    # --- Build children payload ---
     children_data = []
-    total_study_hours = 0
-    total_rewards = 0
-    
-    # Process each child
+    total_badges = 0
+    total_achievements = 0
+    total_points = 0
+
     for link in children_links:
         student = link.student
         user = student.user
-        
-        # Get enrollments and course progress
-        enrollments = Enrollment.objects.filter(student=student, status=Enrollment.Status.ACTIVE)
-        courses_enrolled = enrollments.count()
-        courses_completed = enrollments.filter(status=Enrollment.Status.COMPLETED).count()
-        
-        # Calculate average score from test attempts
-        test_attempts = TestAttempt.objects.filter(student=student, status='graded')
-        avg_score = test_attempts.aggregate(avg_score=Avg('score'))['avg_score'] or 0
-        
-        # Get weekly study hours (mock calculation - you may want to track this differently)
-        weekly_hours = 8 + (student.id % 10)  # Mock data, replace with actual tracking
-        total_study_hours += weekly_hours
-        
-        # Get rewards/badges count
-        badge_count = BadgeAward.objects.filter(student=student).count()
-        total_rewards += badge_count
-        
-        # Get current streak
-        try:
-            streak = Streak.objects.get(student=student)
-            current_streak = streak.current_days
-        except Streak.DoesNotExist:
-            current_streak = 0
-        
-        # Get upcoming test
-        upcoming_tests = Test.objects.filter(
-            course__enrollments__student=student,
-            visibility=Test.Visibility.PUBLISHED,
-            start_at__gt=timezone.now()
-        ).order_by('start_at').first()
-        
+
+        courses_enrolled = active_map.get(student.id, 0)
+        courses_completed = completed_map.get(student.id, 0)
+
+        badge_count = badge_count_map.get(student.id, 0)
+        achievement_count = achievement_count_map.get(student.id, 0)
+
+        points_balance = points_balance_map.get(student.id, 0)
+
+        total_badges += badge_count
+        total_achievements += achievement_count
+        total_points += points_balance
+
+        streak_info = streak_map.get(student.id)
+        current_streak = streak_info["current_days"] if streak_info else 0
+
+        # Per-child next upcoming test based on enrollments
+        next_test = (
+            Test.objects.filter(
+                course__enrollments__student=student,
+                visibility=Test.Visibility.PUBLISHED,
+                start_at__gt=timezone.now(),
+            )
+            .order_by("start_at")
+            .first()
+        )
+
         upcoming_test_info = "No upcoming tests"
-        if upcoming_tests:
-            upcoming_test_info = f"{upcoming_tests.title} - {upcoming_tests.start_at.strftime('%A %I:%M %p')}"
-        
-        # Get last activity (mock - replace with actual activity tracking)
-        last_active = "2 hours ago"  # Mock data
-        
+        if next_test:
+            upcoming_test_info = f"{next_test.title} - {next_test.start_at.strftime('%A %I:%M %p')}"
+
+        # Last activity accurate from ActivityEvent
+        la = last_activity_map.get(student.id)
+        if la and la.get("occurred_at"):
+            last_active = get_time_ago(la["occurred_at"])
+        else:
+            last_active = "No activity yet"
+
         child_data = {
             "id": student.id,
-            "name": user.get_full_name() or user.email.split('@')[0],
-            "grade": getattr(student.current_classroom, 'name', 'N/A'),
+            "name": user.get_full_name() or user.email.split("@")[0],
+            "grade": getattr(student.current_classroom, "name", "N/A"),
             "school": parent_profile.organization.name,
-            "avatar": user.avatar.url if user.avatar else None,
+            "avatar": user.avatar.url if getattr(user, "avatar", None) else None,
+
+            # Academics
             "coursesEnrolled": courses_enrolled,
             "coursesCompleted": courses_completed,
-            "averageScore": round(float(avg_score), 1),
-            "weeklyHours": weekly_hours,
+            "averageScore": round(float(avg_score_map.get(student.id, 0)), 1),
+
+            # Gamification (accurate)
+            "pointsBalance": int(points_balance),
+            "badgesEarned": int(badge_count),
+            "achievementsUnlocked": int(achievement_count),
+            "currentStreak": int(current_streak),
+
+            # Activity / schedule
             "lastActive": last_active,
             "upcomingTest": upcoming_test_info,
-            "currentStreak": current_streak,
-            "totalRewards": badge_count,
+
+            # Backward compatibility with your existing frontend field:
+            # "totalRewards" now means badges + achievements (not “weekly hours” related).
+            "totalRewards": int(badge_count + achievement_count),
         }
+
         children_data.append(child_data)
 
-    # Calculate family stats
+    # --- Family stats (no study-hours) ---
     family_stats = [
         {
             "title": "Total Children",
             "value": str(len(children_data)),
-            "change": "All active",
+            "change": "All linked",
             "icon": "Baby",
             "color": "text-purple-600",
             "bgColor": "bg-purple-100",
         },
         {
-            "title": "Combined Study Hours",
-            "value": str(total_study_hours),
-            "change": "This week",
-            "icon": "Clock",
-            "color": "text-blue-600",
-            "bgColor": "bg-blue-100",
-        },
-        {
-            "title": "Total Rewards Earned",
-            "value": str(total_rewards),
+            "title": "Total Badges Earned",
+            "value": str(total_badges),
             "change": "Across all children",
             "icon": "Trophy",
             "color": "text-orange-600",
             "bgColor": "bg-orange-100",
         },
+        {
+            "title": "Achievements Unlocked",
+            "value": str(total_achievements),
+            "change": "Across all children",
+            "icon": "Star",
+            "color": "text-blue-600",
+            "bgColor": "bg-blue-100",
+        },
+        {
+            "title": "Points Balance",
+            "value": str(total_points),
+            "change": "Current total",
+            "icon": "Coins",
+            "color": "text-green-600",
+            "bgColor": "bg-green-100",
+        },
     ]
 
-    # Get recent activity
+    # --- Recent activity (accurate timestamps) ---
     recent_activity = []
-    
+
     # Recent test attempts
-    recent_tests = TestAttempt.objects.filter(
-        student__in=[link.student for link in children_links],
-        submitted_at__isnull=False
-    ).select_related('student__user', 'test').order_by('-submitted_at')[:5]
-    
+    recent_tests = (
+        TestAttempt.objects.filter(
+            student__in=students,
+            submitted_at__isnull=False,
+        )
+        .select_related("student__user", "test")
+        .order_by("-submitted_at")[:5]
+    )
     for attempt in recent_tests:
         recent_activity.append({
             "type": "test",
-            "child": attempt.student.user.get_full_name() or attempt.student.user.email.split('@')[0],
+            "child": attempt.student.user.get_full_name() or attempt.student.user.email.split("@")[0],
             "title": f"Took {attempt.test.title}",
             "description": f"Scored {attempt.score}%",
             "time": get_time_ago(attempt.submitted_at),
+            "_ts": attempt.submitted_at,
             "icon": "Target",
             "color": "text-blue-600",
         })
-    
-    # Recent badge awards
-    recent_badges = BadgeAward.objects.filter(
-        student__in=[link.student for link in children_links]
-    ).select_related('student__user', 'badge').order_by('-awarded_at')[:3]
-    
-    for award in recent_badges:
+
+    # Recent achievements unlocked
+    recent_achievements = (
+        AchievementAcquired.objects.filter(student__in=students)
+        .select_related("student__user", "definition")
+        .order_by("-acquired_at")[:5]
+    )
+    for acq in recent_achievements:
         recent_activity.append({
             "type": "achievement",
-            "child": award.student.user.get_full_name() or award.student.user.email.split('@')[0],
-            "title": f"Earned {award.badge.name}",
-            "description": award.reason or "Great achievement!",
-            "time": get_time_ago(award.awarded_at),
-            "icon": "Trophy",
+            "child": acq.student.user.get_full_name() or acq.student.user.email.split("@")[0],
+            "title": f"Unlocked {acq.definition.title}",
+            "description": acq.definition.description or "Achievement unlocked!",
+            "time": get_time_ago(acq.acquired_at),
+            "_ts": acq.acquired_at,
+            "icon": "Star",
             "color": "text-green-600",
         })
-    
-    # Recent payments
-    recent_payments = SubscriptionPayment.objects.filter(
-        invoice__organization_membership__user=request.user,
-        status=SubscriptionPayment.Status.SUCCESS
-    ).order_by('-paid_at')[:2]
-    
+
+    # Recent badge awards
+    recent_badges = (
+        BadgeAward.objects.filter(student__in=students)
+        .select_related("student__user", "badge")
+        .order_by("-awarded_at")[:5]
+    )
+    for award in recent_badges:
+        recent_activity.append({
+            "type": "badge",
+            "child": award.student.user.get_full_name() or award.student.user.email.split("@")[0],
+            "title": f"Earned {award.badge.name}",
+            "description": award.reason or award.badge.criteria or "Badge earned!",
+            "time": get_time_ago(award.awarded_at),
+            "_ts": award.awarded_at,
+            "icon": "Trophy",
+            "color": "text-orange-600",
+        })
+
+    # Recent payments (as you already had)
+    recent_payments = (
+        SubscriptionPayment.objects.filter(
+            invoice__organization_membership__user=request.user,
+            status=SubscriptionPayment.Status.SUCCESS,
+        )
+        .order_by("-paid_at")[:2]
+    )
     for payment in recent_payments:
         recent_activity.append({
             "type": "payment",
@@ -1437,38 +1591,33 @@ def parent_overview(request):
             "title": "Subscription Payment",
             "description": f"₦{payment.amount} paid successfully",
             "time": get_time_ago(payment.paid_at),
+            "_ts": payment.paid_at,
             "icon": "CreditCard",
             "color": "text-purple-600",
         })
-    
-    # Sort recent activity by time (most recent first)
-    recent_activity.sort(key=lambda x: x['time'], reverse=False)
-    recent_activity = recent_activity[:10]  # Limit to 10 items
 
-    # Get upcoming events
+    # Sort by real datetime desc, then trim, then remove internal key
+    recent_activity.sort(key=lambda x: x.get("_ts") or timezone.make_aware(timezone.datetime.min), reverse=True)
+    recent_activity = recent_activity[:10]
+    for item in recent_activity:
+        item.pop("_ts", None)
+
+    # --- Upcoming events (tests) ---
     upcoming_events = []
-    
-    # Upcoming tests
-    upcoming_tests = Test.objects.filter(
-        course__enrollments__student__in=[link.student for link in children_links],
-        visibility=Test.Visibility.PUBLISHED,
-        start_at__gt=timezone.now()
-    ).select_related('course').order_by('start_at')[:10]
-    
+    upcoming_tests = upcoming_tests_qs[:10]
+
     for test in upcoming_tests:
-        # Get the student(s) enrolled in this course
-        enrolled_students = [link.student for link in children_links 
-                           if link.student.enrollments.filter(course=test.course).exists()]
-        
-        for student in enrolled_students:
-            importance = "high" if test.start_at <= timezone.now() + timedelta(days=2) else "medium"
-            upcoming_events.append({
-                "child": student.user.get_full_name() or student.user.email.split('@')[0],
-                "event": test.title,
-                "date": test.start_at.strftime('%A, %I:%M %p'),
-                "type": "Test",
-                "importance": importance,
-            })
+        # Which of the parent's children are enrolled in the test.course?
+        for student in students:
+            if Enrollment.objects.filter(student=student, course=test.course).exists():
+                importance = "high" if test.start_at <= timezone.now() + timedelta(days=2) else "medium"
+                upcoming_events.append({
+                    "child": student.user.get_full_name() or student.user.email.split("@")[0],
+                    "event": test.title,
+                    "date": test.start_at.strftime("%A, %I:%M %p"),
+                    "type": "Test",
+                    "importance": importance,
+                })
 
     return Response({
         "children": children_data,
