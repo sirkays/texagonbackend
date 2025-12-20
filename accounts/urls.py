@@ -12,7 +12,7 @@ urlpatterns = [
     path('api/parent/children-list/', views.children_list_view, name='children_list'),
     path('api/parent/time-periods/', views.time_periods_view, name='time_periods'),
 
-    path('api/parent/children/', views.get_parent_children, name='parent-children'),
+    path('api/parent/children/', views.get_children_progress, name='parent-children'),
     path('api/parent/reset-child-password/', views.reset_child_password, name='reset-child-password'),
 
 

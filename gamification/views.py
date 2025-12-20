@@ -21,6 +21,7 @@ from gamification.models import (
     PointTransaction,
     Streak,
     AchievementDefinition,
+    AchievementAcquired,
 )
 from learning.models import Enrollment
 from orgs.models import OrganizationMembership
@@ -444,39 +445,75 @@ def parent_rewards(request):
         # ---------- Children data ----------
         children_data: List[Dict[str, Any]] = []
 
+        # inside parent_rewards()
+
         for student in students:
             org = getattr(student, "organization", None)
             total_points = _sum_points(student)
             streak_obj = Streak.objects.filter(student=student).first()
             current_streak = streak_obj.current_days if streak_obj else 0
 
-            # Badges
-            all_badges = Badge.objects.filter(Q(organization__isnull=True) | Q(organization=org))
-            awarded = BadgeAward.objects.filter(student=student, badge__in=all_badges).select_related("badge")
+            # -----------------------
+            # Badges (Badge + BadgeAward)
+            # -----------------------
+            all_badges = Badge.objects.filter(Q(organization__isnull=True) | Q(organization=org)).order_by("points", "id")
+            awarded = (
+                BadgeAward.objects
+                .filter(student=student, badge__in=all_badges)
+                .select_related("badge")
+            )
             awarded_map = {aw.badge_id: aw for aw in awarded}
 
             badges_data = []
             for b in all_badges:
                 aw = awarded_map.get(b.id)
-                badge_dict = {
+                badges_data.append({
+                    "id": b.id,
                     "name": b.name,
-                    "icon": b.icon_name or "🏅",
+                    "icon": b.icon_name or "medal",
+                    "color": b.color or "bg-gray-400",
+                    "pointsThreshold": b.points or 0,
                     "earned": bool(aw),
-                }
-                if aw:
-                    badge_dict["date"] = aw.awarded_at.strftime("%Y-%m-%d")
-                badges_data.append(badge_dict)
+                    "earnedAt": aw.awarded_at.strftime("%Y-%m-%d") if aw else None,
+                    "reason": aw.reason if aw else "",
+                })
 
-            # Recent achievements (from PointTransaction)
+            # -----------------------
+            # Achievements (AchievementAcquired + AchievementDefinition)
+            # -----------------------
+            achievement_defs = AchievementDefinition.objects.filter(
+                Q(organization__isnull=True) | Q(organization=org),
+                is_active=True,
+            )
+
+            acquired = (
+                AchievementAcquired.objects
+                .filter(student=student, definition__in=achievement_defs)
+                .select_related("definition")
+                .order_by("-acquired_at")[:5]
+            )
+
+            achievements_data = [{
+                "code": a.definition.code,
+                "title": a.definition.title,
+                "description": a.definition.description,
+                "icon": a.definition.icon,
+                "category": a.definition.category,
+                "points": a.definition.points,
+                "acquiredAt": a.acquired_at.strftime("%Y-%m-%d"),
+                "valueAtUnlock": a.value_at_unlock,
+            } for a in acquired]
+
+            # -----------------------
+            # Recent Points (PointTransaction ledger)
+            # -----------------------
             recent_trans = PointTransaction.objects.filter(student=student).order_by("-created_at")[:5]
-            recent_ach = [
-                {
-                    "title": trans.reason or "Points Earned",
-                    "points": trans.points,
-                    "date": trans.created_at.strftime("%Y-%m-%d"),
-                    "type": "Achievement"
-                } for trans in recent_trans
-            ]
+            recent_points = [{
+                "reason": trans.reason or "Points Earned",
+                "points": trans.points,
+                "date": trans.created_at.strftime("%Y-%m-%d"),
+                "balanceAfter": trans.balance_after,
+            } for trans in recent_trans]
 
             avatar = _avatar_url_for(student.user, request) or "/placeholder.svg?height=40&width=40"
 
@@ -487,8 +524,10 @@ def parent_rewards(request):
                 "totalPoints": total_points,
                 "currentStreak": current_streak,
                 "badges": badges_data,
-                "recentAchievements": recent_ach,
+                "achievements": achievements_data,
+                "recentPoints": recent_points,
             })
+
 
         # ---------- Leaderboard (top by points globally) ----------
         points_agg = PointTransaction.objects.values("student_id").annotate(total=Sum("points")).order_by("-total")

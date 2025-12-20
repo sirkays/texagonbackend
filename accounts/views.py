@@ -2,9 +2,9 @@ from datetime import date, datetime, timedelta
 from django.conf import settings
 from django.db import models
 from django.db.models import (
-    Avg, Sum, Count, Min, Max, F, Q, Case, When, FloatField, DecimalField
+    Avg, Sum, Count, Min, Max, F, Q, Case, When, FloatField, DecimalField,Value
 )
-
+from django.db.models.functions import Coalesce
 
 from django.http import (
     JsonResponse
@@ -1406,7 +1406,6 @@ def parent_overview(request):
             .distinct()
             .order_by("start_at")
         )
-
         # --- Build children payload ---
         children_data = []
         total_badges = 0
@@ -1445,7 +1444,8 @@ def parent_overview(request):
 
             upcoming_test_info = "No upcoming tests"
             if next_test:
-                upcoming_test_info = f"{next_test.title} - {next_test.start_at.strftime('%A %I:%M %p')}"
+                local_start = timezone.localtime(next_test.start_at)  # converts to current TZ (e.g. Africa/Lagos)
+                upcoming_test_info = f"{next_test.title} - {local_start.strftime('%A %I:%M %p')}"
 
             # Last activity accurate from ActivityEvent
             la = last_activity_map.get(student.id)
@@ -1614,10 +1614,11 @@ def parent_overview(request):
             for student in students:
                 if Enrollment.objects.filter(student=student, course=test.course).exists():
                     importance = "high" if test.start_at <= timezone.now() + timedelta(days=2) else "medium"
+                    local_start = timezone.localtime(test.start_at)  # converts to current TZ (e.g. Africa/Lagos)
                     upcoming_events.append({
                         "child": student.user.get_full_name() or student.user.email.split("@")[0],
                         "event": test.title,
-                        "date": test.start_at.strftime("%A, %I:%M %p"),
+                        "date": local_start.strftime("%A, %I:%M %p"),
                         "type": "Test",
                         "importance": importance,
                     })
@@ -1647,8 +1648,6 @@ def get_time_ago(datetime_obj):
         return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
     else:
         return "Just now"
-
-
 
 
 @api_view(["GET"])
@@ -1896,49 +1895,6 @@ def score_to_grade(score):
     else:
         return "F"
 
-
-
-
-@api_view(["GET"])
-@permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
-def children_list_view(request):
-    """
-    Returns a list of all children for the authenticated parent.
-    Used to populate the Select Child dropdown filter.
-    """
-    try:
-        # Get parent profile for authenticated user
-        parent_profile = ParentProfile.objects.get(user=request.user)
-    except ParentProfile.DoesNotExist:
-        return Response(
-            {"detail": "Parent profile not found."}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
-
-    # Get all children linked to this parent
-    children_links = ParentChildLink.objects.filter(parent=parent_profile).select_related(
-        'student__user', 'student__current_classroom', 'student__organization'
-    )
-
-    children_data = []
-    for link in children_links:
-        student = link.student
-        child_data = {
-            "id": student.id,
-            "name": student.user.get_full_name() or student.user.first_name,
-            "grade": student.current_classroom.name if student.current_classroom else "N/A",
-            "school": student.organization.name,
-            "avatar": student.user.avatar.url if student.user.avatar else None,
-        }
-        children_data.append(child_data)
-
-    return Response({
-        "children": children_data,
-        "totalChildren": len(children_data)
-    })
-
-
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -1985,25 +1941,14 @@ def time_periods_view(request):
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
-def get_parent_children(request):
+def children_list_view(request):
     """
-    Get all children linked to the authenticated parent user.
-    Returns detailed information about each child including courses, status, and subscription.
+    Returns a list of all children for the authenticated parent.
+    Used to populate the Select Child dropdown filter.
     """
-    user = getattr(request, "user", None)
-    if not user or not user.is_authenticated:
-        return Response(
-            {"detail": "Invalid or missing session token."}, 
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-
-    # Get parent profile
     try:
-        parent_profile = ParentProfile.objects.select_related(
-            'organization', 
-            'organization_subscription',
-            'organization_subscription__plan'
-        ).get(user=user)
+        # Get parent profile for authenticated user
+        parent_profile = ParentProfile.objects.get(user=request.user)
     except ParentProfile.DoesNotExist:
         return Response(
             {"detail": "Parent profile not found."}, 
@@ -2011,88 +1956,296 @@ def get_parent_children(request):
         )
 
     # Get all children linked to this parent
-    child_links = ParentChildLink.objects.select_related(
-        'student',
-        'student__user',
-        'student__current_classroom',
-        'student__organization'
-    ).filter(parent=parent_profile)
+    children_links = ParentChildLink.objects.filter(parent=parent_profile).select_related(
+        'student__user', 'student__current_classroom', 'student__organization'
+    )
 
     children_data = []
-    for link in child_links:
+    for link in children_links:
         student = link.student
-        student_user = student.user
-        
-        # Calculate age from date of birth
-        age = None
-        if student.dob:
-            today = date.today()
-            age = today.year - student.dob.year - (
-                (today.month, today.day) < (student.dob.month, student.dob.day)
-            )
-
-        # Get enrollment statistics
-        enrollments = Enrollment.objects.filter(student=student)
-        total_courses = enrollments.count()
-        completed_courses = enrollments.filter(
-            status=Enrollment.Status.COMPLETED
-        ).count()
-
-        # Get last active from session tokens
-        last_session = SessionToken.objects.filter(
-            user=student_user,
-            is_active=True
-        ).order_by('-created_at').first()
-        
-        last_active = None
-        if last_session:
-            time_diff = timezone.now() - last_session.created_at
-            if time_diff < timedelta(hours=1):
-                last_active = f"{int(time_diff.total_seconds() / 60)} minutes ago"
-            elif time_diff < timedelta(days=1):
-                last_active = f"{int(time_diff.total_seconds() / 3600)} hours ago"
-            else:
-                last_active = f"{time_diff.days} days ago"
-
-        # Determine status based on organization membership
-        is_active = student.organization.is_active
-        
-        # Get subscription info from parent's subscription
-        subscription_status = "Basic"
-        if parent_profile.organization_subscription:
-            if parent_profile.organization_subscription.status == "active":
-                subscription_status = "Premium"
-
         child_data = {
             "id": student.id,
-            "name": student_user.get_full_name() or student_user.email,
-            "age": age,
-            "grade": student.current_classroom.name if student.current_classroom else "Not Assigned",
+            "name": student.user.get_full_name() or student.user.first_name,
+            "grade": student.current_classroom.name if student.current_classroom else "N/A",
             "school": student.organization.name,
-            "avatar": student_user.avatar.url if student_user.avatar else None,
-            "email": student_user.email,
-            "status": "Active" if is_active else "Suspended",
-            "subscription": subscription_status,
-            "lastActive": last_active or "Never",
-            "joinDate": student.created_at.strftime("%Y-%m-%d"),
-            "totalCourses": total_courses,
-            "completedCourses": completed_courses,
-            "relationship": link.relationship,
-            "admissionNo": student.admission_no,
+            "avatar": student.user.avatar.url if student.user.avatar else None,
         }
         children_data.append(child_data)
 
-    return Response(
-        {
-            "detail": "Children retrieved successfully",
-            "children": children_data,
-            "parentSubscription": {
-                "status": parent_profile.organization_subscription.status if parent_profile.organization_subscription else "none",
-                "plan": parent_profile.organization_subscription.plan.name if parent_profile.organization_subscription else None,
+    return Response({
+        "children": children_data,
+        "totalChildren": len(children_data)
+    })
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def get_children_progress(request):
+    try:
+        TIME_PERIODS = {
+            "week": {"days": 7, "stats_key": "weeklyStats"},
+            "month": {"days": 30, "stats_key": "monthlyStats"},
+            "quarter": {"days": 90, "stats_key": "quarterlyStats"},
+            "semester": {"days": 180, "stats_key": "semesterStats"},
+            "year": {"days": 365, "stats_key": "yearlyStats"},
+        }
+
+
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return Response(
+                {"detail": "Invalid or missing session token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        try:
+            parent_profile = ParentProfile.objects.select_related("organization").get(user=user)
+        except ParentProfile.DoesNotExist:
+            return Response({"detail": "Parent profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # ----------------------------
+        # Params
+        # ----------------------------
+        child_id_str = (request.GET.get("child_id") or "all").strip()
+        time_period = (request.GET.get("time_period") or "week").strip().lower()
+
+        # Validate time_period
+        if time_period not in TIME_PERIODS:
+            return Response(
+                {
+                    "detail": f"Invalid time_period '{time_period}'. Allowed: {list(TIME_PERIODS.keys())}"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate child_id
+        child_id = None
+        if child_id_str != "all":
+            try:
+                child_id = int(child_id_str)
+            except ValueError:
+                return Response({"detail": "Invalid child_id format."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ----------------------------
+        # Filter children
+        # ----------------------------
+        child_links_qs = ParentChildLink.objects.select_related(
+            "student",
+            "student__user",
+            "student__current_classroom",
+            "student__organization",
+        ).filter(parent=parent_profile)
+
+        if child_id is not None:
+            child_links_qs = child_links_qs.filter(student__id=child_id)
+
+        # ----------------------------
+        # Time window
+        # ----------------------------
+        days = TIME_PERIODS[time_period]["days"]
+        stats_key = TIME_PERIODS[time_period]["stats_key"]
+
+        end = timezone.now()
+        start = end - timedelta(days=days)
+
+        children_data = []
+
+        for link in child_links_qs:
+            student = link.student
+            student_user = student.user
+
+            # Age
+            age = None
+            if student.dob:
+                today = date.today()
+                age = today.year - student.dob.year - (
+                    (today.month, today.day) < (student.dob.month, student.dob.day)
+                )
+
+            # -------------------------------------
+            # Attempts within selected period
+            # -------------------------------------
+
+
+            attempts = (
+                TestAttempt.objects.filter(
+                    student=student,
+                    submitted_at__range=(start, end),
+                    status__in=["submitted", "graded"],
+                )
+                .select_related("test", "test__course")
+                .annotate(
+                    computed_total_marks=Coalesce(
+                        Sum("test__questions__points"),
+                        Value(Decimal("0.00")),
+                        output_field=DecimalField(max_digits=10, decimal_places=2),
+                    )
+                )
+            )
+
+
+            tests_completed = attempts.count()
+
+            percentages = []
+            for att in attempts:
+                total = att.computed_total_marks or 0
+                if total > 0:
+                    percentages.append((att.score / total) * Decimal("100"))
+                else:
+                    percentages.append(Decimal("0"))
+
+
+            average_score = sum(percentages) / len(percentages) if percentages else Decimal("0")
+
+            courses_completed = Enrollment.objects.filter(
+                student=student,
+                status=Enrollment.Status.COMPLETED,
+            ).count()
+
+            try:
+                streak = Streak.objects.get(student=student).current_days
+            except Streak.DoesNotExist:
+                streak = 0
+
+            stats = {
+                "testsCompleted": tests_completed,
+                "averageScore": int(round(average_score)),
+                "streak": streak,
+                "coursesCompleted": courses_completed,
             }
-        },
-        status=status.HTTP_200_OK
-    )
+
+            # -------------------------------------
+            # Per-test performance (latest attempt per test)
+            # -------------------------------------
+            tests_data = []
+
+            latest_attempts = attempts.values("test_id").annotate(
+                latest_submitted=Max("submitted_at")
+            ).order_by()
+
+            for la in latest_attempts:
+                attempt = attempts.filter(
+                    test_id=la["test_id"],
+                    submitted_at=la["latest_submitted"],
+                ).first()
+
+                if not attempt:
+                    continue
+
+                test = attempt.test
+                total = getattr(attempt, "computed_total_marks", None)
+
+                # If you’re inside the loop and `attempt` was fetched from `attempts` queryset,
+                # computed_total_marks will exist. But if attempt came from another queryset,
+                # it won’t. So fallback safely:
+                if total is None:
+                    total = test.questions.aggregate(t=Coalesce(Sum("points"), 0))["t"]
+
+                percentage = (attempt.score / total) * Decimal("100") if total and total > 0 else Decimal("0")
+
+                if percentage >= Decimal("70"):
+                    grade = "A"
+                elif percentage >= Decimal("60"):
+                    grade = "B"
+                elif percentage >= Decimal("50"):
+                    grade = "C"
+                elif percentage >= Decimal("45"):
+                    grade = "D"
+                else:
+                    grade = "F"
+
+                prev_attempt = (
+                    TestAttempt.objects.filter(
+                        student=student,
+                        test=test,
+                        submitted_at__lt=attempt.submitted_at,
+                        status__in=["submitted", "graded"],
+                    )
+                    .order_by("-submitted_at")
+                    .first()
+                )
+
+                trend = "stable"
+                if prev_attempt:
+                    prev_total = prev_attempt.test.questions.aggregate(
+                        t=Coalesce(
+                            Sum("points"),
+                            Value(Decimal("0.00")),
+                            output_field=DecimalField(max_digits=10, decimal_places=2),
+                        )
+                    )["t"]
+
+                    prev_percentage = (
+                        (prev_attempt.score / prev_total) * Decimal("100")
+                        if prev_total > 0
+                        else Decimal("0")
+                    )
+
+                    if percentage > prev_percentage + Decimal("5"):
+                        trend = "up"
+                    elif percentage < prev_percentage - Decimal("5"):
+                        trend = "down"
+
+                test_title = test.title
+                if getattr(test, "course", None) and getattr(test.course, "name", None):
+                    test_title = f"{test.course.name} - {test.title}"
+
+                tests_data.append(
+                    {
+                        "name": test_title,
+                        "grade": grade,
+                        "lastScore": int(round(percentage)),
+                        "trend": trend,
+                    }
+                )
+
+            # -------------------------------------
+            # Subscription/status
+            # -------------------------------------
+            is_active = student.organization.is_active
+            subscription_status = "Basic"
+            if (
+                getattr(parent_profile, "organization_subscription", None)
+                and parent_profile.organization_subscription.status == "active"
+            ):
+                subscription_status = "Premium"
+
+            child_data = {
+                "id": student.id,
+                "name": student_user.get_full_name() or student_user.email,
+                "age": age,
+                "grade": student.current_classroom.name if student.current_classroom else "Not Assigned",
+                "school": student.organization.name,
+                "avatar": student_user.avatar.url if getattr(student_user, "avatar", None) else None,
+                "email": student_user.email,
+                "status": "Active" if is_active else "Suspended",
+                "subscription": subscription_status,
+                "lastActive": "Never",
+                "joinDate": student.created_at.strftime("%Y-%m-%d"),
+                "totalCourses": Enrollment.objects.filter(student=student).count(),
+                "completedCourses": Enrollment.objects.filter(
+                    student=student, status=Enrollment.Status.COMPLETED
+                ).count(),
+                "relationship": link.relationship,
+                "admissionNo": student.admission_no,
+                "subjects": tests_data,
+
+                # ✅ Put stats into the correct key for the chosen period:
+                stats_key: stats,
+
+                # Optional: also return a consistent key to simplify frontend later:
+                "stats": stats,
+            }
+
+            children_data.append(child_data)
+            print(children_data)
+        return Response({"children": children_data}, status=status.HTTP_200_OK)
+    except Exception as e:
+        print(e)
+    return Response({"children": []}, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 @api_view(["POST"])
@@ -2143,7 +2296,7 @@ def reset_child_password(request):
             'student__user'
         ).get(
             parent=parent_profile,
-            student__user__id=child_id
+            student__id=child_id
         )
     except ParentChildLink.DoesNotExist:
         return Response(
