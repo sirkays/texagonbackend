@@ -1245,6 +1245,32 @@ def tutoring_stats(request):
 
 
 
+
+def _update_private_enrollment_for_booking(booking, enrollment_status: str):
+    """
+    Update enrollment for the private tutoring course tied to this booking.
+    If enrollment doesn't exist, we can either create it or ignore.
+    Here: we update if exists; optionally create if missing.
+    """
+    if not booking.private_tutoring:
+        return  # no private tutoring → nothing to update
+
+    course = booking.private_tutoring.course
+    student = booking.student
+
+    # If you want strict behavior (must exist), use get_object_or_404.
+    # If you want tolerant behavior, update if exists.
+    enrollment = Enrollment.objects.filter(student=student, course=course).first()
+    if not enrollment:
+        # Optional: auto-create if you expect enrollment always
+        enrollment = Enrollment.objects.create(student=student, course=course)
+
+    # enrollment_status should be one of Enrollment.Status values ("completed" / "dropped")
+    enrollment.status = enrollment_status
+    enrollment.save(update_fields=["status", "updated_at"] if hasattr(enrollment, "updated_at") else ["status"])
+
+
+
 @api_view(["GET", "POST", "PATCH", "DELETE"])
 @authentication_classes([SessionTokenAuthentication])
 @permission_classes([HasAPIKey])
@@ -1331,39 +1357,64 @@ def teacher_tutoring_bookings(request):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         elif request.method == "PATCH":
-            # Update status for TutoringBooking or PrivateTutoring
             tab = request.query_params.get("tab", "upcoming")
             if tab not in ["upcoming", "private"]:
-                return Response({"detail": "PATCH only supported for 'upcoming' or 'private' tabs."},
-                               status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"detail": "PATCH only supported for 'upcoming' or 'private' tabs."},
+                    status=drf_status.HTTP_400_BAD_REQUEST,
+                )
 
             item_id = request.data.get("id")
             if not item_id:
-                return Response({"detail": "id required."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"detail": "id required."}, status=drf_status.HTTP_400_BAD_REQUEST)
 
             status_new = request.data.get("status")
             if not status_new:
-                return Response({"detail": "status required."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"detail": "status required."}, status=drf_status.HTTP_400_BAD_REQUEST)
 
             if tab == "private":
-                # Update PrivateTutoring status
+                # (Your existing logic here...)
                 item = get_object_or_404(PrivateTutoring, id=item_id, teacher=teacher)
                 if status_new not in ["Active", "Inactive"]:
-                    return Response({"detail": "Invalid status. Use 'Active' or 'Inactive'."},
-                                   status=status.HTTP_400_BAD_REQUEST)
+                    return Response(
+                        {"detail": "Invalid status. Use 'Active' or 'Inactive'."},
+                        status=drf_status.HTTP_400_BAD_REQUEST,
+                    )
                 item.status = status_new
                 item.save()
                 return Response(PrivateTutoringSerializer(item).data)
-            else:
-                # Update TutoringBooking status
-                item = get_object_or_404(TutoringBooking, id=item_id, teacher=teacher)
-                if status_new not in dict(TutoringBooking.Status.choices):
-                    return Response({"detail": "Invalid status."}, status=status.HTTP_400_BAD_REQUEST)
-                item.status = status_new
+
+            # tab == "upcoming": update TutoringBooking + Enrollment
+            booking = get_object_or_404(TutoringBooking, id=item_id, teacher=teacher)
+
+            # Only allow status transitions you want
+            allowed = set(dict(TutoringBooking.Status.choices).keys())  # pending/confirmed/completed/cancelled
+            if status_new not in allowed:
+                return Response({"detail": "Invalid status."}, status=drf_status.HTTP_400_BAD_REQUEST)
+
+            # Optional: prevent changing already completed bookings
+            if booking.status == "completed":
+                return Response(
+                    {"detail": "Completed booking cannot be modified."},
+                    status=drf_status.HTTP_400_BAD_REQUEST,
+                )
+
+            with transaction.atomic():
+                booking.status = status_new
+
+                # If moving to completed/cancelled, set completed_date so it appears under "past"
+                if status_new in ["completed", "cancelled"]:
+                    booking.completed_date = timezone.now()
+
+                booking.save(update_fields=["status", "completed_date", "updated_at"] if hasattr(booking, "updated_at") else ["status", "completed_date"])
+
+                # Enrollment side-effect rules
                 if status_new == "completed":
-                    item.completed_date = timezone.now()
-                item.save()
-                return Response(TutoringBookingTeacherSerializer(item).data)
+                    _update_private_enrollment_for_booking(booking, Enrollment.Status.COMPLETED)
+                elif status_new == "cancelled":
+                    _update_private_enrollment_for_booking(booking, Enrollment.Status.DROPPED)
+
+            return Response(TutoringBookingTeacherSerializer(booking).data)
 
         elif request.method == "DELETE":
             # Delete PrivateTutoring or TutoringBooking

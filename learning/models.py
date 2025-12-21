@@ -22,7 +22,7 @@ class Course(NamedModel):
 
 
     def __str__(self):
-        return f"{self.subject.name} Teacher: {self.teacher.user.email}"
+        return f"{self.subject.name} Teacher: {self.teacher.user.email}, Name: {self.name}"
 
     class Meta:
         unique_together = ("organization", "subject", "classroom", "teacher")
@@ -37,6 +37,7 @@ class Enrollment(TimeStampedModel):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="enrollments")
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
     progress_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    
 
     class Meta:
         unique_together = ("student", "course")
