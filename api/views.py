@@ -1283,10 +1283,18 @@ def teacher_tutoring_bookings(request):
 
             if tab == "private":
                 # Handle PrivateTutoring for "Private Sessions" tab
-                qs = PrivateTutoring.objects.filter(teacher=teacher).select_related("course")
+                qs = (
+                    PrivateTutoring.objects
+                    .filter(teacher=teacher)
+                    .select_related("course")
+                    .order_by("-created_at")  # descending
+                )
+
                 total = qs.count()
                 qs = qs[start:start + limit]
+
                 serializer = PrivateTutoringSerializer(qs, many=True)
+
             else:
                 # Handle TutoringBooking for "Current Private Session" (upcoming) or "Past Sessions" (past)
                 qs = TutoringBooking.objects.filter(teacher=teacher).select_related(
