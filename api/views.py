@@ -1201,54 +1201,62 @@ def tutoring_stats(request):
     Small dashboard numbers needed at the page bottom:
       - total_tutoring = upcoming + past
       - upcoming_count
-      - confirmed_tutors (distinct tutors with CONFIRMED bookings for this parent)
+      - confirmed_tutors (distinct TeacherProfile with CONFIRMED bookings for this parent)
       - cancelled_bookings (count of CANCELLED bookings for this parent)
-      - active_tutors (available tutors count from PrivateTutoring)
+      - active_tutors (distinct TeacherProfile offering active PrivateTutoring)
     Optional filter: student_id
     """
-    parent = _get_parent_for_user(request.user)
-    if not parent:
-        return Response({"detail": "Parent profile not found."}, status=403)
+    try:
+        parent = _get_parent_for_user(request.user)
+        if not parent:
+            return Response({"detail": "Parent profile not found."}, status=status.HTTP_403_FORBIDDEN)
 
-    qs = TutoringBooking.objects.filter(student__parent_links__parent=parent)
+        qs = TutoringBooking.objects.filter(student__parent_links__parent=parent)
 
-    student_id = request.query_params.get("student_id")
-    if student_id:
-        qs = qs.filter(student_id=student_id)
+        student_id = request.query_params.get("student_id")
+        if student_id:
+            qs = qs.filter(student_id=student_id)
 
-    upcoming = (
-        qs.exclude(status=TutoringBooking.Status.COMPLETED)
-          .exclude(status=TutoringBooking.Status.CANCELLED)
-          .count()
-    )
-    past = qs.filter(status__in=[TutoringBooking.Status.COMPLETED, TutoringBooking.Status.CANCELLED]).count()
-    total = upcoming + past
+        # upcoming = pending + confirmed (exclude completed/cancelled)
+        upcoming = qs.exclude(
+            status__in=[TutoringBooking.Status.COMPLETED, TutoringBooking.Status.CANCELLED]
+        ).count()
 
-    # ✅ New: tutors with CONFIRMED bookings (distinct)
-    confirmed_tutors = (
-        qs.filter(status=TutoringBooking.Status.CONFIRMED)
-          .values_list("tutor_id", flat=True)   # or "teacher_id" depending on your model
-          .distinct()
-          .count()
-    )
+        past = qs.filter(
+            status__in=[TutoringBooking.Status.COMPLETED, TutoringBooking.Status.CANCELLED]
+        ).count()
 
-    # ✅ New: cancelled tutoring bookings (count)
-    cancelled_bookings = qs.filter(status=TutoringBooking.Status.CANCELLED).count()
+        total = upcoming + past
 
-    # Existing: available tutors on the platform
-    active_tutors = (
-        PrivateTutoring.objects.values("teacher_id")
-        .distinct()
-        .count()
-    )
+        # tutors who have CONFIRMED bookings with this parent (distinct teachers)
+        confirmed_tutors = qs.filter(
+            status=TutoringBooking.Status.CONFIRMED
+        ).values_list("teacher_id", flat=True).distinct().count()
 
-    return Response({
-        "total_tutoring": total,
-        "upcoming_count": upcoming,
-        "confirmed_tutors": confirmed_tutors,
-        "cancelled_bookings": cancelled_bookings,
-        "active_tutors": active_tutors,
-    }, status=200)
+        # cancelled bookings count
+        cancelled_bookings = qs.filter(
+            status=TutoringBooking.Status.CANCELLED
+        ).count()
+
+        # available tutors count (distinct teachers with active PrivateTutoring)
+        active_tutors = PrivateTutoring.objects.filter(
+            active=True
+        ).values_list("teacher_id", flat=True).distinct().count()
+
+        return Response({
+            "total_tutoring": total,
+            "upcoming_count": upcoming,
+            "confirmed_tutors": confirmed_tutors,
+            "cancelled_bookings": cancelled_bookings,
+            "active_tutors": active_tutors,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(e)
+        return Response(
+            {"detail": "Server error while computing tutoring stats."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 def _update_private_enrollment_for_booking(booking, enrollment_status: str):
