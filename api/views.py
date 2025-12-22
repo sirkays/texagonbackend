@@ -1326,12 +1326,15 @@ def teacher_tutoring_bookings(request):
                 qs = TutoringBooking.objects.filter(teacher=teacher).select_related(
                     "student__user", "private_tutoring__course"
                 )
+                print(qs, " twoooooo ",tab)
                 now = timezone.now()
                 if tab == "upcoming":
+                    print(tab, " qs ..... ",qs[0].status)
                     qs = qs.filter(
                         Q(status__in=["pending", "confirmed"]) &
                         Q(completed_date__isnull=True)
                     ).order_by("created_at")
+                    print(tab, " after... ..... ",qs)
                 else:  # past
                     qs = qs.filter(
                         Q(status__in=["completed", "cancelled"])

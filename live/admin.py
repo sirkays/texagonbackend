@@ -61,6 +61,7 @@ class TutoringBookingAdmin(admin.ModelAdmin):
                 "price",
                 "status",
                 "notes",
+                "completed_date",
             )
         }),
         ("Timestamps", {
