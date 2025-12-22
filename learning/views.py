@@ -704,26 +704,10 @@ def resource_materials(request):
         if not student:
             categories = ["All"]
             sample = {
-                "pdfs": [{
-                    "id": "D1", "title": "Sample PDF", "author": "Techxagon",
-                    "pages": 12, "size": "1.2 MB", "rating": 4.7,
-                    "downloads": 120, "category": "All", "pdfUrl": "/sample.pdf",
-                }],
-                "videos": [{
-                    "id": "V1", "title": "Sample Video", "instructor": "Techxagon",
-                    "duration": "45m", "views": 3200, "rating": 4.6,
-                    "category": "All", "videoUrl": "/sample-video.mp4",
-                }],
-                "audio": [{
-                    "id": "A1", "title": "Sample Audio", "speaker": "Techxagon",
-                    "duration": "30m", "listens": 800, "rating": 4.5,
-                    "category": "All", "audioUrl": "/sample-audio.mp3",
-                }],
-                "journals": [{
-                    "id": "J1", "title": "Sample Journal (Doc)", "journal": "TX Review",
-                    "date": timezone.now().strftime("%b %Y"), "pages": 10, "citations": 12,
-                    "category": "All", "content": "A short abstract lorem ipsum…",
-                }],
+                "pdfs": [],
+                "videos": [],
+                "audio": [],
+                "journals": [],
             }
             return Response({
                 "categories": categories,
@@ -735,7 +719,8 @@ def resource_materials(request):
 
         # --- User's active courses (categories) ---
         active_enrolls = (Enrollment.objects
-                          .filter(student=student, course__is_active=True)
+                          .filter(Q(status=Enrollment.Status.ACTIVE)|Q(status=Enrollment.Status.COMPLETED),
+                            student=student, course__is_active=True )
                           .select_related("course", "course__subject"))
         course_ids = list(active_enrolls.values_list("course_id", flat=True))
         if not course_ids:
@@ -814,11 +799,7 @@ def resource_materials(request):
                 "pdfUrl": _safe_file_or_url(ls),
             })
         if not pdfs:
-            pdfs = [{
-                "id": "P1", "title": f"{selected_course.name} – Notes",
-                "author": "Techxagon", "pages": 24, "size": "3.2 MB",
-                "rating": 4.7, "downloads": 340, "category": selected_course.name, "pdfUrl": "/sample.pdf",
-            }]
+            pdfs = []
 
         # Videos
         videos: List[Dict[str, Any]] = []
@@ -840,11 +821,7 @@ def resource_materials(request):
                 "thumbnail":thumb_nail,
             })
         if not videos:
-            videos = [{
-                "id": "V1", "title": f"{selected_course.name} – Overview",
-                "instructor": "Techxagon", "duration": "45m",
-                "views": 1200, "rating": 4.6, "category": selected_course.name, "videoUrl": "/sample-video.mp4",
-            }]
+            videos = []
 
         # Audio
         audio: List[Dict[str, Any]] = []
@@ -861,11 +838,7 @@ def resource_materials(request):
                 "audioUrl": _safe_file_or_url(ls),
             })
         if not audio:
-            audio = [{
-                "id": "A1", "title": f"{selected_course.name} – Audio Intro",
-                "speaker": "Techxagon", "duration": "30m",
-                "listens": 820, "rating": 4.4, "category": selected_course.name, "audioUrl": "/sample-audio.mp3",
-            }]
+            audio = []
 
         # Journals (Docs)
         journals: List[Dict[str, Any]] = []
@@ -882,16 +855,7 @@ def resource_materials(request):
                 "content": meta.get("abstract") or meta.get("summary") or "—",
             })
         if not journals:
-            journals = [{
-                "id": "J1",
-                "title": f"{selected_course.name} – Syllabus",
-                "journal": "Course Docs",
-                "date": timezone.now().strftime("%b %Y"),
-                "pages": 10,
-                "citations": 0,
-                "category": selected_course.name,
-                "content": "Structured outline and references for the course.",
-            }]
+            journals = []
 
         return Response({
             # categories for your chip list (strings)
