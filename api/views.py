@@ -29,7 +29,7 @@ from .serializers import (
     BadgeSerializer, BadgeAwardSerializer, PointTransactionSerializer, StreakSerializer,
     LiveSessionSerializer, TutoringBookingSerializer,TutoringBookingTeacherSerializer,
     SubscriptionPlanSerializer, OrganizationSubscriptionSerializer, SubscriptionInvoiceSerializer, SubscriptionPaymentSerializer,
-    NotificationSerializer,PrivateTutoringSerializer, LanguageSerializer
+    NotificationSerializer,PrivateTutoringSerializer, LanguageSerializer,CancelTutoringBookingSerializer
 )
 
 
@@ -1192,6 +1192,7 @@ def tutoring_tutor_availability(request, private_tutoring_id: int):
     return Response({"days": [day_map.get(d, d) for d in days]}, status=200)
 
 
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -1200,9 +1201,9 @@ def tutoring_stats(request):
     Small dashboard numbers needed at the page bottom:
       - total_tutoring = upcoming + past
       - upcoming_count
-      - hours_completed (sum of completed bookings' duration_hours)
-      - average_rating (placeholder unless you store ratings)
-      - active_tutors (count of distinct PrivateTutoring rows or teachers)
+      - confirmed_tutors (distinct tutors with CONFIRMED bookings for this parent)
+      - cancelled_bookings (count of CANCELLED bookings for this parent)
+      - active_tutors (available tutors count from PrivateTutoring)
     Optional filter: student_id
     """
     parent = _get_parent_for_user(request.user)
@@ -1210,25 +1211,31 @@ def tutoring_stats(request):
         return Response({"detail": "Parent profile not found."}, status=403)
 
     qs = TutoringBooking.objects.filter(student__parent_links__parent=parent)
+
     student_id = request.query_params.get("student_id")
     if student_id:
         qs = qs.filter(student_id=student_id)
 
-    upcoming = qs.exclude(status=TutoringBooking.Status.COMPLETED).exclude(status=TutoringBooking.Status.CANCELLED).count()
+    upcoming = (
+        qs.exclude(status=TutoringBooking.Status.COMPLETED)
+          .exclude(status=TutoringBooking.Status.CANCELLED)
+          .count()
+    )
     past = qs.filter(status__in=[TutoringBooking.Status.COMPLETED, TutoringBooking.Status.CANCELLED]).count()
     total = upcoming + past
 
-    # hours completed (sum duration_hours for COMPLETED)
-    completed_minutes = sum([
-        (b.duration_hours or 0) * 60
-        for b in qs.filter(status=TutoringBooking.Status.COMPLETED)
-    ])
-    hours_completed = round(completed_minutes / 60.0, 1)
+    # ✅ New: tutors with CONFIRMED bookings (distinct)
+    confirmed_tutors = (
+        qs.filter(status=TutoringBooking.Status.CONFIRMED)
+          .values_list("tutor_id", flat=True)   # or "teacher_id" depending on your model
+          .distinct()
+          .count()
+    )
 
-    # average rating — placeholder (replace with real ratings if you store them)
-    # To keep consistent with your UI, compute from completed sessions if you later add a rating field.
-    average_rating = 4.7 if past else 0.0
+    # ✅ New: cancelled tutoring bookings (count)
+    cancelled_bookings = qs.filter(status=TutoringBooking.Status.CANCELLED).count()
 
+    # Existing: available tutors on the platform
     active_tutors = (
         PrivateTutoring.objects.values("teacher_id")
         .distinct()
@@ -1238,12 +1245,10 @@ def tutoring_stats(request):
     return Response({
         "total_tutoring": total,
         "upcoming_count": upcoming,
-        "hours_completed": hours_completed,
-        "average_rating": average_rating,
+        "confirmed_tutors": confirmed_tutors,
+        "cancelled_bookings": cancelled_bookings,
         "active_tutors": active_tutors,
     }, status=200)
-
-
 
 
 def _update_private_enrollment_for_booking(booking, enrollment_status: str):
@@ -1456,7 +1461,60 @@ def teacher_tutoring_bookings(request):
 
 
 
+class CancelTutoringBookingView(APIKeySessionViewSet):
+    """
+    Parent cancels an upcoming tutoring booking.
+    """
+
+    def cancel(self, request):
+        try:
+            serializer = CancelTutoringBookingSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            booking_id = serializer.validated_data["booking_id"]
+            user = request.user
+
+            booking = get_object_or_404(
+                TutoringBooking.objects.select_related("student"),
+                id=booking_id,
+            )
+
+            parent = _get_parent_for_user(user)
+            if not parent:
+                return Response({"detail": "Parent profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            # 🔐 Ownership check
+            parent = booking.student.parent_links.filter(parent__user=user)
+            if parent.exists() is False:
+                return Response(
+                    {"detail": "You are not allowed to cancel this booking"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # 🚫 Business rules
+            if booking.status in ["completed", "cancelled"]:
+                return Response(
+                    {
+                        "detail": f"Booking already {booking.status.lower()}",
+                        "status": booking.status,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # ✅ Cancel booking
+            booking.status = "cancelled"
+            booking.completed_date = timezone.now()
+            booking.save(update_fields=["status", "completed_date"])
 
 
-
-
+            _update_private_enrollment_for_booking(booking, Enrollment.Status.DROPPED)
+        except Exception as e:
+            print(e)
+            return Response({},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {
+                "detail": "Tutoring booking cancelled successfully",
+                "status": booking.status,
+            },
+            status=status.HTTP_200_OK,
+        )

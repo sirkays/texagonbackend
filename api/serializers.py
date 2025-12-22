@@ -333,3 +333,5 @@ class TutoringBookingTeacherSerializer(serializers.ModelSerializer):
             'course_name', 'created_at'
         ]
 
+class CancelTutoringBookingSerializer(serializers.Serializer):
+    booking_id = serializers.IntegerField()

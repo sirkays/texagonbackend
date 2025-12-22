@@ -20,7 +20,8 @@ from .views import (
     tutoring_stats,
     password_reset_request_view,
     password_reset_confirm_view,
-    teacher_tutoring_bookings
+    teacher_tutoring_bookings,
+    CancelTutoringBookingView
 )
 
 router = DefaultRouter()
@@ -81,6 +82,13 @@ urlpatterns = [
 
     ############# TEACHER PRIVATE SESSION ##########
     path('teacher/tutoring-bookings/', teacher_tutoring_bookings, name='teacher_tutoring_bookings'),
+
+    ###################### PARENT CANCEL PRIVATE SESSION ############
+    path(
+        "tutor/tutoring/bookings/cancel/",
+        CancelTutoringBookingView.as_view({"patch": "cancel"}),
+        name="cancel-tutoring-booking",
+    ),
 ]
 
 
