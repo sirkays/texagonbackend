@@ -453,7 +453,7 @@ def available_tests(request):
 
         # From here on your original logic is unchanged
         enrollments = (Enrollment.objects
-                       .filter(student=student)
+                       .filter(student=student,  status=Enrollment.Status.ACTIVE)
                        .only("id", "course_id"))
         course_ids = list(enrollments.values_list("course_id", flat=True))
         if not course_ids:

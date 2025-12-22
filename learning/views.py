@@ -310,7 +310,7 @@ def learning_modules(request):
                             status=status.HTTP_200_OK)
 
         enrolled_course_ids = list(
-            Enrollment.objects.filter(student=student).values_list("course_id", flat=True)
+            Enrollment.objects.filter(student=student, status=Enrollment.Status.ACTIVE).values_list("course_id", flat=True)
         )
         if not enrolled_course_ids:
             return Response({"videos": [], "audio": [], "pdfs": [], "docs": [], "links": [], "tutorials": []},
@@ -349,11 +349,11 @@ def learning_modules(request):
         }
         progress_map = {
             e.course_id: int(e.progress_pct or 0)
-            for e in Enrollment.objects.filter(student=student, course_id__in=course_ids)
+            for e in Enrollment.objects.filter(student=student,  status=Enrollment.Status.ACTIVE, course_id__in=course_ids)
         }
         size_map = {
             r["course_id"]: r["cnt"]
-            for r in (Enrollment.objects.filter(course_id__in=course_ids)
+            for r in (Enrollment.objects.filter(course_id__in=course_ids,  status=Enrollment.Status.ACTIVE)
                       .values("course_id").annotate(cnt=Count("id")))
         }
 
@@ -735,7 +735,7 @@ def resource_materials(request):
 
         # --- User's active courses (categories) ---
         active_enrolls = (Enrollment.objects
-                          .filter(student=student, status=Enrollment.Status.ACTIVE, course__is_active=True)
+                          .filter(student=student, course__is_active=True)
                           .select_related("course", "course__subject"))
         course_ids = list(active_enrolls.values_list("course_id", flat=True))
         if not course_ids:

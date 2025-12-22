@@ -1077,7 +1077,7 @@ def dashboard_overview(request):
     if student:
         enrollments = (
             Enrollment.objects
-            .filter(student=student)
+            .filter(student=student,  status=Enrollment.Status.ACTIVE)
             .select_related("course", "course__subject", "course__classroom", "course__teacher")
             .order_by("-id")
         )
