@@ -27,6 +27,7 @@ from .serializers import (
     SubmissionListSerializer,
     TeacherCodeSubmissionDetailSerializer,
     TeacherCodeCommentSerializer,
+    StudentUpdateSubmissionSerializer,
 )
 from .utils import user_is_submission_student, user_teaches_lesson, user_is_teacher
 
@@ -660,7 +661,6 @@ def student_submission_list(request):
 
     # If your project has a helper like user_is_student_profile / user_is_teacher_profile,
     # use that. Otherwise implement a safe lookup.
-    print(request.user)
     student_profile = _get_student_for_user(request.user)
     qs = CodeSubmission.objects.select_related("lesson", "student").prefetch_related("comments", "comments__author")
 
@@ -680,3 +680,46 @@ def student_submission_list(request):
 
     data = CodeSubmissionSerializer(qs, many=True).data
     return Response(data, status=200)
+
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def student_update_submission(request, submission_id: int):
+    """
+    Student can update (resubmit) their own submission.
+    - PATCH /api/code-ide/submissions/<id>
+    Body: { "title": "...", "language": "...", "code_text": "..." }
+
+    Rules:
+    - Must be owner student
+    - Marks status as "revised"
+    - Optionally clears previous grading fields
+    """
+    student_profile = _get_student_for_user(request.user)
+    if not student_profile:
+        return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        sub = CodeSubmission.objects.select_related("student", "lesson").get(
+            pk=submission_id,
+            student=student_profile,
+        )
+    except CodeSubmission.DoesNotExist:
+        return Response({"detail": "Submission not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    ser = StudentUpdateSubmissionSerializer(sub, data=request.data, partial=True)
+    ser.is_valid(raise_exception=True)
+
+    updated = ser.save(
+        status=CodeSubmission.Status.REVISED,
+        # If you want to “invalidate” grading on resubmission:
+        score=None,
+        feedback="",
+        correction_code="",
+        graded_by=None,
+        graded_at=None,
+    )
+
+    return Response(CodeSubmissionSerializer(updated).data, status=status.HTTP_200_OK)

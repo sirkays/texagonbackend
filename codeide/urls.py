@@ -12,6 +12,7 @@ urlpatterns = [
     # submissions
     path("api/ide/submissions/create/", views.submission_create, name="ide_submission_create"),   # POST (student)
     path("api/ide/student/submissions/", views.student_submission_list, name="ide_submission_list"),  
+    path("api/ide/submissions/<int:submission_id>/student-update/", views.student_update_submission),
     path("api/ide/submissions/<int:submission_id>/", views.submission_detail, name="ide_submission_detail"),  # GET (student/teacher)
     path("api/ide/submissions/<int:submission_id>/teacher-update/", views.submission_teacher_update, name="ide_submission_teacher_update"),  # PATCH (teacher)
 

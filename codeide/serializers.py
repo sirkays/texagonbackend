@@ -229,3 +229,18 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
         except Exception:
             pass
         return {"id": None, "name": ""}
+
+
+
+class StudentUpdateSubmissionSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    class Meta:
+        model = CodeSubmission
+        fields = ["title", "language", "code_text"]
+
+    def validate_title(self, value):
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
