@@ -50,22 +50,49 @@ class CodeCommentSerializer(serializers.ModelSerializer):
 
 
 class CodeSubmissionSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     comments = CodeCommentSerializer(many=True, read_only=True)
 
     class Meta:
         model = CodeSubmission
         fields = [
-            "id", "lesson", "student", "language", "code_text",
-            "status", "score", "feedback", "correction_code",
-            "graded_by", "graded_at",
-            "created_at", "updated_at",
+            "id",
+            "title",  # ✅ add
+            "lesson",
+            "student",
+            "language",
+            "code_text",
+            "status",
+            "score",
+            "feedback",
+            "correction_code",
+            "graded_by",
+            "graded_at",
+            "created_at",
+            "updated_at",
             "comments",
         ]
         read_only_fields = [
-            "id", "student", "status", "score", "feedback",
-            "correction_code", "graded_by", "graded_at",
-            "created_at", "updated_at", "comments",
+            "id",
+            "student",
+            "status",
+            "score",
+            "feedback",
+            "correction_code",
+            "graded_by",
+            "graded_at",
+            "created_at",
+            "updated_at",
+            "comments",
         ]
+
+    def validate_title(self, value):
+        # Normalize whitespace/empty titles to None
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
 
 
 class TeacherUpdateSubmissionSerializer(serializers.ModelSerializer):

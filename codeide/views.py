@@ -135,14 +135,11 @@ def snippet_detail(request, snippet_id: int):
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def submission_create(request):
-    """
-    Student: submit code by lesson.
-    Body: {lesson: id, language, code_text}
-    """
     student = _get_student_for_user(request.user)
     if not student:
         return Response({"detail": "Student profile not found."}, status=403)
 
+    title = (request.data.get("title") or "").strip() or None  # ✅ normalize
     lesson_id = request.data.get("lesson")
     language = request.data.get("language")
     code_text = request.data.get("code_text")
@@ -153,14 +150,17 @@ def submission_create(request):
     lesson = get_object_or_404(Lesson, id=lesson_id)
 
     submission = CodeSubmission.objects.create(
+        title=title,  # ✅ saved
         student=student,
         lesson=lesson,
         language=language,
         code_text=code_text,
         status=CodeSubmission.Status.SUBMITTED,
     )
+
     org = getattr(student, "organization", None)
     today = timezone.localdate()
+
     def _log_after_commit():
         try:
             log_event(
@@ -175,7 +175,6 @@ def submission_create(request):
                 },
                 dedupe_key=f"exercise_submitted:{submission.id}",
             )
-
             log_event(
                 student=student,
                 org=org,
@@ -184,19 +183,16 @@ def submission_create(request):
                 meta={"source": "submission_create", "submission_id": submission.id},
                 dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
             )
-
         except Exception:
             logger.exception(
                 "Gamification on_commit failed (non-fatal)",
                 extra={"submission_id": submission.id, "lesson_id": lesson.id},
             )
-            return
 
-
-    transaction.on_commit(_log_after_commit)
+    if submission.lesson.module.course.course_type == "public":
+        transaction.on_commit(_log_after_commit)
 
     return Response(CodeSubmissionSerializer(submission).data, status=201)
-
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
