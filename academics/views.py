@@ -14,7 +14,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 from api.authentication import SessionTokenAuthentication
 from orgs.models import Organization, OrganizationMembership
 from academics.models import StudentProfile, ParentProfile, TeacherProfile, Classroom, Subject
-from learning.models import Course, Enrollment
+from learning.models import Course, Enrollment, Lesson
 from assessments.models import Test, TestAttempt, TestAnswer, Question
 from gamification.models import (Badge, BadgeAward, PointTransaction, Streak, 
     AchievementDefinition,AchievementAcquired,ActivityEvent
@@ -23,6 +23,8 @@ from attendance.models import AttendanceRecord, AttendanceSession
 from core.utils import _get_student_for_user, _to_int, _sum_points
 from django.db.models.functions import Cast
 from gamification.services.streaks import build_streak
+from texagonbackend.settings import pass_mark as PASS_MARK
+from texagonbackend.settings import LOW_SCORE
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -303,180 +305,438 @@ def get_top_students_for_teacher_courses(teacher_courses_qs, limit=10):
     return out
 
 
+
+
+
+def _d(value, default="0") -> Decimal:
+    """Safe Decimal conversion."""
+    try:
+        return Decimal(str(value if value is not None else default))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(str(default))
+
+
+def _pct(score: Decimal, total_points: Decimal) -> Decimal:
+    """Convert attempt.score (raw) to percent using sum(question.points)."""
+    if not total_points or total_points <= 0:
+        return Decimal("0")
+    return (score / total_points) * Decimal("100")
+
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def teacher_analytics_view(request):
     """
-    Real analytics endpoint for teacher dashboard.
-    No dummy data. All decimal outputs rounded to 2dp.
+    PATCHED ENDPOINT (full code):
+
+    - "Active this month" card -> Pass Rate
+    - Course Completions -> ONLY public courses (course_type='public')
+    - Enrollment linkage -> ONLY Active/Completed (exclude Dropped)
+    - Course performance adds passRate + returns modal fields to prevent "View Details" crash
+    - Avg Score and Pass Rate computed from sum(test.questions.points) (NOT total_marks)
+    - Attempts include status in ["submitted", "graded"] to avoid 0% when not graded
     """
-    user = request.user
-
-    # Get teacher profile and organization
     try:
-        teacher_profile = TeacherProfile.objects.select_related("organization").get(user=user)
-    except TeacherProfile.DoesNotExist:
-        return Response({"detail": "Teacher profile not found."}, status=status.HTTP_404_NOT_FOUND)
+        user = request.user
+        
+        PASS_MARK_PCT = Decimal(f"{PASS_MARK}")
+        LOW_SCORE = Decimal("30")
+        # Teacher profile
+        try:
+            teacher_profile = TeacherProfile.objects.select_related("organization").get(user=user)
+        except TeacherProfile.DoesNotExist:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    organization = teacher_profile.organization
+        organization = teacher_profile.organization
 
-    # Get teacher's courses
-    teacher_courses = (
-        Course.objects.filter(
-            teacher=teacher_profile,
-            organization=organization,
-            is_active=True,
+        # Teacher courses
+        teacher_courses = (
+            Course.objects.filter(
+                teacher=teacher_profile,
+                organization=organization,
+                is_active=True,
+            )
+            .select_related("subject", "classroom")
         )
-        .select_related("subject", "classroom")
-    )
 
-    # --- Overall statistics (no dummy "change") ---
+        valid_enrollment_statuses = [Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED]
+        valid_attempt_statuses = ["submitted", "graded"]
 
-    # total students in org
-    total_students = StudentProfile.objects.filter(organization=organization).count()
+        # -----------------------------
+        # Precompute test -> total_points (sum of question.points) for all teacher tests
+        # -----------------------------
+        tests_qs = Test.objects.filter(course__in=teacher_courses)
+        test_points_rows = (
+            tests_qs.annotate(total_points=Sum("questions__points"))
+            .values("id", "course_id", "total_points")
+        )
+        test_total_points = {row["id"]: _d(row["total_points"]) for row in test_points_rows}
 
-    # active students (logged in last 30 days)
-    thirty_days_ago = timezone.now() - timedelta(days=30)
-    active_students = StudentProfile.objects.filter(
-        organization=organization,
-        user__last_login__gte=thirty_days_ago,
-    ).count()
+        # Also map course -> list of test ids (for quick lookup)
+        course_test_ids = {}
+        for row in test_points_rows:
+            course_test_ids.setdefault(row["course_id"], []).append(row["id"])
 
-    # course completions for teacher courses:
-    # Enrollment.status == "completed" OR progress >= 90 (use whichever you prefer; here I use status completed)
-    course_completions = Enrollment.objects.filter(
-        course__in=teacher_courses,
-        status=Enrollment.Status.COMPLETED,
-    ).count()
+        # -----------------------------
+        # Overall Stats
+        # -----------------------------
+        total_students = StudentProfile.objects.filter(organization=organization).count()
 
-    overall_stats = [
-        {
-            "title": "Total Students",
-            "value": str(total_students),
-            "icon": "Users",
-            "color": "text-blue-600",
-        },
-        {
-            "title": "Active This Month",
-            "value": str(active_students),
-            "icon": "TrendingUp",
-            "color": "text-green-600",
-        },
-        {
-            "title": "Course Completions",
-            "value": str(course_completions),
-            "icon": "Award",
-            "color": "text-orange-600",
-        },
-    ]
+        # Overall pass rate across teacher courses (based on percent using question points)
+        overall_attempts_rows = (
+            TestAttempt.objects.filter(
+                test__in=list(test_total_points.keys()),
+                status__in=valid_attempt_statuses,
+            )
+            .values("score", "test_id")
+        )
 
-    # --- Course performance (real metrics only) ---
-    course_performance = []
+        overall_attempts = list(overall_attempts_rows)
+        overall_attempts_count = len(overall_attempts)
 
-    # Prefetch enrollments counts/averages efficiently
-    # We'll compute per-course stats in a loop but with aggregates.
-    for course in teacher_courses:
-        enrollments_qs = Enrollment.objects.filter(course=course)
-        student_count = enrollments_qs.count()
+        if overall_attempts_count == 0:
+            overall_pass_rate = Decimal("0")
+        else:
+            pass_count = 0
+            for a in overall_attempts:
+                score = _d(a["score"])
+                total_pts = test_total_points.get(a["test_id"], Decimal("0"))
+                pct = _pct(score, total_pts)
+                if pct >= PASS_MARK_PCT:
+                    pass_count += 1
+            overall_pass_rate = (Decimal(pass_count) / Decimal(overall_attempts_count)) * Decimal("100")
 
-        if student_count == 0:
-            # If you want to still show empty courses, keep them; otherwise skip.
+        # Course completions ONLY for public courses
+        public_teacher_courses = teacher_courses.filter(course_type="public")
+        course_completions = Enrollment.objects.filter(
+            course__in=public_teacher_courses,
+            status=Enrollment.Status.COMPLETED,
+        ).count()
+
+        # Frontend expects "change" (you can keep empty string to avoid dummy)
+        overall_stats = [
+            {
+                "title": "Total Students",
+                "value": str(total_students),
+                "change": "",
+                "icon": "Users",
+                "color": "text-blue-600",
+            },
+            {
+                "title": "Pass Rate",  # was "Active This Month"
+                "value": f"{r2(overall_pass_rate)}%",
+                "change": "",
+                "icon": "TrendingUp",
+                "color": "text-green-600",
+            },
+            {
+                "title": "Course Completions",
+                "value": str(course_completions),
+                "change": "",
+                "icon": "Award",
+                "color": "text-orange-600",
+            },
+        ]
+
+        # -----------------------------
+        # Course Performance
+        # -----------------------------
+        course_performance = []
+
+        # Preload enrollments for teacher courses (Active/Completed only)
+        enrollments_rows = (
+            Enrollment.objects.filter(course__in=teacher_courses, status__in=valid_enrollment_statuses)
+            .select_related("student__user", "course")
+        )
+
+        # Group enrollments per course
+        enrollments_by_course = {}
+        for e in enrollments_rows:
+            enrollments_by_course.setdefault(e.course_id, []).append(e)
+
+        # Preload attempts for teacher courses (submitted/graded), group by course & student for averages
+        attempts_rows = (
+            TestAttempt.objects.filter(
+                test__in=list(test_total_points.keys()),
+                status__in=valid_attempt_statuses,
+            )
+            .values("student_id", "test_id", "score")
+        )
+
+        # Build course_id from test_id quickly
+        # (we already have course_test_ids, but need reverse map test->course)
+        test_course_map = {}
+        for row in test_points_rows:
+            test_course_map[row["id"]] = row["course_id"]
+
+        # Accumulate percent scores per (course, student)
+        # and per course overall (for avgScore and passRate)
+        course_student_pct_sum = {}
+        course_student_pct_count = {}
+
+        course_pct_sum = {}
+        course_attempt_count = {}
+        course_pass_count = {}
+
+        for a in attempts_rows:
+            test_id = a["test_id"]
+            course_id = test_course_map.get(test_id)
+            if not course_id:
+                continue
+
+            score = _d(a["score"])
+            total_pts = test_total_points.get(test_id, Decimal("0"))
+            pct = _pct(score, total_pts)
+
+            # per course overall
+            course_pct_sum[course_id] = course_pct_sum.get(course_id, Decimal("0")) + pct
+            course_attempt_count[course_id] = course_attempt_count.get(course_id, 0) + 1
+            if pct >= PASS_MARK_PCT:
+                course_pass_count[course_id] = course_pass_count.get(course_id, 0) + 1
+
+            # per (course, student) for top/struggling lists
+            key = (course_id, a["student_id"])
+            course_student_pct_sum[key] = course_student_pct_sum.get(key, Decimal("0")) + pct
+            course_student_pct_count[key] = course_student_pct_count.get(key, 0) + 1
+
+        # Build per-course response
+        for course in teacher_courses:
+            course_id = course.id
+
+            course_enrollments = enrollments_by_course.get(course_id, [])
+            student_count = len(course_enrollments)
+
+            completed_count = sum(1 for e in course_enrollments if e.status == Enrollment.Status.COMPLETED)
+            completion_rate = (
+                (Decimal(completed_count) / Decimal(student_count)) * Decimal("100")
+                if student_count
+                else Decimal("0")
+            )
+
+            # avgScore% (course)
+            att_count = course_attempt_count.get(course_id, 0)
+            if att_count == 0:
+                avg_score_pct = Decimal("0")
+                pass_rate_pct = Decimal("0")
+            else:
+                avg_score_pct = course_pct_sum.get(course_id, Decimal("0")) / Decimal(att_count)
+                pass_rate_pct = (Decimal(course_pass_count.get(course_id, 0)) / Decimal(att_count)) * Decimal("100")
+
+            # Modal lists (top/struggling) - based on attempt avg % + enrollment progress_pct for tie-breaker
+            students_rows = []
+            for e in course_enrollments[:5000]:
+                student = e.student
+                u = getattr(student, "user", None)
+
+                # student's avg percent in this course
+                s_key = (course_id, student.id)
+                s_count = course_student_pct_count.get(s_key, 0)
+                if s_count == 0:
+                    s_avg_pct = Decimal("0")
+                else:
+                    s_avg_pct = course_student_pct_sum.get(s_key, Decimal("0")) / Decimal(s_count)
+
+                last_login = getattr(u, "last_login", None) if u else None
+                name = (u.get_full_name() or u.email) if u else f"student-{student.id}"
+
+                students_rows.append(
+                    {
+                        "name": name,
+                        "score": r2(s_avg_pct),
+                        "progress": r2(getattr(e, "progress_pct", Decimal("0"))),
+                        "lastActive": last_login.date().isoformat() if last_login else "N/A",
+                    }
+                )
+
+            students_by_best = sorted(students_rows, key=lambda x: (x["score"], x["progress"]), reverse=True)
+
+            # ONLY students below LOW_SCORE
+            struggling_only = [s for s in students_rows if _d(s["score"]) < LOW_SCORE]
+            struggling_by_worst = sorted(struggling_only, key=lambda x: (x["score"], x["progress"]))
+
+            top_performers = [
+                {"name": x["name"], "score": x["score"], "progress": x["progress"]}
+                for x in students_by_best[:5]
+            ]
+
+            struggling_students = [
+                {"name": x["name"], "score": x["score"], "progress": x["progress"], "lastActive": x["lastActive"]}
+                for x in struggling_by_worst[:5]
+            ]
+
+            total_lessons = Lesson.objects.filter(module__course=course, active=True).count()
+
             course_performance.append(
                 {
                     "id": str(course.id),
                     "name": course.name,
-                    "students": 0,
-                    "avgProgress": 0.00,
-                    "avgScore": 0.00,
-                    "completionRate": 0.00,
+                    "students": int(student_count),
+                    # Keep avgProgress if you still want it elsewhere; frontend can ignore it.
+                    "avgProgress": 0.0,
+                    "avgScore": r2(avg_score_pct),
+                    "passRate": r2(pass_rate_pct),
+                    "completionRate": r2(completion_rate),
+
+                    # modal fields to prevent View Details crash
+                    "rating": 0,
+                    "totalLessons": int(total_lessons),
+                    "completedLessons": 0,
+                    "enrollmentTrend": [],
+                    "weeklyActivity": [],
+                    "topPerformers": top_performers,
+                    "strugglingStudents": struggling_students,
                 }
             )
-            continue
 
-        avg_progress = enrollments_qs.aggregate(v=Avg("progress_pct"))["v"] or Decimal("0")
-        completed_count = enrollments_qs.filter(status=Enrollment.Status.COMPLETED).count()
-        completion_rate = (Decimal(completed_count) / Decimal(student_count)) * Decimal("100")
+        # -----------------------------
+        # Top Students (tab)
+        # Must return: {name, coursesCompleted, avgScore, lastActive}
+        # Using percent scores across all teacher course attempts
+        # -----------------------------
+        # Aggregate percent per student from earlier attempts loop by reusing course_student_pct_sum/count
+        student_pct_sum = {}
+        student_pct_count = {}
 
-        # tests and attempts for this course
-        attempts_qs = TestAttempt.objects.filter(
-            test__course=course,
-            status="graded",
-        )
-        avg_score = attempts_qs.aggregate(v=Avg("score"))["v"] or Decimal("0")
+        for (course_id, student_id), s_sum in course_student_pct_sum.items():
+            s_count = course_student_pct_count.get((course_id, student_id), 0)
+            student_pct_sum[student_id] = student_pct_sum.get(student_id, Decimal("0")) + s_sum
+            student_pct_count[student_id] = student_pct_count.get(student_id, 0) + s_count
 
-        course_performance.append(
-            {
-                "id": str(course.id),
-                "name": course.name,
-                "students": int(student_count),
-                "avgProgress": r2(avg_progress),
-                "avgScore": r2(avg_score),
-                "completionRate": r2(completion_rate),
-            }
+        # Candidate students are those enrolled (Active/Completed) in teacher courses
+        candidate_student_ids = list(
+            Enrollment.objects.filter(course__in=teacher_courses, status__in=valid_enrollment_statuses)
+            .values_list("student_id", flat=True)
+            .distinct()
         )
 
-    # --- Top students across teacher courses (real) ---
-    top_students = get_top_students_for_teacher_courses(teacher_courses, limit=10)
+        # Build rows
+        top_rows = []
+        profiles = (
+            StudentProfile.objects.filter(id__in=candidate_student_ids)
+            .select_related("user")
+        )
 
-    # --- Test analytics (real) ---
-    test_analytics = []
-    tests = Test.objects.filter(course__in=teacher_courses, visibility=Test.Visibility.PUBLISHED)
+        # Precompute coursesCompleted per student (teacher courses only)
+        completed_counts = {
+            row["student_id"]: row["c"]
+            for row in Enrollment.objects.filter(
+                course__in=teacher_courses,
+                status=Enrollment.Status.COMPLETED,
+            )
+            .values("student_id")
+            .annotate(c=Count("id"))
+        }
 
-    for test in tests[:10]:
-        attempts = TestAttempt.objects.filter(test=test)
-        total_attempts = attempts.count()
+        for p in profiles:
+            sid = p.id
+            cnt = student_pct_count.get(sid, 0)
+            avg_pct = (student_pct_sum.get(sid, Decimal("0")) / Decimal(cnt)) if cnt else Decimal("0")
 
-        if total_attempts == 0:
+            u = p.user
+            last_login = getattr(u, "last_login", None)
+            name = u.get_full_name() or u.email
+
+            top_rows.append(
+                {
+                    "name": name,
+                    "coursesCompleted": int(completed_counts.get(sid, 0)),
+                    "avgScore": r2(avg_pct),
+                    "lastActive": last_login.date().isoformat() if last_login else "N/A",
+                }
+            )
+
+        top_students = sorted(top_rows, key=lambda x: (x["avgScore"], x["coursesCompleted"]), reverse=True)[:10]
+
+        # -----------------------------
+        # Test Analytics (percent-based using question points)
+        # -----------------------------
+        test_analytics = []
+        published_tests = Test.objects.filter(
+            course__in=teacher_courses,
+            visibility=Test.Visibility.PUBLISHED,
+        )
+
+        # Precompute total_points for published tests
+        published_points = {
+            row["id"]: _d(row["total_points"])
+            for row in published_tests.annotate(total_points=Sum("questions__points")).values("id", "total_points")
+        }
+
+        for test in published_tests[:10]:
+            total_pts = published_points.get(test.id, Decimal("0"))
+
+            attempts = list(
+                TestAttempt.objects.filter(test=test, status__in=valid_attempt_statuses)
+                .values("score")
+            )
+            total_attempts = len(attempts)
+
+            if total_attempts == 0:
+                test_analytics.append(
+                    {
+                        "id": str(test.id),
+                        "name": test.title,
+                        "attempts": 0,
+                        "avgScore": 0.00,
+                        "passRate": 0.00,
+                        "difficulty": "N/A",
+                        "questions": test.questions.count(),
+                        "timeLimit": f"{test.duration_minutes} minutes",
+                        "scoreDistribution": [
+                            {"range": "90-100", "count": 0},
+                            {"range": "80-89", "count": 0},
+                            {"range": "70-79", "count": 0},
+                            {"range": "60-69", "count": 0},
+                            {"range": "Below 60", "count": 0},
+                        ],
+                    }
+                )
+                continue
+
+            pct_sum = Decimal("0")
+            pass_count = 0
+            buckets = {"90-100": 0, "80-89": 0, "70-79": 0, "60-69": 0, "Below 60": 0}
+
+            for a in attempts:
+                pct = _pct(_d(a["score"]), total_pts)
+                pct_sum += pct
+                if pct >= PASS_MARK_PCT:
+                    pass_count += 1
+
+                if pct >= 90:
+                    buckets["90-100"] += 1
+                elif pct >= 80:
+                    buckets["80-89"] += 1
+                elif pct >= 70:
+                    buckets["70-79"] += 1
+                elif pct >= 60:
+                    buckets["60-69"] += 1
+                else:
+                    buckets["Below 60"] += 1
+
+            avg_score_pct = pct_sum / Decimal(total_attempts)
+            pass_rate_pct = (Decimal(pass_count) / Decimal(total_attempts)) * Decimal("100")
+            score_distribution = [{"range": k, "count": v} for k, v in buckets.items()]
+
             test_analytics.append(
                 {
                     "id": str(test.id),
                     "name": test.title,
-                    "attempts": 0,
-                    "avgScore": 0.00,
-                    "passRate": 0.00,
-                    "difficulty": "N/A",
+                    "attempts": int(total_attempts),
+                    "avgScore": r2(avg_score_pct),
+                    "passRate": r2(pass_rate_pct),
+                    "difficulty": get_test_difficulty(avg_score_pct),
                     "questions": test.questions.count(),
                     "timeLimit": f"{test.duration_minutes} minutes",
-                    "scoreDistribution": [
-                        {"range": "90-100", "count": 0},
-                        {"range": "80-89", "count": 0},
-                        {"range": "70-79", "count": 0},
-                        {"range": "60-69", "count": 0},
-                        {"range": "Below 60", "count": 0},
-                    ],
+                    "scoreDistribution": score_distribution,
                 }
             )
-            continue
 
-        avg_score = attempts.aggregate(v=Avg("score"))["v"] or Decimal("0")
-        pass_rate = (Decimal(attempts.filter(score__gte=60).count()) / Decimal(total_attempts)) * Decimal("100")
-
-        score_distribution = [
-            {"range": "90-100", "count": attempts.filter(score__gte=90).count()},
-            {"range": "80-89", "count": attempts.filter(score__gte=80, score__lt=90).count()},
-            {"range": "70-79", "count": attempts.filter(score__gte=70, score__lt=80).count()},
-            {"range": "60-69", "count": attempts.filter(score__gte=60, score__lt=70).count()},
-            {"range": "Below 60", "count": attempts.filter(score__lt=60).count()},
-        ]
-
-        test_analytics.append(
-            {
-                "id": str(test.id),
-                "name": test.title,
-                "attempts": int(total_attempts),
-                "avgScore": r2(avg_score),
-                "passRate": r2(pass_rate),
-                "difficulty": get_test_difficulty(avg_score),
-                "questions": test.questions.count(),
-                "timeLimit": f"{test.duration_minutes} minutes",
-                "scoreDistribution": score_distribution,
-            }
-        )
-
-    # No dummy content
-    popular_content = []
-
+        popular_content = []
+    except Exception as e:
+        print(e)
+        return Response({}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     return Response(
         {
             "overallStats": overall_stats,

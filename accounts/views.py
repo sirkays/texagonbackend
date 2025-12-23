@@ -1936,46 +1936,50 @@ def time_periods_view(request):
     })
 
 
-
-
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def children_list_view(request):
     """
-    Returns a list of all children for the authenticated parent.
-    Used to populate the Select Child dropdown filter.
+    Returns a list of all children for the authenticated parent,
+    but only children who have enrollments with status ACTIVE or COMPLETED.
     """
     try:
-        # Get parent profile for authenticated user
         parent_profile = ParentProfile.objects.get(user=request.user)
     except ParentProfile.DoesNotExist:
         return Response(
-            {"detail": "Parent profile not found."}, 
+            {"detail": "Parent profile not found."},
             status=status.HTTP_404_NOT_FOUND
         )
 
-    # Get all children linked to this parent
-    children_links = ParentChildLink.objects.filter(parent=parent_profile).select_related(
-        'student__user', 'student__current_classroom', 'student__organization'
+    allowed_statuses = [Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED]
+
+    children_links = (
+        ParentChildLink.objects
+        .filter(parent=parent_profile)
+        .filter(
+            student__enrollments__status__in=allowed_statuses
+        )
+        .select_related('student__user', 'student__current_classroom', 'student__organization')
+        .distinct()
     )
 
     children_data = []
     for link in children_links:
         student = link.student
-        child_data = {
+        children_data.append({
             "id": student.id,
             "name": student.user.get_full_name() or student.user.first_name,
             "grade": student.current_classroom.name if student.current_classroom else "N/A",
             "school": student.organization.name,
-            "avatar": student.user.avatar.url if student.user.avatar else None,
-        }
-        children_data.append(child_data)
+            "avatar": student.user.avatar.url if getattr(student.user, "avatar", None) else None,
+        })
 
     return Response({
         "children": children_data,
         "totalChildren": len(children_data)
     })
+
 
 
 
@@ -1991,7 +1995,6 @@ def get_children_progress(request):
             "semester": {"days": 180, "stats_key": "semesterStats"},
             "year": {"days": 365, "stats_key": "yearlyStats"},
         }
-
 
         user = getattr(request, "user", None)
         if not user or not user.is_authenticated:
@@ -2011,16 +2014,12 @@ def get_children_progress(request):
         child_id_str = (request.GET.get("child_id") or "all").strip()
         time_period = (request.GET.get("time_period") or "week").strip().lower()
 
-        # Validate time_period
         if time_period not in TIME_PERIODS:
             return Response(
-                {
-                    "detail": f"Invalid time_period '{time_period}'. Allowed: {list(TIME_PERIODS.keys())}"
-                },
+                {"detail": f"Invalid time_period '{time_period}'. Allowed: {list(TIME_PERIODS.keys())}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Validate child_id
         child_id = None
         if child_id_str != "all":
             try:
@@ -2029,14 +2028,24 @@ def get_children_progress(request):
                 return Response({"detail": "Invalid child_id format."}, status=status.HTTP_400_BAD_REQUEST)
 
         # ----------------------------
-        # Filter children
+        # Enrollment restriction
         # ----------------------------
-        child_links_qs = ParentChildLink.objects.select_related(
-            "student",
-            "student__user",
-            "student__current_classroom",
-            "student__organization",
-        ).filter(parent=parent_profile)
+        allowed_statuses = [Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED]
+
+        # ----------------------------
+        # Filter children (only those with eligible enrollments)
+        # ----------------------------
+        child_links_qs = (
+            ParentChildLink.objects.select_related(
+                "student",
+                "student__user",
+                "student__current_classroom",
+                "student__organization",
+            )
+            .filter(parent=parent_profile)
+            .filter(student__enrollments__status__in=allowed_statuses)
+            .distinct()
+        )
 
         if child_id is not None:
             child_links_qs = child_links_qs.filter(student__id=child_id)
@@ -2065,15 +2074,15 @@ def get_children_progress(request):
                 )
 
             # -------------------------------------
-            # Attempts within selected period
+            # Attempts (ONLY courses where enrollment is ACTIVE/COMPLETED)
             # -------------------------------------
-
-
             attempts = (
                 TestAttempt.objects.filter(
                     student=student,
                     submitted_at__range=(start, end),
                     status__in=["submitted", "graded"],
+                    test__course__enrollments__student=student,
+                    test__course__enrollments__status__in=allowed_statuses,
                 )
                 .select_related("test", "test__course")
                 .annotate(
@@ -2083,22 +2092,27 @@ def get_children_progress(request):
                         output_field=DecimalField(max_digits=10, decimal_places=2),
                     )
                 )
+                .distinct()
             )
-
 
             tests_completed = attempts.count()
 
+            # -------------------------------------
+            # Average score (EXCLUDE private courses)
+            # -------------------------------------
             percentages = []
             for att in attempts:
-                total = att.computed_total_marks or 0
-                if total > 0:
-                    percentages.append((att.score / total) * Decimal("100"))
-                else:
-                    percentages.append(Decimal("0"))
+                course = getattr(att.test, "course", None)
+                if course and course.course_type == "private":
+                    continue  # 🚫 do not include private in average
 
+                total = att.computed_total_marks or Decimal("0")
+                if total and total > 0:
+                    percentages.append((att.score / total) * Decimal("100"))
 
             average_score = sum(percentages) / len(percentages) if percentages else Decimal("0")
 
+            # Completed courses (keep as-is, or also restrict; this is your original meaning)
             courses_completed = Enrollment.objects.filter(
                 student=student,
                 status=Enrollment.Status.COMPLETED,
@@ -2118,12 +2132,15 @@ def get_children_progress(request):
 
             # -------------------------------------
             # Per-test performance (latest attempt per test)
+            # + tag private attempts
             # -------------------------------------
             tests_data = []
 
-            latest_attempts = attempts.values("test_id").annotate(
-                latest_submitted=Max("submitted_at")
-            ).order_by()
+            latest_attempts = (
+                attempts.values("test_id")
+                .annotate(latest_submitted=Max("submitted_at"))
+                .order_by()
+            )
 
             for la in latest_attempts:
                 attempt = attempts.filter(
@@ -2135,11 +2152,10 @@ def get_children_progress(request):
                     continue
 
                 test = attempt.test
-                total = getattr(attempt, "computed_total_marks", None)
+                course = getattr(test, "course", None)
+                is_private = bool(course and course.course_type == "private")
 
-                # If you’re inside the loop and `attempt` was fetched from `attempts` queryset,
-                # computed_total_marks will exist. But if attempt came from another queryset,
-                # it won’t. So fallback safely:
+                total = getattr(attempt, "computed_total_marks", None)
                 if total is None:
                     total = test.questions.aggregate(t=Coalesce(Sum("points"), 0))["t"]
 
@@ -2156,12 +2172,15 @@ def get_children_progress(request):
                 else:
                     grade = "F"
 
+                # Previous attempt (also restricted to eligible enrollments)
                 prev_attempt = (
                     TestAttempt.objects.filter(
                         student=student,
                         test=test,
                         submitted_at__lt=attempt.submitted_at,
                         status__in=["submitted", "graded"],
+                        test__course__enrollments__student=student,
+                        test__course__enrollments__status__in=allowed_statuses,
                     )
                     .order_by("-submitted_at")
                     .first()
@@ -2179,7 +2198,7 @@ def get_children_progress(request):
 
                     prev_percentage = (
                         (prev_attempt.score / prev_total) * Decimal("100")
-                        if prev_total > 0
+                        if prev_total and prev_total > 0
                         else Decimal("0")
                     )
 
@@ -2189,8 +2208,8 @@ def get_children_progress(request):
                         trend = "down"
 
                 test_title = test.title
-                if getattr(test, "course", None) and getattr(test.course, "name", None):
-                    test_title = f"{test.course.name} - {test.title}"
+                if course and getattr(course, "name", None):
+                    test_title = f"{course.name} - {test.title}"
 
                 tests_data.append(
                     {
@@ -2198,6 +2217,10 @@ def get_children_progress(request):
                         "grade": grade,
                         "lastScore": int(round(percentage)),
                         "trend": trend,
+
+                        # ✅ new fields for frontend tag
+                        "isPrivate": is_private,
+                        "tag": "Private" if is_private else None,
                     }
                 )
 
@@ -2232,20 +2255,18 @@ def get_children_progress(request):
                 "admissionNo": student.admission_no,
                 "subjects": tests_data,
 
-                # ✅ Put stats into the correct key for the chosen period:
+                # put stats into chosen key
                 stats_key: stats,
-
-                # Optional: also return a consistent key to simplify frontend later:
                 "stats": stats,
             }
 
             children_data.append(child_data)
-            print(children_data)
+
         return Response({"children": children_data}, status=status.HTTP_200_OK)
+
     except Exception as e:
         print(e)
-    return Response({"children": []}, status=status.HTTP_400_BAD_REQUEST)
-
+        return Response({"children": []}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(["POST"])

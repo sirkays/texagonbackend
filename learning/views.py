@@ -77,13 +77,18 @@ def my_materials(request):
         my_only = request.query_params.get("my_only") in {"1", "true", "True"}
 
         # ---------- Materials ----------
+        allowed_statuses = [Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED]
+
         if my_only or not student:
             m_base = Material.objects.filter(owner=user)
         else:
             m_base = Material.objects.filter(
-                Q(owner=user) | Q(organization=student.organization, is_public=True)
-            )
-
+                Q(owner=user) |
+                Q(organization=student.organization)
+            ).filter(
+                lesson__module__course__enrollments__student=student,
+                lesson__module__course__enrollments__status__in=allowed_statuses,
+            ).distinct()
         if q:
             # title + tags (tags is JSON/list => contains text in DB)
             m_base = m_base.filter(
