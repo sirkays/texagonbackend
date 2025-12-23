@@ -641,3 +641,42 @@ def teacher_submission_grade(request, pk: int):
     # --------------------------------------------------------------
 
     return Response(TeacherCodeSubmissionDetailSerializer(submission).data, status=200)
+
+
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def student_submission_list(request):
+    """
+    Student: list their code submissions.
+    Teacher: list submissions for lessons they teach (optional, if you want).
+    Optional query params:
+      - lesson: int (filter by lesson id)
+    """
+    lesson_id = request.query_params.get("lesson")
+
+    # If your project has a helper like user_is_student_profile / user_is_teacher_profile,
+    # use that. Otherwise implement a safe lookup.
+    print(request.user)
+    student_profile = _get_student_for_user(request.user)
+    qs = CodeSubmission.objects.select_related("lesson", "student").prefetch_related("comments", "comments__author")
+
+    if student_profile:
+        qs = qs.filter(student=student_profile)
+    else:
+        return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
+
+    if lesson_id:
+        try:
+            qs = qs.filter(lesson_id=int(lesson_id))
+        except ValueError:
+            return Response({"detail": "lesson must be an integer."}, status=400)
+
+    # ordered newest first by model Meta, but we can be explicit
+    qs = qs.order_by("-created_at")
+
+    data = CodeSubmissionSerializer(qs, many=True).data
+    return Response(data, status=200)
