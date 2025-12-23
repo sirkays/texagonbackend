@@ -508,12 +508,14 @@ def teacher_submissions_list(request):
     qs, err = _teacher_scoped_queryset(request)
     if err:
         return err
+
     qs = _apply_filters(request, qs)
 
     paginator = QuickPagination()
     page = paginator.paginate_queryset(qs, request)
     ser = SubmissionListSerializer(page, many=True)
     return paginator.get_paginated_response(ser.data)
+
 
 # ---------- 2) Detail ----------
 @api_view(["GET"])

@@ -79,6 +79,9 @@ class TeacherUpdateSubmissionSerializer(serializers.ModelSerializer):
 
 
 class SubmissionListSerializer(serializers.ModelSerializer):
+    # Add title but normalize empty/" " to None
+    title = serializers.SerializerMethodField()
+
     student_name = serializers.SerializerMethodField()
     lesson_title = serializers.CharField(source="lesson.name", read_only=True)
     course_name = serializers.SerializerMethodField()
@@ -88,7 +91,8 @@ class SubmissionListSerializer(serializers.ModelSerializer):
         model = CodeSubmission
         fields = [
             "id",
-            "created_at",
+            "title",         # ✅ added
+            "created_at",    # ✅ already here, now frontend will display it
             "updated_at",
             "status",
             "language",
@@ -98,6 +102,10 @@ class SubmissionListSerializer(serializers.ModelSerializer):
             "class_name",
             "score",
         ]
+
+    def get_title(self, obj: CodeSubmission):
+        t = (obj.title or "").strip()
+        return t or None
 
     def get_student_name(self, obj: CodeSubmission) -> str:
         u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
@@ -126,7 +134,6 @@ class SubmissionListSerializer(serializers.ModelSerializer):
         except Exception:
             pass
         return ""
-
 
 class TeacherCodeCommentSerializer(serializers.ModelSerializer):
     author_name = serializers.SerializerMethodField()

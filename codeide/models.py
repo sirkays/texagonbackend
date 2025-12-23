@@ -36,7 +36,7 @@ class CodeSubmission(TimeStampedModel):
         SUBMITTED = "submitted", "Submitted"
         GRADED = "graded", "Graded"
         REVISED = "revised", "Revised"
-
+    title = models.CharField(max_length=255, blank=True, null=True)
     student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="code_submissions")
     lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="code_submissions")
 
