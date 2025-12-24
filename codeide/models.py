@@ -82,7 +82,7 @@ def codefile_upload_to(instance, filename: str) -> str:
     from datetime import datetime
     today = datetime.utcnow()
     safe_name = os.path.basename(filename)
-    return f"codefiles/{instance.student_id}/{today:%Y/%m/%d}/{safe_name}"
+    return f"texagon/codefiles/{instance.student_id}/{today:%Y/%m/%d}/{safe_name}"
 
 class CodeFile(TimeStampedModel):
     """

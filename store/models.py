@@ -91,7 +91,7 @@ class Product(TimeStampedModel):
 class ProductImage(TimeStampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="images")
-    product_image = models.ImageField(upload_to="product_images/", blank=True, null=True)  # use ImageField
+    product_image = models.ImageField(upload_to="texagon/product_images/", blank=True, null=True)  # use ImageField
     alt_text = models.CharField(max_length=200, blank=True)
     sort_order = models.PositiveIntegerField(default=0)
 

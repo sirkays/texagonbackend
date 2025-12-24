@@ -71,10 +71,10 @@ class Lesson(NamedModel):
         LINK = "link", "External Link"
 
     module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name="lessons")
-    cover_image = models.ImageField(upload_to="covers/", blank=True, null=True)
+    cover_image = models.ImageField(upload_to="texagon/covers/", blank=True, null=True)
     order = models.PositiveIntegerField(default=1)
     content_type = models.CharField(max_length=16, choices=ContentType.choices)
-    file = models.FileField(upload_to="lessons/files/", blank=True, null=True)
+    file = models.FileField(upload_to="texagon/lessons/files/", blank=True, null=True)
     url = models.URLField(blank=True)
     duration_seconds = models.PositiveIntegerField(default=0)
     meta = models.JSONField(default=dict, blank=True)
@@ -97,8 +97,8 @@ class Material(TimeStampedModel):
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="materials")
     title = models.CharField(max_length=255)
     kind = models.CharField(max_length=16, choices=Kind.choices)
-    file = models.FileField(upload_to="materials/files/", blank=True, null=True)
-    cover_image = models.ImageField(upload_to="materials/covers/", blank=True, null=True)
+    file = models.FileField(upload_to="texagon/materials/files/", blank=True, null=True)
+    cover_image = models.ImageField(upload_to="texagon/materials/covers/", blank=True, null=True)
     url = models.URLField(blank=True)
     tags = models.JSONField(default=list, blank=True)
     is_public = models.BooleanField(default=False)
