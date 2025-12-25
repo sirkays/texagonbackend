@@ -41,6 +41,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    "cloudinary",
+    "cloudinary_storage",
     "core",
     "codeide",
     "accounts",
@@ -57,6 +59,7 @@ INSTALLED_APPS = [
     "api",
     "rest_framework",
     "rest_framework_api_key",
+
 ]
 
 MIDDLEWARE = [
@@ -151,22 +154,45 @@ pass_mark = 45
 
 LOW_SCORE = 30
 
-STATIC_URL = 'static/'
-MEDIA_URL = 'media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+STATIC_URL = "static/"
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+STATIC_ROOT = BASE_DIR / "static"
 
+# Production
 if os.environ.get("LOCAL") == "0":
-    #MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-    #STATIC_ROOT = os.path.join(BASE_DIR, 'static')
-    STATIC_URL = '/static/'        # <- needs the leading slash
-    #STATIC_ROOT = '/app/staticfiles'  # <- exactly where you mounted the volume
-    STATIC_ROOT = BASE_DIR / "static" 
+    STATIC_URL = "/static/"
+    STATIC_ROOT = BASE_DIR / "static"
 
+    # Cloudinary credentials
+    CLOUDINARY_STORAGE = {
+        "CLOUD_NAME": os.environ.get("CLOUDINARY_CLOUD_NAME"),
+        "API_KEY": os.environ.get("CLOUDINARY_API_KEY"),
+        "API_SECRET": os.environ.get("CLOUDINARY_API_SECRET"),
+    }
 
-    MEDIA_URL = '/media/'
-    #MEDIA_ROOT = '/app/media'  
-    MEDIA_ROOT = BASE_DIR / "media"
+    # Django 5.2+ storage configuration
+    STORAGES = {
+        # static files via WhiteNoise
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+        # media files via Cloudinary
+        "default": {
+            "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+        },
+    }
+
+else:
+    # Local dev storage config (filesystem)
+    STORAGES = {
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+    }
 
 
 DOMAIN_EMAIL = os.environ.get("DOMAIN_EMAIL")
