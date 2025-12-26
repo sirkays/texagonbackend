@@ -97,7 +97,7 @@ def _product_to_dict(p: Product, request=None) -> dict:
         "slug": p.slug,
         "type": p.product_type,
         "category": p.category.name,
-        "price": str(p.price),
+        "price": str(p.price) ,
         "rating": float(p.rating),
         "rating_count": p.rating_count,
         "image": image_url,
@@ -163,7 +163,7 @@ def products_list(request):
     max_p = request.GET.get("max_price")
 
     qs = Product.objects.filter(is_active=True).select_related("category").prefetch_related("images")
-
+    
     if q:
         qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q))
     if category:
@@ -247,6 +247,7 @@ def cart_add(request):
     except ValueError:
         return Response({"detail": "Invalid quantity value."}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
+        print(e)
         # Catch any unexpected errors
         return Response(
             {"detail": f"An unexpected error occurred: {str(e)}"},
@@ -305,32 +306,34 @@ def cart_apply_coupon(request):
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def address_list_create(request):
-    user = _get_user_from_request(request)
-    if not user:
-        return Response({"detail": "Auth required."}, status=401)
+    try:
+        user = _get_user_from_request(request)
+        if not user:
+            return Response({"detail": "Auth required."}, status=401)
+        if request.method == "GET":
+            data = [{
+                "id": str(a.id), "full_name": a.full_name, "line1": a.line1, "line2": a.line2,
+                "city": a.city, "state": a.state, "postal_code": a.postal_code, "country": a.country,
+                "phone": a.phone, "is_default": a.is_default
+            } for a in user.addresses.all().order_by("-is_default", "full_name")]
+            return Response({"results": data})
 
-    if request.method == "GET":
-        data = [{
-            "id": str(a.id), "full_name": a.full_name, "line1": a.line1, "line2": a.line2,
-            "city": a.city, "state": a.state, "postal_code": a.postal_code, "country": a.country,
-            "phone": a.phone, "is_default": a.is_default
-        } for a in user.addresses.all().order_by("-is_default", "full_name")]
-        return Response({"results": data})
-
-    # POST create
-    payload = request.data
-    addr = Address.objects.create(
-        user=user,
-        full_name=payload.get("full_name", ""),
-        line1=payload.get("line1", ""),
-        line2=payload.get("line2", ""),
-        city=payload.get("city", ""),
-        state=payload.get("state", ""),
-        postal_code=payload.get("postal_code", ""),
-        country=payload.get("country", "US"),
-        phone=payload.get("phone", ""),
-        is_default=bool(payload.get("is_default", False)),
-    )
+        # POST create
+        payload = request.data
+        addr = Address.objects.create(
+            user=user,
+            full_name=payload.get("full_name", ""),
+            line1=payload.get("line1", ""),
+            line2=payload.get("line2", ""),
+            city=payload.get("city", ""),
+            state=payload.get("state", ""),
+            postal_code=payload.get("postal_code", ""),
+            country=payload.get("country", "US"),
+            phone=payload.get("phone", ""),
+            is_default=bool(payload.get("is_default", False)),
+        )
+    except Exception as e:
+        print(e)
     return Response({"id": str(addr.id)}, status=201)
 
 @api_view(["PATCH", "DELETE"])
@@ -412,6 +415,7 @@ def checkout_create_order(request):
         )
     # leave cart as-is until payment success, or clear here if you prefer
     return Response({"order_id": str(order.id), "grand_total": str(order.grand_total)}, status=201)
+
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
