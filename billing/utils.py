@@ -50,7 +50,6 @@ def generate_payment_link(request, user_id:int, tx_ref:str,redirect_url:str,titl
     return get_payment_link(payload)
 
 def confirm_transaction(transaction_id):
-    
     if PAYMENT_TEST:
         FLW_SECRET_KEY = TEST_KEY_SECRET
     #TEST_KEY_SECRET = "FLWSECK_TEST-baf077665388f439db111cb3d2a94181-X"
@@ -59,5 +58,4 @@ def confirm_transaction(transaction_id):
     r = requests.get(url, headers=headers)
     r = r.json()
     status = r['status']
-    print(headers," headers ",r)
     return (r,status)

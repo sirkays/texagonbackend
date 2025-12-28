@@ -23,7 +23,7 @@ from academics.models import ParentProfile
 from billing.models import SubscriptionInvoice, SubscriptionPayment, InvoiceType
 from core.utils import _is_org_admin_or_teacher, _resolve_org, get_object_or_404_ajax
 from orgs.models import OrganizationMembership
-from store.models import Order, Payment
+from store.models import Order, Payment, OrderItem,CartItem
 from .models import Complaint, ComplaintResponse,ComplaintAttachment
 from .utils import confirm_transaction, generate_payment_link
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
@@ -437,16 +437,18 @@ def confirm_payement(request):
     
     subscription_payment = get_object_or_404_ajax(
         SubscriptionPayment, reference=tx_ref, 
-        invoice__number=invoice_id, invoice__organization_membership__user=request.user,
+        invoice__organization_membership__user=request.user,
     )
 
+    if subscription_payment.invoice.number != invoice_id and str(subscription_payment.invoice.id) != invoice_id:
+        return Response({"detail": "Could not update payment, wrong invoice"}, status=status.HTTP_400_BAD_REQUEST)
+        
     if subscription_payment is False:
         return Response({"detail": "We could not confirm payment at this moment. Contact support if it not confirmed in 30min"}, 
         status=status.HTTP_404_NOT_FOUND)
 
     subscription_payment.transaction_id = transaction_id
     subscription_payment.save()
-    print(transaction_id, " trasssss")
     res = confirm_transaction(transaction_id)
     
     if res[1] != "success":
@@ -476,9 +478,22 @@ def confirm_payement(request):
                         course=course,
                         status="active"
                     )
+        elif invoice_type.invoice_type == "store":
+            if invoice_type.object_type == "order":
+                order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=request.user)
+                if order is False:
+                    return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
+                order.status = "paid"
+                order.save()
 
+                products = OrderItem.objects.filter(order=order).values_list("product")
+
+                carts = CartItem.objects.filter(product__pk__in=products, cart__user=request.user)
+                carts.delete()
+                
     except Exception as e:
-        pass
+        print(e)
+        return Response({"status":"failed", "message":f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     return Response({"status":"success"}, status=status.HTTP_200_OK)
 
