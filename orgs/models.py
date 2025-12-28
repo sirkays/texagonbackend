@@ -41,6 +41,17 @@ class OrganizationMembership(TimeStampedModel):
     def __str__(self):
         return f"{self.user} @ {self.organization} ({self.role})"
 
+    @classmethod
+    def fetch_defaults(cls, user):
+        org = Organization.objects.get_or_create(
+            slug="default",
+        )
+        return cls.objects.get_or_create(
+            user=user,
+            organization=org,
+            role="owner",
+        )
+
 class AcademicSession(NamedModel):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="sessions")
     start_date = models.DateField()

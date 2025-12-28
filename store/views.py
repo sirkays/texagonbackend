@@ -191,6 +191,8 @@ def products_list(request):
     data = [_product_to_dict(p, request) for p in page]
     return paginator.get_paginated_response({"results": data})
 
+
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -370,6 +372,9 @@ def _compute_totals(cart: Cart) -> dict:
     grand = max(subtotal - discount + tax + shipping, Decimal("0.00")).quantize(Decimal("0.01"))
     return {"subtotal": subtotal, "discount": discount, "tax": tax, "shipping": shipping, "grand": grand}
 
+
+
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -417,60 +422,7 @@ def checkout_create_order(request):
     return Response({"order_id": str(order.id), "grand_total": str(order.grand_total)}, status=201)
 
 
-@api_view(["POST"])
-@permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
-def payment_card_start(request, order_id: str):
-    """
-    Body: {provider="stripe"|"paystack", currency?}
-    """
-    provider = (request.data.get("provider") or "stripe").lower()
-    try:
-        order = Order.objects.get(pk=order_id, status__in=[Order.Status.PENDING, Order.Status.PAID])
-    except Order.DoesNotExist:
-        return Response({"detail": "Order not found."}, status=404)
-
-    pay = Payment.objects.create(
-        order=order,
-        provider=provider,
-        status=Payment.Status.INITIATED,
-        amount=order.grand_total,
-        currency=request.data.get("currency") or "NGN",
-    )
-    # Return client secret / authorization_url as needed (mock here)
-    return Response({"payment_id": str(pay.id), "status": pay.status, "amount": str(pay.amount)})
-
-@api_view(["POST"])
-@permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
-def payment_mark_captured(request, payment_id: str):
-    """
-    Body: {provider_ref?}
-    (Webhook or admin action) Mark a card payment captured.
-    """
-    try:
-        pay = Payment.objects.select_related("order").get(pk=payment_id)
-    except Payment.DoesNotExist:
-        return Response({"detail": "Not found."}, status=404)
-
-    pay.status = Payment.Status.CAPTURED
-    pay.provider_ref = request.data.get("provider_ref", "")
-    pay.save(update_fields=["status", "provider_ref"])
-
-    order = pay.order
-    if order.status == Order.Status.PENDING:
-        order.status = Order.Status.PAID
-        order.save(update_fields=["status"])
-
-        # grant entitlements for digital items
-        for oi in order.items.select_related("product"):
-            if oi.product.is_digital:
-                Entitlement.objects.get_or_create(user=order.user, product=oi.product)
-
-    return Response({"detail": "Captured.", "order_status": order.status})
-
 # ---------- BNPL ----------
-
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])

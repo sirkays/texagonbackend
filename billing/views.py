@@ -3,7 +3,7 @@ import traceback
 import heapq
 import secrets
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal,Decimal, ROUND_HALF_UP, InvalidOperation
 from itertools import islice
 from django.db import models
 
@@ -86,79 +86,131 @@ def _serialize_payment(payment: SubscriptionPayment,payment_link: str) -> dict:
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def create_subscription_payment(request):
-    """
-    POST payload example:
-    {
-        "invoice": 123
-    }
-
-    Only a user attached to the organization (OrganizationMembership, is_active=True)
-    of the invoice's subscription may create the payment.
-    """
-    user = getattr(request, "user", None)
-    if not user or not user.is_authenticated:
-        return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
-
-    invoice_id = request.data.get("invoice") or request.data.get("invoice_id")
-    redirect_url = request.data.get("redirect_url")
-
-    if not redirect_url:
-        return Response({"detail": "Missing 'redirect_url' in request body."}, status=status.HTTP_400_BAD_REQUEST)
-
-
-    if not invoice_id:
-        return Response({"detail": "Missing 'invoice' id in request body."}, status=status.HTTP_400_BAD_REQUEST)
-
-    # load invoice with subscription -> organization
     try:
-        invoice = SubscriptionInvoice.objects.select_related("subscription__organization").get(number=invoice_id)
-    except SubscriptionInvoice.DoesNotExist:
-        return Response({"detail": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    org = invoice.subscription.organization
-
-    # check membership
-    membership = _user_active_membership_for_org(user, org)
-    if membership is None:
-        return Response({"detail": "User is not attached to the invoice's organization."}, status=status.HTTP_403_FORBIDDEN)
-
-    # Build payment object
-    reference = _generate_reference(12)
-    amount = invoice.amount
-    currency = getattr(invoice, "currency", "NGN")
-
-    # Create the payment. method left blank intentionally.
-    payment = SubscriptionPayment(
-        invoice=invoice,
-        reference=reference,
-        amount=amount,
-        currency=currency,
-        redirect_url=redirect_url,
-        method="",  # left blank per your spec
-        status=SubscriptionPayment.Status.CREATED,
-        # paid_at defaults to timezone.now() per your model; we can leave it as default
-        meta={"created_by_membership_id": membership.pk, "created_by_user_id": user.pk},
-    )
-
-    try:
-        payment.save()
-        payment_plan = invoice.subscription.plan.name
-        customer_detail = {
-            "email":request.user.email,
+        """
+        POST payload example:
+        {
+            "invoice": 123
         }
-        title = "Subscription Payment"
-        payment_link = generate_payment_link(
-            request,
-            request.user.id, 
-            reference, redirect_url,
-            title,customer_detail,
-            amount,payment_plan
+
+        Only a user attached to the organization (OrganizationMembership, is_active=True)
+        of the invoice's subscription may create the payment.
+        """
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        invoice_id = request.data.get("invoice") or request.data.get("invoice_id")
+        redirect_url = request.data.get("redirect_url")
+
+        is_store_payment = request.data.get("is_store_payment")
+
+        item_list = (request.data.get("item_list") or "").split(",") if request.data.get("item_list") else []
+
+        title = request.data.get("payment_title",  "Subscription Payment")
+
+        invoice = None
+        membership = None
+        if is_store_payment:
+            print(request.data, " payload ")
+            raw_amount = request.data.get("amount")
+            order_id = request.data.get("order_id")
+
+            order = get_object_or_404_ajax(Order, pk=order_id)
+            if not order:
+                return Response({"detail": "Order is not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+            if raw_amount in (None, "", 0, "0"):
+                return Response({"detail": "Amount is not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                amount = Decimal(str(raw_amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            except (InvalidOperation, TypeError, ValueError):
+                return Response({"detail": "Invalid amount"}, status=status.HTTP_400_BAD_REQUEST)
+
+            membership = get_object_or_404_ajax(OrganizationMembership, user=request.user)
+            if membership is False:
+                membership = OrganizationMembership.fetch_defaults()
+
+            invoice, _created = SubscriptionInvoice.objects.get_or_create(
+                organization_membership=membership,
+                status="pending",
+                defaults={"amount": amount, "due_at": timezone.now()},
+            )
+
+            invoice_type, _ = InvoiceType.objects.get_or_create(
+                invoice=invoice,
+                invoice_type="store",
+                defaults={"object_id": order_id, "object_type": "order"},
+            )
+
+
+        if not redirect_url:
+            return Response({"detail": "Missing 'redirect_url' in request body."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+        if not invoice_id and not invoice:
+            return Response({"detail": "Missing 'invoice' id in request body."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # load invoice with subscription -> organization
+        if not invoice:
+            try:
+                invoice = SubscriptionInvoice.objects.select_related("subscription__organization").get(number=invoice_id)
+            except SubscriptionInvoice.DoesNotExist:
+                return Response({"detail": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+
+        if not membership:
+            org = invoice.subscription.organization
+
+            # check membership
+            membership = _user_active_membership_for_org(user, org)
+            if membership is None:
+                return Response({"detail": "User is not attached to the invoice's organization."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Build payment object
+        reference = _generate_reference(12)
+        amount = invoice.amount
+        currency = getattr(invoice, "currency", "NGN")
+
+        # Create the payment. method left blank intentionally.
+        payment = SubscriptionPayment(
+            invoice=invoice,
+            reference=reference,
+            amount=amount,
+            currency=currency,
+            redirect_url=redirect_url,
+            method="",  # left blank per your spec
+            status=SubscriptionPayment.Status.CREATED,
+            # paid_at defaults to timezone.now() per your model; we can leave it as default
+            meta={"created_by_membership_id": membership.pk, "created_by_user_id": user.pk},
         )
+
+        try:
+            payment.save()
+            if invoice.subscription:
+                payment_plan = invoice.subscription.plan.name
+            else:
+                payment_plan = f"Store payment for {item_list}"
+
+            customer_detail = {
+                "email":request.user.email,
+            }
+            payment_link = generate_payment_link(
+                request,
+                request.user.id, 
+                reference, redirect_url,
+                title,customer_detail,
+                amount,payment_plan
+            )
+        except Exception as e:
+            return Response({"detail": "Could not create payment.", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(_serialize_payment(payment, payment_link), status=status.HTTP_201_CREATED)
+
     except Exception as e:
-        return Response({"detail": "Could not create payment.", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-    return Response(_serialize_payment(payment, payment_link), status=status.HTTP_201_CREATED)
-
+        print(e)
+    return Response({"detail": "Could not create payment.", "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(["PATCH"])
 @permission_classes([HasAPIKey])
@@ -394,7 +446,7 @@ def confirm_payement(request):
 
     subscription_payment.transaction_id = transaction_id
     subscription_payment.save()
-    
+    print(transaction_id, " trasssss")
     res = confirm_transaction(transaction_id)
     
     if res[1] != "success":

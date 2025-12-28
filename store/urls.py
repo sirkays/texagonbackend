@@ -23,10 +23,7 @@ urlpatterns = [
     path("checkout/create-order/", views.checkout_create_order),
     path("orders/", views.orders_list),
     path("orders/<uuid:order_id>/", views.order_detail),
-
-    path("payments/card/<uuid:order_id>/start/", views.payment_card_start),
-    path("payments/<uuid:payment_id>/mark-captured/", views.payment_mark_captured),
-
+    
     # BNPL
     path("bnpl/plans/", views.bnpl_plans),
     path("bnpl/<uuid:order_id>/start/", views.bnpl_start),

@@ -27,8 +27,8 @@ class OrganizationSubscription(TimeStampedModel):
 
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="subscriptions")
     plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT, related_name="subscriptions")
-    start_date = models.DateField()
-    end_date = models.DateField()
+    start_date = models.DateField(blank=True, null=True)
+    end_date = models.DateField(blank=True, null=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
     auto_renew = models.BooleanField(default=True)
     payment_method = models.CharField(max_length=64, blank=True)
@@ -36,6 +36,7 @@ class OrganizationSubscription(TimeStampedModel):
 
 class SubscriptionInvoice(TimeStampedModel):
     class Status(models.TextChoices):
+        PENDING = "pending", "pending"
         OPEN = "open", "open"
         PAID = "paid", "paid"
         VOID = "void", "void"
@@ -119,9 +120,10 @@ class InvoiceType(models.Model):
     class Paytype(models.TextChoices):
         TUTOR = "tutor","tutor",
         SUBSCRIPTION = "subscription","subscription"
+        STORE = "store", "store"
     invoice = models.OneToOneField(SubscriptionInvoice, on_delete=models.CASCADE)
     invoice_type = models.CharField(max_length=16, choices=Paytype.choices, default=Paytype.SUBSCRIPTION)
-    object_id = models.PositiveIntegerField(blank=True, null=True)
+    object_id = models.CharField(max_length=250,blank=True, null=True)
     object_type = models.CharField(max_length=10, blank=True, null=True)
 
 

@@ -196,7 +196,6 @@ class Order(TimeStampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="orders")
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING, db_index=True)
-
     subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     discount_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     tax_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))

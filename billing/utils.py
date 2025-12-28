@@ -59,4 +59,5 @@ def confirm_transaction(transaction_id):
     r = requests.get(url, headers=headers)
     r = r.json()
     status = r['status']
+    print(headers," headers ",r)
     return (r,status)
