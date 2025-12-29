@@ -489,6 +489,14 @@ def confirm_payement(request):
 
                 carts = CartItem.objects.filter(product__pk__in=products, cart__user=request.user)
                 carts.delete()
+
+                if order.coupon_code:
+                    coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
+                    if coupon:
+                        coupon.used_count = coupon.used_count + 1
+
+                        coupon.save()
+
                 
     except Exception as e:
         print(e)

@@ -156,14 +156,13 @@ def _cart_to_dict(cart: Cart) -> dict:
         "id": str(cart.id),
         "items": items,
         "coupon": usable_coupon.code if usable_coupon else None,
-
         "subtotal": str(subtotal),
         "discount_total": str(discount_total),
-
         "grand_total": str(grand_total),            # subtotal - discount
         "shipping_total": str(shipping_total),      # backend shipping
         "tax_total": str(tax_total),                # backend tax
         "payable_total": str(payable_total),        # grand + shipping + tax
+        
     }
 
 
