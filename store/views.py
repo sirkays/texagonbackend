@@ -22,6 +22,8 @@ from accounts.models import User
 from core.utils import _resolve_org
 from billing.models import SubscriptionPayment, SubscriptionInvoice
 
+from .utils import calc_discount, is_coupon_usable
+
 # Store-related models
 from store.models import (
     Category,
@@ -105,30 +107,65 @@ def _product_to_dict(p: Product, request=None) -> dict:
         "description":p.description
     }
 
+
+
+TAX_RATE = Decimal("0.08")
+FLAT_SHIPPING = Decimal("9.99")
+
 def _cart_to_dict(cart: Cart) -> dict:
     items = []
     subtotal = Decimal("0.00")
-    for it in cart.items.select_related("product"):
-        line = it.quantity * it.product.price
+    has_physical = False
 
-        image_url = it.product.images.first().product_image.url
-        
+    for it in cart.items.select_related("product").prefetch_related("product__images"):
+        line = (Decimal(it.quantity) * it.product.price).quantize(Decimal("0.01"))
+
+        has_physical = it.product.is_digital is False
+
+        first_img = it.product.images.first()
+        image_url = first_img.product_image.url if first_img and first_img.product_image else None
+
         items.append({
             "id": str(it.id),
-            "image_url":image_url,
+            "image_url": image_url,
             "product_id": str(it.product_id),
             "title": it.product.title,
             "price": str(it.product.price),
             "quantity": it.quantity,
             "line_total": str(line),
+            "type": getattr(it.product, "type", "physical"),  # ✅ ensure frontend knows type
         })
         subtotal += line
+
+    subtotal = subtotal.quantize(Decimal("0.01"))
+
+    usable_coupon = cart.coupon if (cart.coupon and is_coupon_usable(cart.coupon)) else None
+    discount_total = calc_discount(subtotal, usable_coupon).quantize(Decimal("0.01"))
+
+    # ✅ discounted subtotal (your previous grand_total)
+    grand_total = (subtotal - discount_total).quantize(Decimal("0.01"))
+
+    # ✅ shipping & tax on backend
+    shipping_total = (FLAT_SHIPPING if has_physical else Decimal("0.00")).quantize(Decimal("0.01"))
+    tax_total = (grand_total * TAX_RATE).quantize(Decimal("0.01"))
+
+    # ✅ final payable amount
+    payable_total = (grand_total + shipping_total + tax_total).quantize(Decimal("0.01"))
+    #print(shipping_total, " sipping ",payable_total, " grand ", grand_total, " dis ", discount_total, " subtotal ", subtotal)
     return {
         "id": str(cart.id),
         "items": items,
-        "coupon": cart.coupon.code if cart.coupon else None,
+        "coupon": usable_coupon.code if usable_coupon else None,
+
         "subtotal": str(subtotal),
+        "discount_total": str(discount_total),
+
+        "grand_total": str(grand_total),            # subtotal - discount
+        "shipping_total": str(shipping_total),      # backend shipping
+        "tax_total": str(tax_total),                # backend tax
+        "payable_total": str(payable_total),        # grand + shipping + tax
     }
+
 
 
 # ---------- catalog ----------
@@ -285,22 +322,34 @@ def cart_remove_item(request, item_id: str):
     cart.items.filter(pk=item_id).delete()
     return Response(_cart_to_dict(cart))
 
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def cart_apply_coupon(request):
-    """
-    Body: {code}
-    """
     cart = _get_or_create_cart(request)
     code = (request.data.get("code") or "").strip().upper()
+
     try:
         coupon = Coupon.objects.get(code=code, active=True)
     except Coupon.DoesNotExist:
         return Response({"detail": "Invalid coupon."}, status=400)
+
+    if not is_coupon_usable(coupon):
+        return Response({"detail": "Coupon is not usable (expired/not started/limit reached)."}, status=400)
+
     cart.coupon = coupon
     cart.save(update_fields=["coupon"])
-    return Response(_cart_to_dict(cart))
+
+    cart_data = _cart_to_dict(cart)
+    
+    request.session['grand_total'] = cart_data['grand_total']
+    request.session['subtotal'] = cart_data['subtotal']
+    request.session['discount_total'] = cart_data['discount_total']
+    request.session['payable_total'] = cart_data['payable_total']
+    return Response(cart_data)
+
+
 
 # ---------- addresses ----------
 
@@ -390,6 +439,7 @@ def checkout_create_order(request):
         return Response({"detail": "Cart is empty."}, status=400)
 
     has_physical = cart.items.filter(product__is_digital=False).exists()
+    
     billing_id = request.data.get("billing_address_id")
     shipping_id = request.data.get("shipping_address_id") if has_physical else None
 

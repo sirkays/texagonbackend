@@ -112,7 +112,6 @@ def create_subscription_payment(request):
         invoice = None
         membership = None
         if is_store_payment:
-            print(request.data, " payload ")
             raw_amount = request.data.get("amount")
             order_id = request.data.get("order_id")
 
