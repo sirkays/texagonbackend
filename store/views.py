@@ -417,9 +417,9 @@ def _compute_totals(cart: Cart) -> dict:
             discount = (subtotal * cart.coupon.value / Decimal("100")).quantize(Decimal("0.01"))
         else:
             discount = min(cart.coupon.value, subtotal)
-
-    grand = max(subtotal - discount + TAX_RATE + FLAT_SHIPPING, Decimal("0.00")).quantize(Decimal("0.01"))
-    return {"subtotal": subtotal, "discount": discount, "tax": TAX_RATE, "shipping": FLAT_SHIPPING, "grand": grand}
+    tax_rate_amt = (subtotal * TAX_RATE).quantize(Decimal("0.01"))
+    grand = max(subtotal - discount + tax_rate_amt + FLAT_SHIPPING, Decimal("0.00")).quantize(Decimal("0.01"))
+    return {"subtotal": subtotal, "discount": discount, "tax": tax_rate_amt, "shipping": FLAT_SHIPPING, "grand": grand}
 
 
 
@@ -622,7 +622,7 @@ def checkout_create_order(request):
         shipping = Address.objects.filter(user=user, id=shipping_id).first() if shipping_id else None
 
         totals = _compute_totals(cart)
-
+        
         order = Order.objects.create(
             user=user,
             subtotal=totals["subtotal"],
