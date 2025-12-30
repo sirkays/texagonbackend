@@ -28,6 +28,7 @@ urlpatterns = [
     path("bnpl/plans/", views.bnpl_plans),
     path("bnpl/<uuid:order_id>/start/", views.bnpl_start),
     path("bnpl/agreements/<uuid:agreement_id>/", views.bnpl_agreement_detail),
+    path("bnpl/breakdown/", views.bnpl_breakdown, name="bnpl-breakdown"),
 
     # reviews
     path("reviews/<uuid:product_id>/", views.review_create),

@@ -50,6 +50,8 @@ from store.models import (
     ShippingMethod,
 )
 
+from .bnpl import pick_plan_for_product, check_eligibility, compute_bnpl_breakdown
+
 # ---------- helpers ----------
 
 def _get_session_token_from_request(request) -> str | None:
@@ -483,6 +485,7 @@ def bnpl_plans(request):
         "currency": p.currency, "min_amount": str(p.min_amount), "max_amount": str(p.max_amount) if p.max_amount else None
     } for p in plans]
     return Response({"results": data})
+    
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
@@ -563,6 +566,129 @@ def bnpl_agreement_detail(request, agreement_id: str):
         } for inst in ag.installments.order_by("index")]
     }
     return Response(data)
+
+
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def bnpl_breakdown(request):
+    """
+    POST body:
+    {
+    "product_id": "<uuid>",           # required unless order_id provided
+    "quantity": 1,                    # optional (default 1)
+    "plan_id": "<uuid>",              # optional
+    "order_id": "<uuid>"              # optional: if you want breakdown from an existing order total
+    }
+    """
+    data = request.data or {}
+    product_id = data.get("product_id")
+    plan_id = data.get("plan_id")
+    order_id = data.get("order_id")
+    quantity = int(data.get("quantity") or 1)
+
+    if quantity < 1:
+        return Response({"detail": "quantity must be >= 1"}, status=status.HTTP_400_BAD_REQUEST)
+
+    principal_amount = None
+    product = None
+
+    # Option A: from order
+    if order_id:
+        try:
+            order = Order.objects.select_related("user").get(id=order_id)
+        except Order.DoesNotExist:
+            return Response({"detail": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # ensure the session user owns it if you require
+        if order.user_id and request.user.is_authenticated and order.user_id != request.user.id:
+            return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
+
+        principal_amount = order.grand_total
+
+    # Option B: from product * qty
+    else:
+        if not product_id:
+            return Response({"detail": "product_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        
+        try:
+            product = Product.objects.select_related("default_bnpl_plan").get(id=product_id, is_active=True)
+        except Product.DoesNotExist:
+            return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not product.bnpl_enabled:
+            return Response(
+                {
+                    "eligible": False,
+                    "reason": "BNPL is not enabled for this product.",
+                    "product_id": str(product.id),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        principal_amount = (product.price or Decimal("0.00")) * Decimal(quantity)
+
+    plan = pick_plan_for_product(product, plan_id=plan_id) if product else (
+        BNPLPlanTemplate.objects.filter(id=plan_id, active=True).first() if plan_id else BNPLPlanTemplate.objects.filter(active=True).first()
+    )
+    if not plan:
+        return Response(
+            {"eligible": False, "reason": "No BNPL plan configured."},
+            status=status.HTTP_200_OK,
+        )
+
+    principal_amount = Decimal(principal_amount or Decimal("0.00"))
+    eligible, reason = check_eligibility(principal_amount, plan)
+
+    breakdown = compute_bnpl_breakdown(
+        principal_amount=principal_amount,
+        plan=plan,
+        currency=plan.currency or "NGN",
+    )
+    print(
+        {
+            "eligible": eligible,
+            "reason": reason,
+            "plan": {
+                "id": str(plan.id),
+                "provider": plan.provider,
+                "name": plan.name,
+                "num_installments": plan.num_installments,
+                "interval_days": plan.interval_days,
+                "take_downpayment_now": plan.take_downpayment_now,
+                "currency": plan.currency,
+                "min_amount": str(plan.min_amount),
+                "max_amount": str(plan.max_amount) if plan.max_amount is not None else None,
+                "customer_fee_flat": str(plan.customer_fee_flat),
+                "customer_fee_rate": str(plan.customer_fee_rate),
+            },
+            "breakdown": breakdown,
+        }
+    )
+    return Response(
+        {
+            "eligible": eligible,
+            "reason": reason,
+            "plan": {
+                "id": str(plan.id),
+                "provider": plan.provider,
+                "name": plan.name,
+                "num_installments": plan.num_installments,
+                "interval_days": plan.interval_days,
+                "take_downpayment_now": plan.take_downpayment_now,
+                "currency": plan.currency,
+                "min_amount": str(plan.min_amount),
+                "max_amount": str(plan.max_amount) if plan.max_amount is not None else None,
+                "customer_fee_flat": str(plan.customer_fee_flat),
+                "customer_fee_rate": str(plan.customer_fee_rate),
+            },
+            "breakdown": breakdown,
+        },
+        status=status.HTTP_200_OK,
+    )
 
 # ---------- orders ----------
 

@@ -488,16 +488,17 @@ def confirm_payement(request):
                 products = OrderItem.objects.filter(order=order).values_list("product")
 
                 carts = CartItem.objects.filter(product__pk__in=products, cart__user=request.user)
-                carts.delete()
+                if carts:
+                    carts.delete()
 
-                Cart.objects.filter(user=request.user).update(coupon=None)
+                    Cart.objects.filter(user=request.user).update(coupon=None)
 
-                if order.coupon_code:
-                    coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
-                    if coupon:
-                        coupon.used_count = coupon.used_count + 1
+                    if order.coupon_code:
+                        coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
+                        if coupon:
+                            coupon.used_count = coupon.used_count + 1
 
-                        coupon.save()
+                            coupon.save()
 
                 
     except Exception as e:
