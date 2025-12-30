@@ -126,7 +126,7 @@ def _cart_to_dict(cart: Cart) -> dict:
 
         first_img = it.product.images.first()
         image_url = first_img.product_image.url if first_img and first_img.product_image else None
-
+        
         items.append({
             "id": str(it.id),
             "image_url": image_url,
@@ -423,24 +423,134 @@ def _compute_totals(cart: Cart) -> dict:
     return {"subtotal": subtotal, "discount": discount, "tax": tax, "shipping": shipping, "grand": grand}
 
 
-
-
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
 def checkout_create_order(request):
     """
-    Body: {billing_address_id?, shipping_address_id?}
-    Creates Order + OrderItems from the active cart.
+    Body (normal/cart):
+      { billing_address_id?, shipping_address_id? }
+
+    Body (BNPL / request-item):
+      {
+        "is_bnpl": true,
+        "product_id": "<uuid>",
+        "quantity": 1,
+        "bnpl_plan_id": "<uuid>"  # optional
+      }
+
+    Creates Order + OrderItems.
+    - Normal flow: from active cart items
+    - BNPL flow: from product_id + quantity (cart can be empty)
     """
     user = _get_user_from_request(request)
     cart = _get_or_create_cart(request)
+
+    is_bnpl = bool(request.data.get("is_bnpl") in [True, "true", "True", 1, "1"])
+    product_id = request.data.get("product_id")
+    quantity = int(request.data.get("quantity") or 1)
+    bnpl_plan_id = request.data.get("bnpl_plan_id")
+
+    if quantity < 1:
+        return Response({"detail": "quantity must be >= 1"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ---------------------------
+    # Determine source of items
+    # ---------------------------
+    if is_bnpl:
+        # BNPL path: allow order creation without cart
+        if not product_id:
+            return Response({"detail": "product_id is required for BNPL."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            product = Product.objects.select_related("default_bnpl_plan").get(id=product_id, is_active=True)
+        except Product.DoesNotExist:
+            return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not product.bnpl_enabled:
+            return Response({"detail": "BNPL is not enabled for this product."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # You can optionally validate/lock plan selection here
+        # If bnpl_plan_id provided, ensure it exists & is active
+        if bnpl_plan_id:
+            plan = BNPLPlanTemplate.objects.filter(id=bnpl_plan_id, active=True).first()
+            if not plan:
+                return Response({"detail": "Invalid bnpl_plan_id."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            plan = product.default_bnpl_plan if product.default_bnpl_plan and product.default_bnpl_plan.active else None
+            if not plan:
+                plan = BNPLPlanTemplate.objects.filter(active=True).first()
+
+        if not plan:
+            return Response({"detail": "No BNPL plan configured."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # For BNPL we build a single "virtual cart" totals model:
+        line_subtotal = (product.price or Decimal("0.00")) * Decimal(quantity)
+
+        # IMPORTANT:
+        # If your store tax/shipping rules require address, keep them zero or compute later.
+        # Keep consistent with your bnpl_breakdown approach.
+        # Example: digital items => no shipping. Physical => you may compute shipping when address exists.
+        has_physical = (product.is_digital is False)
+
+        # If you have robust tax/shipping logic in _compute_totals(cart),
+        # you can implement a _compute_totals_for_lines(...) function.
+        # For now: mimic simple totals:
+        tax_total = Decimal("0.00")          # or compute VAT here if you have rules
+        shipping_total = Decimal("0.00")     # or compute shipping for physical items
+        discount_total = Decimal("0.00")     # BNPL request item ignores coupon/cart discounts unless you support it
+
+        grand_total = (line_subtotal - discount_total + tax_total + shipping_total).quantize(Decimal("0.01"))
+
+        billing_id = request.data.get("billing_address_id")
+        shipping_id = request.data.get("shipping_address_id") if has_physical else None
+
+        billing = Address.objects.filter(user=user, id=billing_id).first() if billing_id else None
+        shipping = Address.objects.filter(user=user, id=shipping_id).first() if shipping_id else None
+
+        order = Order.objects.create(
+            user=user,
+            subtotal=line_subtotal,
+            discount_total=discount_total,
+            tax_total=tax_total,
+            shipping_total=shipping_total,
+            grand_total=grand_total,
+            coupon_code="",  # BNPL request-item ignores cart coupon by default
+            billing_address=billing,
+            shipping_address=shipping,
+            status=Order.Status.PENDING,
+        )
+
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            title_snapshot=product.title,
+            unit_price=product.price,
+            quantity=quantity,
+            line_total=(Decimal(quantity) * (product.price or Decimal("0.00"))).quantize(Decimal("0.01")),
+        )
+
+        return Response(
+            {
+                "order_id": str(order.id),
+                "grand_total": str(order.grand_total),
+                "is_bnpl": True,
+                "product_id": str(product.id),
+                "quantity": quantity,
+                "bnpl_plan_id": str(plan.id),
+            },
+            status=201,
+        )
+
+    # ---------------------------
+    # Normal path: from cart
+    # ---------------------------
     if not cart.items.exists():
         return Response({"detail": "Cart is empty."}, status=400)
 
     has_physical = cart.items.filter(product__is_digital=False).exists()
-    
+
     billing_id = request.data.get("billing_address_id")
     shipping_id = request.data.get("shipping_address_id") if has_physical else None
 
@@ -448,6 +558,7 @@ def checkout_create_order(request):
     shipping = Address.objects.filter(user=user, id=shipping_id).first() if shipping_id else None
 
     totals = _compute_totals(cart)
+
     order = Order.objects.create(
         user=user,
         subtotal=totals["subtotal"],
@@ -460,6 +571,7 @@ def checkout_create_order(request):
         shipping_address=shipping,
         status=Order.Status.PENDING,
     )
+
     for ci in cart.items.select_related("product"):
         OrderItem.objects.create(
             order=order,
@@ -467,9 +579,9 @@ def checkout_create_order(request):
             title_snapshot=ci.product.title,
             unit_price=ci.product.price,
             quantity=ci.quantity,
-            line_total=(ci.quantity * ci.product.price),
+            line_total=(Decimal(ci.quantity) * (ci.product.price or Decimal("0.00"))).quantize(Decimal("0.01")),
         )
-    # leave cart as-is until payment success, or clear here if you prefer
+
     return Response({"order_id": str(order.id), "grand_total": str(order.grand_total)}, status=201)
 
 
@@ -588,7 +700,7 @@ def bnpl_breakdown(request):
     plan_id = data.get("plan_id")
     order_id = data.get("order_id")
     quantity = int(data.get("quantity") or 1)
-
+    
     if quantity < 1:
         return Response({"detail": "quantity must be >= 1"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -648,26 +760,10 @@ def bnpl_breakdown(request):
         plan=plan,
         currency=plan.currency or "NGN",
     )
-    print(
-        {
-            "eligible": eligible,
-            "reason": reason,
-            "plan": {
-                "id": str(plan.id),
-                "provider": plan.provider,
-                "name": plan.name,
-                "num_installments": plan.num_installments,
-                "interval_days": plan.interval_days,
-                "take_downpayment_now": plan.take_downpayment_now,
-                "currency": plan.currency,
-                "min_amount": str(plan.min_amount),
-                "max_amount": str(plan.max_amount) if plan.max_amount is not None else None,
-                "customer_fee_flat": str(plan.customer_fee_flat),
-                "customer_fee_rate": str(plan.customer_fee_rate),
-            },
-            "breakdown": breakdown,
-        }
-    )
+    has_physical = product.is_digital is False
+
+    first_img = product.images.first()
+    image_url = first_img.product_image.url if first_img and first_img.product_image else None
     return Response(
         {
             "eligible": eligible,
@@ -686,6 +782,12 @@ def bnpl_breakdown(request):
                 "customer_fee_rate": str(plan.customer_fee_rate),
             },
             "breakdown": breakdown,
+            "product_details":{
+                "image_url": image_url,
+                "product_id": str(product.id),
+                "title": product.title,
+                "price": str(product.price),
+            }
         },
         status=status.HTTP_200_OK,
     )
