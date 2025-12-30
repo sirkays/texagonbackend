@@ -419,7 +419,7 @@ def _compute_totals(cart: Cart) -> dict:
             discount = min(cart.coupon.value, subtotal)
 
     grand = max(subtotal - discount + TAX_RATE + FLAT_SHIPPING, Decimal("0.00")).quantize(Decimal("0.01"))
-    return {"subtotal": subtotal, "discount": discount, "tax": tax, "shipping": shipping, "grand": grand}
+    return {"subtotal": subtotal, "discount": discount, "tax": TAX_RATE, "shipping": FLAT_SHIPPING, "grand": grand}
 
 
 
@@ -430,68 +430,190 @@ def _compute_totals(cart: Cart) -> dict:
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
 def checkout_create_order(request):
-    """
-    Body (normal/cart):
-      { billing_address_id?, shipping_address_id? }
+    try:
+        """
+        Body (normal/cart):
+        { billing_address_id?, shipping_address_id? }
 
-    Body (BNPL / request-item):
-      {
-        "is_bnpl": true,
-        "product_id": "<uuid>",
-        "quantity": 1,
-        "bnpl_plan_id": "<uuid>"  # optional
-      }
+        Body (BNPL / request-item):
+        {
+            "is_bnpl": true,
+            "product_id": "<uuid>",
+            "quantity": 1,
+            "bnpl_plan_id": "<uuid>"  # optional
+        }
 
-    Creates Order + OrderItems.
-    - Normal flow: from active cart items
-    - BNPL flow: from product_id + quantity (cart can be empty)
-    Also creates BNPLAgreement for BNPL flow.
-    """
-    user = _get_user_from_request(request)
-    cart = _get_or_create_cart(request)
+        Creates Order + OrderItems.
+        - Normal flow: from active cart items
+        - BNPL flow: from product_id + quantity (cart can be empty)
+        Also creates BNPLAgreement for BNPL flow.
+        """
+        user = _get_user_from_request(request)
+        cart = _get_or_create_cart(request)
 
-    is_bnpl = _to_bool(request.data.get("is_bnpl"))
-    product_id = (request.data.get("product_id") or "").strip()
-    quantity = int(request.data.get("quantity") or 1)
-    bnpl_plan_id = request.data.get("bnpl_plan_id")
+        is_bnpl = _to_bool(request.data.get("is_bnpl"))
+        product_id = (request.data.get("product_id") or "").strip()
+        quantity = int(request.data.get("quantity") or 1)
+        bnpl_plan_id = request.data.get("bnpl_plan_id")
 
-    if quantity < 1:
-        return Response({"detail": "quantity must be >= 1"}, status=status.HTTP_400_BAD_REQUEST)
+        if quantity < 1:
+            return Response({"detail": "quantity must be >= 1"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ============================================================
-    # BNPL PATH (request-item) — cart can be empty
-    # ============================================================
-    if is_bnpl:
-        if not product_id:
-            return Response({"detail": "product_id is required for BNPL."}, status=status.HTTP_400_BAD_REQUEST)
+        # ============================================================
+        # BNPL PATH (request-item) — cart can be empty
+        # ============================================================
+        if is_bnpl:
+            if not product_id:
+                return Response({"detail": "product_id is required for BNPL."}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            product = Product.objects.select_related("default_bnpl_plan").prefetch_related("images").get(
-                id=product_id, is_active=True
+            try:
+                product = Product.objects.select_related("default_bnpl_plan").prefetch_related("images").get(
+                    id=product_id, is_active=True
+                )
+            except Product.DoesNotExist:
+                return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            if not product.bnpl_enabled:
+                return Response({"detail": "BNPL is not enabled for this product."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Pick plan
+            if bnpl_plan_id:
+                plan = BNPLPlanTemplate.objects.filter(id=bnpl_plan_id, active=True).first()
+                if not plan:
+                    return Response({"detail": "Invalid bnpl_plan_id."}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                plan = None
+                if product.default_bnpl_plan and product.default_bnpl_plan.active:
+                    plan = product.default_bnpl_plan
+                if not plan:
+                    plan = BNPLPlanTemplate.objects.filter(active=True).first()
+
+            if not plan:
+                return Response({"detail": "No BNPL plan configured."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Address (optional; shipping only for physical)
+            has_physical = (product.is_digital is False)
+
+            billing_id = request.data.get("billing_address_id")
+            shipping_id = request.data.get("shipping_address_id") if has_physical else None
+
+            billing = Address.objects.filter(user=user, id=billing_id).first() if billing_id else None
+            shipping = Address.objects.filter(user=user, id=shipping_id).first() if shipping_id else None
+
+            # ---------------------------
+            # Totals
+            # ---------------------------
+            # Principal base is product price * qty
+            line_subtotal = _quant((product.price or Decimal("0.00")) * Decimal(quantity))
+
+            # Decide whether BNPL includes tax/shipping:
+            # Most BNPL providers finance the TOTAL payable (including tax/shipping).
+            tax_total = _quant(line_subtotal * TAX_RATE)
+            shipping_total = _quant(FLAT_SHIPPING if has_physical else Decimal("0.00"))
+
+            discount_total = Decimal("0.00")  # request-item ignores coupons unless you support it
+            grand_total = _quant(line_subtotal - discount_total + tax_total + shipping_total)
+
+            # Create Order
+            order = Order.objects.create(
+                user=user,
+                subtotal=line_subtotal,
+                discount_total=_quant(discount_total),
+                tax_total=tax_total,
+                shipping_total=shipping_total,
+                grand_total=grand_total,
+                coupon_code="",
+                billing_address=billing,
+                shipping_address=shipping,
+                status=Order.Status.PENDING,
             )
-        except Product.DoesNotExist:
-            return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if not product.bnpl_enabled:
-            return Response({"detail": "BNPL is not enabled for this product."}, status=status.HTTP_400_BAD_REQUEST)
+            OrderItem.objects.create(
+                order=order,
+                product=product,
+                title_snapshot=product.title,
+                unit_price=_quant(product.price or Decimal("0.00")),
+                quantity=quantity,
+                line_total=_quant((product.price or Decimal("0.00")) * Decimal(quantity)),
+            )
 
-        # Pick plan
-        if bnpl_plan_id:
-            plan = BNPLPlanTemplate.objects.filter(id=bnpl_plan_id, active=True).first()
-            if not plan:
-                return Response({"detail": "Invalid bnpl_plan_id."}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            plan = None
-            if product.default_bnpl_plan and product.default_bnpl_plan.active:
-                plan = product.default_bnpl_plan
-            if not plan:
-                plan = BNPLPlanTemplate.objects.filter(active=True).first()
+            # ---------------------------
+            # Create BNPLAgreement
+            # ---------------------------
+            principal_amount = _quant(order.grand_total)  # finance the full payable amount
+            customer_fees = _bnpl_customer_fees(principal_amount, plan)
+            total_amount = _quant(principal_amount + customer_fees)
 
-        if not plan:
-            return Response({"detail": "No BNPL plan configured."}, status=status.HTTP_400_BAD_REQUEST)
+            agreement = BNPLAgreement.objects.create(
+                order=order,
+                plan=plan,
+                provider=plan.provider,
+                status=BNPLAgreement.Status.PENDING,
+                num_installments=plan.num_installments,
+                interval_days=plan.interval_days,
+                take_downpayment_now=plan.take_downpayment_now,
+                currency=plan.currency or "NGN",
+                principal_amount=principal_amount,
+                customer_fee_flat=_quant(plan.customer_fee_flat or Decimal("0.00")),
+                customer_fee_rate=Decimal(plan.customer_fee_rate or Decimal("0.0000")),
+                total_amount=total_amount,
+                amount_paid=Decimal("0.00"),
+                amount_outstanding=total_amount,
+            )
 
-        # Address (optional; shipping only for physical)
-        has_physical = (product.is_digital is False)
+            # Create schedule rows now (installments)
+            agreement.initialize_schedule(first_charge_at=timezone.now())
+
+            # Pay-today (first installment) amount for frontend button
+            first_inst = agreement.installments.order_by("index").first()
+            pay_today = _quant(first_inst.amount_due if first_inst else Decimal("0.00"))
+
+            first_img = product.images.first()
+            image_url = first_img.get_absolute_url(request) if first_img else None
+
+            return Response(
+                {
+                    "order_id": str(order.id),
+                    "grand_total": str(order.grand_total),
+
+                    "is_bnpl": True,
+                    "product_id": str(product.id),
+                    "quantity": quantity,
+                    "bnpl_plan_id": str(plan.id),
+
+                    "bnpl_agreement_id": str(agreement.id),
+                    "bnpl_total_amount": str(agreement.total_amount),
+                    "bnpl_customer_fees": str(customer_fees),
+                    "bnpl_pay_today": str(pay_today),
+
+                    "product_details": {
+                        "image_url": image_url,
+                        "product_id": str(product.id),
+                        "title": product.title,
+                        "price": str(product.price),
+                    },
+
+                    "installments": [
+                        {
+                            "index": inst.index,
+                            "due_at": inst.due_at.isoformat(),
+                            "amount_due": str(inst.amount_due),
+                            "capture_immediately": bool(inst.capture_immediately),
+                            "status": inst.status,
+                        }
+                        for inst in agreement.installments.all().order_by("index")
+                    ],
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        # ============================================================
+        # NORMAL PATH (cart)
+        # ============================================================
+        if not cart.items.exists():
+            return Response({"detail": "Cart is empty."}, status=status.HTTP_400_BAD_REQUEST)
+
+        has_physical = cart.items.filter(product__is_digital=False).exists()
 
         billing_id = request.data.get("billing_address_id")
         shipping_id = request.data.get("shipping_address_id") if has_physical else None
@@ -499,155 +621,35 @@ def checkout_create_order(request):
         billing = Address.objects.filter(user=user, id=billing_id).first() if billing_id else None
         shipping = Address.objects.filter(user=user, id=shipping_id).first() if shipping_id else None
 
-        # ---------------------------
-        # Totals
-        # ---------------------------
-        # Principal base is product price * qty
-        line_subtotal = _quant((product.price or Decimal("0.00")) * Decimal(quantity))
+        totals = _compute_totals(cart)
 
-        # Decide whether BNPL includes tax/shipping:
-        # Most BNPL providers finance the TOTAL payable (including tax/shipping).
-        tax_total = _quant(line_subtotal * TAX_RATE)
-        shipping_total = _quant(FLAT_SHIPPING if has_physical else Decimal("0.00"))
-
-        discount_total = Decimal("0.00")  # request-item ignores coupons unless you support it
-        grand_total = _quant(line_subtotal - discount_total + tax_total + shipping_total)
-
-        # Create Order
         order = Order.objects.create(
             user=user,
-            subtotal=line_subtotal,
-            discount_total=_quant(discount_total),
-            tax_total=tax_total,
-            shipping_total=shipping_total,
-            grand_total=grand_total,
-            coupon_code="",
+            subtotal=totals["subtotal"],
+            discount_total=totals["discount"],
+            tax_total=totals["tax"],
+            shipping_total=totals["shipping"],
+            grand_total=totals["grand"],
+            coupon_code=cart.coupon.code if cart.coupon else "",
             billing_address=billing,
             shipping_address=shipping,
             status=Order.Status.PENDING,
         )
 
-        OrderItem.objects.create(
-            order=order,
-            product=product,
-            title_snapshot=product.title,
-            unit_price=_quant(product.price or Decimal("0.00")),
-            quantity=quantity,
-            line_total=_quant((product.price or Decimal("0.00")) * Decimal(quantity)),
-        )
+        for ci in cart.items.select_related("product"):
+            OrderItem.objects.create(
+                order=order,
+                product=ci.product,
+                title_snapshot=ci.product.title,
+                unit_price=_quant(ci.product.price or Decimal("0.00")),
+                quantity=ci.quantity,
+                line_total=_quant(Decimal(ci.quantity) * (ci.product.price or Decimal("0.00"))),
+            )
 
-        # ---------------------------
-        # Create BNPLAgreement
-        # ---------------------------
-        principal_amount = _quant(order.grand_total)  # finance the full payable amount
-        customer_fees = _bnpl_customer_fees(principal_amount, plan)
-        total_amount = _quant(principal_amount + customer_fees)
+        return Response({"order_id": str(order.id), "grand_total": str(order.grand_total)}, status=status.HTTP_201_CREATED)
 
-        agreement = BNPLAgreement.objects.create(
-            order=order,
-            plan=plan,
-            provider=plan.provider,
-            status=BNPLAgreement.Status.PENDING,
-            num_installments=plan.num_installments,
-            interval_days=plan.interval_days,
-            take_downpayment_now=plan.take_downpayment_now,
-            currency=plan.currency or "NGN",
-            principal_amount=principal_amount,
-            customer_fee_flat=_quant(plan.customer_fee_flat or Decimal("0.00")),
-            customer_fee_rate=Decimal(plan.customer_fee_rate or Decimal("0.0000")),
-            total_amount=total_amount,
-            amount_paid=Decimal("0.00"),
-            amount_outstanding=total_amount,
-        )
-
-        # Create schedule rows now (installments)
-        agreement.initialize_schedule(first_charge_at=timezone.now())
-
-        # Pay-today (first installment) amount for frontend button
-        first_inst = agreement.installments.order_by("index").first()
-        pay_today = _quant(first_inst.amount_due if first_inst else Decimal("0.00"))
-
-        first_img = product.images.first()
-        image_url = first_img.get_absolute_url(request) if first_img else None
-
-        return Response(
-            {
-                "order_id": str(order.id),
-                "grand_total": str(order.grand_total),
-
-                "is_bnpl": True,
-                "product_id": str(product.id),
-                "quantity": quantity,
-                "bnpl_plan_id": str(plan.id),
-
-                "bnpl_agreement_id": str(agreement.id),
-                "bnpl_total_amount": str(agreement.total_amount),
-                "bnpl_customer_fees": str(customer_fees),
-                "bnpl_pay_today": str(pay_today),
-
-                "product_details": {
-                    "image_url": image_url,
-                    "product_id": str(product.id),
-                    "title": product.title,
-                    "price": str(product.price),
-                },
-
-                "installments": [
-                    {
-                        "index": inst.index,
-                        "due_at": inst.due_at.isoformat(),
-                        "amount_due": str(inst.amount_due),
-                        "capture_immediately": bool(inst.capture_immediately),
-                        "status": inst.status,
-                    }
-                    for inst in agreement.installments.all().order_by("index")
-                ],
-            },
-            status=status.HTTP_201_CREATED,
-        )
-
-    # ============================================================
-    # NORMAL PATH (cart)
-    # ============================================================
-    if not cart.items.exists():
-        return Response({"detail": "Cart is empty."}, status=status.HTTP_400_BAD_REQUEST)
-
-    has_physical = cart.items.filter(product__is_digital=False).exists()
-
-    billing_id = request.data.get("billing_address_id")
-    shipping_id = request.data.get("shipping_address_id") if has_physical else None
-
-    billing = Address.objects.filter(user=user, id=billing_id).first() if billing_id else None
-    shipping = Address.objects.filter(user=user, id=shipping_id).first() if shipping_id else None
-
-    totals = _compute_totals(cart)
-
-    order = Order.objects.create(
-        user=user,
-        subtotal=totals["subtotal"],
-        discount_total=totals["discount"],
-        tax_total=totals["tax"],
-        shipping_total=totals["shipping"],
-        grand_total=totals["grand"],
-        coupon_code=cart.coupon.code if cart.coupon else "",
-        billing_address=billing,
-        shipping_address=shipping,
-        status=Order.Status.PENDING,
-    )
-
-    for ci in cart.items.select_related("product"):
-        OrderItem.objects.create(
-            order=order,
-            product=ci.product,
-            title_snapshot=ci.product.title,
-            unit_price=_quant(ci.product.price or Decimal("0.00")),
-            quantity=ci.quantity,
-            line_total=_quant(Decimal(ci.quantity) * (ci.product.price or Decimal("0.00"))),
-        )
-
-    return Response({"order_id": str(order.id), "grand_total": str(order.grand_total)}, status=status.HTTP_201_CREATED)
-
-
+    except Exception as e:
+        print(e)
 
 
 
