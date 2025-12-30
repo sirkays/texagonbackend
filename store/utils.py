@@ -35,3 +35,22 @@ def calc_discount(subtotal: Decimal, coupon: Coupon | None) -> Decimal:
 
     # never discount more than subtotal
     return min(discount, subtotal)
+
+
+
+def _to_bool(v):
+    return v in [True, "true", "True", 1, "1", "yes", "YES", "on", "ON"]
+
+
+def _quant(v: Decimal) -> Decimal:
+    return (v or Decimal("0.00")).quantize(Decimal("0.01"))
+
+
+def _bnpl_customer_fees(principal_amount: Decimal, plan) -> Decimal:
+    """
+    customer_fee_rate is stored as decimal (e.g. 0.0500 for 5%)
+    """
+    principal_amount = Decimal(principal_amount or Decimal("0.00"))
+    rate = Decimal(plan.customer_fee_rate or Decimal("0.0000"))
+    flat = Decimal(plan.customer_fee_flat or Decimal("0.00"))
+    return _quant(flat + (principal_amount * rate))

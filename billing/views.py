@@ -23,7 +23,7 @@ from academics.models import ParentProfile
 from billing.models import SubscriptionInvoice, SubscriptionPayment, InvoiceType
 from core.utils import _is_org_admin_or_teacher, _resolve_org, get_object_or_404_ajax
 from orgs.models import OrganizationMembership
-from store.models import Order, Payment, OrderItem,CartItem
+from store.models import Order, Payment, OrderItem,CartItem,Cart
 from .models import Complaint, ComplaintResponse,ComplaintAttachment
 from .utils import confirm_transaction, generate_payment_link
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
@@ -105,12 +105,17 @@ def create_subscription_payment(request):
 
         is_store_payment = request.data.get("is_store_payment")
 
+        bnpl_plan_id = request.data.get("bnpl_plan_id")
+
+        is_bnpl = request.data.get("is_bnpl")
+
         item_list = (request.data.get("item_list") or "").split(",") if request.data.get("item_list") else []
 
         title = request.data.get("payment_title",  "Subscription Payment")
 
         invoice = None
         membership = None
+
         if is_store_payment:
             raw_amount = request.data.get("amount")
             order_id = request.data.get("order_id")
@@ -137,11 +142,21 @@ def create_subscription_payment(request):
                 defaults={"amount": amount, "due_at": timezone.now()},
             )
 
-            invoice_type, _ = InvoiceType.objects.get_or_create(
-                invoice=invoice,
-                invoice_type="store",
-                defaults={"object_id": order_id, "object_type": "order"},
-            )
+            if is_bnpl and bnpl_plan_id:
+                invoice_type, _ = InvoiceType.objects.get_or_create(
+                    invoice=invoice,
+                    invoice_type="store",
+                    defaults={"object_id": order_id, "object_type": "bnpl",
+                    "meta":{"bnpl_plan_id": bnpl_plan_id}
+                    },
+                )
+                invoice_type.
+            else:
+                invoice_type, _ = InvoiceType.objects.get_or_create(
+                    invoice=invoice,
+                    invoice_type="store",
+                    defaults={"object_id": order_id, "object_type": "order"},
+                )
 
 
         if not redirect_url:
@@ -210,6 +225,7 @@ def create_subscription_payment(request):
     except Exception as e:
         print(e)
     return Response({"detail": "Could not create payment.", "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 @api_view(["PATCH"])
 @permission_classes([HasAPIKey])
@@ -412,7 +428,7 @@ def fetch_parent_invoices(request):
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
-def confirm_payement(request):
+def confirm_payment(request):
     user = getattr(request, "user", None)
     if not user or not user.is_authenticated:
         return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
@@ -461,6 +477,7 @@ def confirm_payement(request):
     subscription_payment.invoice.status = "paid"
     subscription_payment.invoice.transaction_id = transaction_id
     subscription_payment.invoice.save()
+
     try:
         invoice_type = InvoiceType.objects.get(invoice=subscription_payment.invoice)
         if invoice_type.invoice_type == "tutor":
@@ -500,7 +517,69 @@ def confirm_payement(request):
 
                             coupon.save()
 
-                
+        elif invoice_type.object_type == "bnpl":
+            order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=request.user)
+            if not order:
+                return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 1) Mark order as paid OR keep pending + bnpl flag (your call)
+            order.status = "paid"
+            order.save(update_fields=["status"])
+
+            # 2) Create / ensure BNPLAgreement exists
+            agreement = getattr(order, "bnpl_agreement", None)
+            if agreement is None:
+                # You MUST know what plan was chosen.
+                # Ideally you stored plan on the order at create-order time.
+                # Example: store chosen plan id in order.notes or a dedicated field.
+                plan_id = invoice_type.meta.get('bnpl_plan_id')
+                plan = BNPLPlanTemplate.objects.filter(id=plan_id, active=True).first()
+                if not plan:
+                    return Response({"detail": "BNPL plan missing for this order."}, status=400)
+
+                agreement = BNPLAgreement.objects.create(
+                    order=order,
+                    plan=plan,
+                    provider=plan.provider,
+                    status=BNPLAgreement.Status.PENDING,
+
+                    num_installments=plan.num_installments,
+                    interval_days=plan.interval_days,
+                    take_downpayment_now=plan.take_downpayment_now,
+
+                    currency=plan.currency or "NGN",
+                    principal_amount=order.grand_total,
+                    customer_fee_flat=plan.customer_fee_flat,
+                    customer_fee_rate=plan.customer_fee_rate,
+                    total_amount=order.grand_total,  # or principal + fee if that’s your design
+
+                    provider_checkout_id=subscription_payment.reference,  # optional mapping
+                )
+
+            # 3) Initialize schedule if not already created
+            if not agreement.installments.exists():
+                agreement.initialize_schedule()
+
+            # 4) Mark installment #1 as captured using the paid amount
+            # The payment amount is subscription_payment.amount (invoice.amount)
+            first_inst = agreement.installments.order_by("index").first()
+            if not first_inst:
+                return Response({"detail": "BNPL schedule missing."}, status=500)
+
+            first_inst.mark_captured(subscription_payment.amount)
+
+            # 5) Clear cart items (same as your normal order flow)
+            products = OrderItem.objects.filter(order=order).values_list("product", flat=True)
+            CartItem.objects.filter(product__pk__in=list(products), cart__user=request.user).delete()
+            Cart.objects.filter(user=request.user).update(coupon=None)
+
+            # 6) Coupon used_count handling (optional — but keep consistent with normal checkout)
+            if order.coupon_code:
+                coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
+                if coupon:
+                    coupon.used_count = coupon.used_count + 1
+                    coupon.save()
+
     except Exception as e:
         print(e)
         return Response({"status":"failed", "message":f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

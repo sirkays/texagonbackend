@@ -1,6 +1,6 @@
 from django.urls import path
-from .views import (update_subscription_payment,create_subscription_payment,fetch_parent_invoices,confirm_payement,
-transactions_list,
+from .views import (update_subscription_payment,create_subscription_payment,fetch_parent_invoices,confirm_payment,
+    transactions_list,
     create_complaint,
     list_complaints,
     get_complaint,
@@ -17,7 +17,7 @@ urlpatterns = [
     path("api/fetch/invoices/", fetch_parent_invoices, name="fetch_parent_invoices"),
 
 
-    path("api/confirm/payment/", confirm_payement, name="confirm_payement"),
+    path("api/confirm/payment/", confirm_payment, name="confirm_payment"),
 
     path("api/transactions-list/", transactions_list, name="transactions_list"),
 

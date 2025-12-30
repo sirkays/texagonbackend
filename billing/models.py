@@ -125,6 +125,7 @@ class InvoiceType(models.Model):
     invoice_type = models.CharField(max_length=16, choices=Paytype.choices, default=Paytype.SUBSCRIPTION)
     object_id = models.CharField(max_length=250,blank=True, null=True)
     object_type = models.CharField(max_length=10, blank=True, null=True)
+    meta = models.JSONField(default=dict, blank=True)
 
 
 class Complaint(models.Model):  # or inherit your TimeStampedModel
