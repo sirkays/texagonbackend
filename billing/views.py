@@ -150,7 +150,6 @@ def create_subscription_payment(request):
                     "meta":{"bnpl_plan_id": bnpl_plan_id}
                     },
                 )
-                invoice_type.
             else:
                 invoice_type, _ = InvoiceType.objects.get_or_create(
                     invoice=invoice,
