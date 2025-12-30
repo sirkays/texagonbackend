@@ -286,6 +286,6 @@ class InvoiceTypeAdmin(admin.ModelAdmin):
         }),
         (_("Linked Object"), {
             "description": _("Optional reference to the source object (e.g Tutor, Booking, Subscription)"),
-            "fields": ("object_type", "object_id"),
+            "fields": ("object_type", "object_id", "meta"),
         }),
     )
