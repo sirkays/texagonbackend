@@ -215,7 +215,7 @@ class Order(TimeStampedModel):
         order_items = self.items.all()
         for order_item in order_items:
             product = order_item.product
-            if product.stock >= order.quantity:
+            if product.stock >= order_item.quantity:
                 product.stock = product.stock - order_item.quantity
                 product.save()
 

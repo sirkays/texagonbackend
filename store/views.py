@@ -4,9 +4,8 @@ import heapq
 from itertools import islice
 from decimal import Decimal
 from datetime import datetime
-
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import F, Q, Prefetch
 from django.utils import timezone
 
 from rest_framework import status
@@ -871,17 +870,51 @@ def orders_list(request):
     user = _get_user_from_request(request)
     if not user:
         return Response({"detail": "Auth required."}, status=401)
-    orders = (Order.objects.filter(user=user)
-              .prefetch_related("items__product", "shipments")
-              .order_by("-created_at")[:50])
-    data = [{
-        "id": str(o.id),
-        "status": o.status,
-        "grand_total": str(o.grand_total),
-        "created_at": o.created_at.isoformat(),
-        "items": [{"title": it.title_snapshot, "qty": it.quantity, "price": str(it.unit_price)} for it in o.items.all()],
-    } for o in orders]
+
+    orders = (
+    Order.objects.filter(user=user)
+    .select_related("bnpl_agreement", "bnpl_agreement__plan")
+    .prefetch_related("items__product", "shipments", "bnpl_agreement__installments")
+    .order_by("-created_at")[:50]
+    )
+
+    data = []
+    for o in orders:
+        bnpl = getattr(o, "bnpl_agreement", None)
+
+        next_payment = None
+        remaining = None
+        agreement_id = None
+
+        if bnpl:
+            agreement_id = str(bnpl.id)
+
+            # simplest: compute from installments (pending/authorized)
+            inst_qs = bnpl.installments.order_by("index")
+            unpaid = [i for i in inst_qs if i.status in {"pending", "authorized", "failed"}]
+            remaining = len(unpaid)
+
+            if unpaid:
+                next_payment = unpaid[0].due_at.isoformat()
+
+        data.append({
+            "id": str(o.id),
+            "status": o.status,
+            "grand_total": str(o.grand_total),
+            "created_at": o.created_at.isoformat(),
+            "items": [{"title": it.title_snapshot, "qty": it.quantity, "price": str(it.unit_price)} for it in o.items.all()],
+
+            # ✅ BNPL fields for frontend
+            "is_bnpl": bool(bnpl),
+            "agreement_id": agreement_id,
+            "bnpl_status": bnpl.status if bnpl else None,
+            "bnpl_provider": bnpl.provider if bnpl else None,
+            "next_payment": next_payment,
+            "remaining_payments": remaining,
+        })
     return Response({"results": data})
+
+
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])

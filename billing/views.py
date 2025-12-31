@@ -521,14 +521,13 @@ def confirm_payment(request):
 
             elif invoice_type.object_type == "bnpl":
                 order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=request.user)
-                if not order:
+                if not order or order is False:
                     return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
 
                 # 1) Mark order as paid OR keep pending + bnpl flag (your call)
                 order.status = "paid"
                 order.save(update_fields=["status"])
                 order.reduce_stock()
-
                 # 2) Create / ensure BNPLAgreement exists
                 agreement = getattr(order, "bnpl_agreement", None)
                 if agreement is None:
