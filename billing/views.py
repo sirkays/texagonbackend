@@ -23,7 +23,7 @@ from academics.models import ParentProfile
 from billing.models import SubscriptionInvoice, SubscriptionPayment, InvoiceType
 from core.utils import _is_org_admin_or_teacher, _resolve_org, get_object_or_404_ajax
 from orgs.models import OrganizationMembership
-from store.models import Order, Payment, OrderItem,CartItem,Cart
+from store.models import Order, Payment, OrderItem,CartItem,Cart,Coupon
 from .models import Complaint, ComplaintResponse,ComplaintAttachment
 from .utils import confirm_transaction, generate_payment_link
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
