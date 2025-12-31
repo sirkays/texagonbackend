@@ -114,6 +114,9 @@ def create_subscription_payment(request):
 
         title = request.data.get("payment_title",  "Subscription Payment")
 
+        agreement_id = request.data.get("agreement_id")
+        installment_id = request.data.get("installment_id")
+
         invoice = None
         membership = None
 
@@ -143,14 +146,25 @@ def create_subscription_payment(request):
                 defaults={"amount": amount, "due_at": timezone.now()},
             )
 
-            if is_bnpl and bnpl_plan_id:
+            if is_bnpl:
+                meta = {"bnpl_plan_id": bnpl_plan_id}
+
+                # ✅ for later installments, bnpl_plan_id may be empty, but installment_id MUST exist
+                if agreement_id:
+                    meta["agreement_id"] = str(agreement_id)
+                if installment_id:
+                    meta["installment_id"] = str(installment_id)
+
                 invoice_type, _ = InvoiceType.objects.get_or_create(
                     invoice=invoice,
                     invoice_type="store",
-                    defaults={"object_id": order_id, "object_type": "bnpl",
-                    "meta":{"bnpl_plan_id": bnpl_plan_id}
+                    defaults={
+                        "object_id": order_id,
+                        "object_type": "bnpl",
+                        "meta": meta,
                     },
                 )
+
             else:
                 invoice_type, _ = InvoiceType.objects.get_or_create(
                     invoice=invoice,
@@ -564,11 +578,31 @@ def confirm_payment(request):
 
                 # 4) Mark installment #1 as captured using the paid amount
                 # The payment amount is subscription_payment.amount (invoice.amount)
-                first_inst = agreement.installments.order_by("index").first()
-                if not first_inst:
+                meta = invoice_type.meta or {}
+                installment_id = meta.get("installment_id")
+
+                inst_qs = agreement.installments.order_by("index")
+
+                if installment_id:
+                    inst = inst_qs.filter(id=installment_id).first()
+                    if not inst:
+                        return Response({"detail": "Installment not found for this agreement."}, status=400)
+                else:
+                    # fallback (initial downpayment)
+                    inst = inst_qs.first()
+
+                if not inst:
                     return Response({"detail": "BNPL schedule missing."}, status=500)
 
-                first_inst.mark_captured(subscription_payment.amount)
+                # ✅ prevent double pay
+                if inst.is_settled:
+                    return Response({"detail": "Installment already settled."}, status=400)
+
+                # ✅ optional: block paying before due date (your policy)
+                if inst.due_at and inst.due_at > timezone.now():
+                    return Response({"detail": "Installment is not due yet."}, status=400)
+
+                inst.mark_captured(subscription_payment.amount)
 
                 # 5) Clear cart items (same as your normal order flow)
                 products = OrderItem.objects.filter(order=order).values_list("product", flat=True)

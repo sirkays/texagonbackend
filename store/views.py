@@ -923,8 +923,12 @@ def order_detail(request, order_id: str):
     user = _get_user_from_request(request)
     try:
         o = (Order.objects
-             .select_related("billing_address","shipping_address")
-             .prefetch_related("items__product","shipments__events","shipments__items__order_item")
+             .select_related("billing_address", "shipping_address", "bnpl_agreement")  # ✅ add
+             .prefetch_related(
+                 "items__product",
+                 "shipments__events",
+                 "shipments__items__order_item",
+             )
              .get(pk=order_id, user=user))
     except Order.DoesNotExist:
         return Response({"detail": "Not found."}, status=404)
@@ -942,10 +946,20 @@ def order_detail(request, order_id: str):
             } for e in s.events.all().order_by("occurred_at")]
         })
 
+    bnpl = getattr(o, "bnpl_agreement", None)
+
     data = {
-        "id": str(o.id), "status": o.status, "grand_total": str(o.grand_total),
+        "id": str(o.id),
+        "status": o.status,
+        "grand_total": str(o.grand_total),
         "items": [{"title": it.title_snapshot, "qty": it.quantity, "price": str(it.unit_price)} for it in o.items.all()],
         "shipments": shipments,
+
+        # ✅ BNPL extras for frontend
+        "is_bnpl": bool(bnpl),
+        "agreement_id": str(bnpl.id) if bnpl else None,
+        "bnpl_status": bnpl.status if bnpl else None,
+        "bnpl_provider": bnpl.provider if bnpl else None,
     }
     return Response(data)
 
