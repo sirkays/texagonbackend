@@ -23,18 +23,26 @@ def compute_bnpl_breakdown(
     currency: str = "NGN",
     first_due_at=None,
 ):
-    principal_amount = q2(principal_amount)
+    product_price = q2(principal_amount)
+
+    tax_amount = q2(product_price * TAX_RATE)
+    shipping_amount = q2(FLAT_SHIPPING)
+
+    principal_amount = q2(product_price + tax_amount + shipping_amount)
 
     fee_flat = q2(plan.customer_fee_flat or Decimal("0.00"))
-    fee_rate = plan.customer_fee_rate or Decimal("0.0000")  # e.g. 0.0500 = 5%
-    fee_rate_amount = q2(principal_amount * Decimal(fee_rate))
+    fee_rate = plan.customer_fee_rate or Decimal("0.0000")
 
-    tax_fee = (principal_amount * TAX_RATE) + FLAT_SHIPPING
-    tax_fee =  q2(tax_fee)
+    fee_rate_amount = q2(principal_amount * fee_rate)
 
-    customer_fees = q2(fee_flat + fee_rate_amount + tax_fee)
+    customer_fees = q2(fee_flat + fee_rate_amount)
+
     total_amount = q2(principal_amount + customer_fees)
 
+
+    print("Total Amt: ", total_amount)
+
+    print("Shipping: ",FLAT_SHIPPING, " customer fee: ", customer_fees)
     # Installments
     n = int(plan.num_installments)
     per_inst = q2(total_amount / Decimal(n))
