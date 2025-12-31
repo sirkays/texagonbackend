@@ -513,36 +513,36 @@ def checkout_create_order(request):
             grand_total = _quant(line_subtotal - discount_total + tax_total + shipping_total)
 
             # Create Order
-            # order = Order.objects.create(
-            #     user=user,
-            #     subtotal=line_subtotal,
-            #     discount_total=_quant(discount_total),
-            #     tax_total=tax_total,
-            #     shipping_total=shipping_total,
-            #     grand_total=grand_total,
-            #     coupon_code="",
-            #     billing_address=billing,
-            #     shipping_address=shipping,
-            #     status=Order.Status.PENDING,
-            # )
+            order = Order.objects.create(
+                user=user,
+                subtotal=line_subtotal,
+                discount_total=_quant(discount_total),
+                tax_total=tax_total,
+                shipping_total=shipping_total,
+                grand_total=grand_total,
+                coupon_code="",
+                billing_address=billing,
+                shipping_address=shipping,
+                status=Order.Status.PENDING,
+            )
 
-            # OrderItem.objects.create(
-            #     order=order,
-            #     product=product,
-            #     title_snapshot=product.title,
-            #     unit_price=_quant(product.price or Decimal("0.00")),
-            #     quantity=quantity,
-            #     line_total=_quant((product.price or Decimal("0.00")) * Decimal(quantity)),
-            # )
+            OrderItem.objects.create(
+                order=order,
+                product=product,
+                title_snapshot=product.title,
+                unit_price=_quant(product.price or Decimal("0.00")),
+                quantity=quantity,
+                line_total=_quant((product.price or Decimal("0.00")) * Decimal(quantity)),
+            )
 
             # ---------------------------
             # Create BNPLAgreement
             # ---------------------------
-            principal_amount = _quant(grand_total)  # finance the full payable amount
+            principal_amount = _quant(order.grand_total)  # finance the full payable amount
             customer_fees = _bnpl_customer_fees(principal_amount, plan)
             total_amount = _quant(principal_amount + customer_fees)
+            
 
-            return Response({"status":"failed"}, status=status.HTTP_403_FORBIDDEN)
             agreement = BNPLAgreement.objects.create(
                 order=order,
                 plan=plan,
