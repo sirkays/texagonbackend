@@ -211,6 +211,14 @@ class Order(TimeStampedModel):
     def __str__(self):
         return f"Order {self.pk} — {self.get_status_display()}"
 
+    def reduce_stock(self):
+        order_items = self.items.all()
+        for order_item in order_items:
+            product = order_item.product
+            if product.stock >= order.quantity:
+                product.stock = product.stock - order_item.quantity
+                product.save()
+
 
 class OrderItem(TimeStampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

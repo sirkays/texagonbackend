@@ -502,6 +502,7 @@ def confirm_payment(request):
                     return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
                 order.status = "paid"
                 order.save()
+                order.reduce_stock()
 
                 products = OrderItem.objects.filter(order=order).values_list("product")
 
@@ -526,6 +527,7 @@ def confirm_payment(request):
                 # 1) Mark order as paid OR keep pending + bnpl flag (your call)
                 order.status = "paid"
                 order.save(update_fields=["status"])
+                order.reduce_stock()
 
                 # 2) Create / ensure BNPLAgreement exists
                 agreement = getattr(order, "bnpl_agreement", None)
