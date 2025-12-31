@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.db.models import Q
 from rest_framework import status
 from .models import Product, BNPLPlanTemplate, Order
-
+from texagonbackend.settings import TAX_RATE,FLAT_SHIPPING
 
 TWOPLACES = Decimal("0.01")
 
@@ -29,7 +29,10 @@ def compute_bnpl_breakdown(
     fee_rate = plan.customer_fee_rate or Decimal("0.0000")  # e.g. 0.0500 = 5%
     fee_rate_amount = q2(principal_amount * Decimal(fee_rate))
 
-    customer_fees = q2(fee_flat + fee_rate_amount)
+    tax_fee = (principal_amount * TAX_RATE) + FLAT_SHIPPING
+    tax_fee =  q2(tax_fee)
+
+    customer_fees = q2(fee_flat + fee_rate_amount + tax_fee)
     total_amount = q2(principal_amount + customer_fees)
 
     # Installments

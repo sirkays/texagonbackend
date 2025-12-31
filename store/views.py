@@ -23,7 +23,7 @@ from core.utils import _resolve_org
 from billing.models import SubscriptionPayment, SubscriptionInvoice
 
 from .utils import (calc_discount, is_coupon_usable,_bnpl_customer_fees,_quant,_to_bool)
-
+from texagonbackend.settings import TAX_RATE,FLAT_SHIPPING
 # Store-related models
 from store.models import (
     Category,
@@ -111,8 +111,6 @@ def _product_to_dict(p: Product, request=None) -> dict:
 
 
 
-TAX_RATE = Decimal("0.08")
-FLAT_SHIPPING = Decimal("9.99")
 
 def _cart_to_dict(cart: Cart) -> dict:
     items = []

@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from decimal import Decimal
 
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -15,6 +16,10 @@ LOGO_URL = os.environ.get("LOGO_URL", "https://texagon.epichouse.online/logo.png
 
 TEST_KEY_SECRET = os.environ.get("TEST_KEY_SECRET", "CHANGE_ME")
 FLW_SECRET_KEY = os.environ.get("FLW_SECRET_KEY", "CHANGE_ME")
+
+
+TAX_RATE = Decimal("0.08")
+FLAT_SHIPPING = Decimal("9.99")
 
 if os.environ.get('LOCAL') == "0":
     CSRF_TRUSTED_ORIGINS = [

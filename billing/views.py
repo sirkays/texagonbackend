@@ -85,6 +85,7 @@ def _serialize_payment(payment: SubscriptionPayment,payment_link: str) -> dict:
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
 def create_subscription_payment(request):
     try:
         """
@@ -427,6 +428,7 @@ def fetch_parent_invoices(request):
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
 def confirm_payment(request):
     user = getattr(request, "user", None)
     if not user or not user.is_authenticated:
@@ -516,68 +518,68 @@ def confirm_payment(request):
 
                             coupon.save()
 
-        elif invoice_type.object_type == "bnpl":
-            order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=request.user)
-            if not order:
-                return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
+            elif invoice_type.object_type == "bnpl":
+                order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=request.user)
+                if not order:
+                    return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # 1) Mark order as paid OR keep pending + bnpl flag (your call)
-            order.status = "paid"
-            order.save(update_fields=["status"])
+                # 1) Mark order as paid OR keep pending + bnpl flag (your call)
+                order.status = "paid"
+                order.save(update_fields=["status"])
 
-            # 2) Create / ensure BNPLAgreement exists
-            agreement = getattr(order, "bnpl_agreement", None)
-            if agreement is None:
-                # You MUST know what plan was chosen.
-                # Ideally you stored plan on the order at create-order time.
-                # Example: store chosen plan id in order.notes or a dedicated field.
-                plan_id = invoice_type.meta.get('bnpl_plan_id')
-                plan = BNPLPlanTemplate.objects.filter(id=plan_id, active=True).first()
-                if not plan:
-                    return Response({"detail": "BNPL plan missing for this order."}, status=400)
+                # 2) Create / ensure BNPLAgreement exists
+                agreement = getattr(order, "bnpl_agreement", None)
+                if agreement is None:
+                    # You MUST know what plan was chosen.
+                    # Ideally you stored plan on the order at create-order time.
+                    # Example: store chosen plan id in order.notes or a dedicated field.
+                    plan_id = invoice_type.meta.get('bnpl_plan_id')
+                    plan = BNPLPlanTemplate.objects.filter(id=plan_id, active=True).first()
+                    if not plan:
+                        return Response({"detail": "BNPL plan missing for this order."}, status=400)
 
-                agreement = BNPLAgreement.objects.create(
-                    order=order,
-                    plan=plan,
-                    provider=plan.provider,
-                    status=BNPLAgreement.Status.PENDING,
+                    agreement = BNPLAgreement.objects.create(
+                        order=order,
+                        plan=plan,
+                        provider=plan.provider,
+                        status=BNPLAgreement.Status.PENDING,
 
-                    num_installments=plan.num_installments,
-                    interval_days=plan.interval_days,
-                    take_downpayment_now=plan.take_downpayment_now,
+                        num_installments=plan.num_installments,
+                        interval_days=plan.interval_days,
+                        take_downpayment_now=plan.take_downpayment_now,
 
-                    currency=plan.currency or "NGN",
-                    principal_amount=order.grand_total,
-                    customer_fee_flat=plan.customer_fee_flat,
-                    customer_fee_rate=plan.customer_fee_rate,
-                    total_amount=order.grand_total,  # or principal + fee if that’s your design
+                        currency=plan.currency or "NGN",
+                        principal_amount=order.grand_total,
+                        customer_fee_flat=plan.customer_fee_flat,
+                        customer_fee_rate=plan.customer_fee_rate,
+                        total_amount=order.grand_total,  # or principal + fee if that’s your design
 
-                    provider_checkout_id=subscription_payment.reference,  # optional mapping
-                )
+                        provider_checkout_id=subscription_payment.reference,  # optional mapping
+                    )
 
-            # 3) Initialize schedule if not already created
-            if not agreement.installments.exists():
-                agreement.initialize_schedule()
+                # 3) Initialize schedule if not already created
+                if not agreement.installments.exists():
+                    agreement.initialize_schedule()
 
-            # 4) Mark installment #1 as captured using the paid amount
-            # The payment amount is subscription_payment.amount (invoice.amount)
-            first_inst = agreement.installments.order_by("index").first()
-            if not first_inst:
-                return Response({"detail": "BNPL schedule missing."}, status=500)
+                # 4) Mark installment #1 as captured using the paid amount
+                # The payment amount is subscription_payment.amount (invoice.amount)
+                first_inst = agreement.installments.order_by("index").first()
+                if not first_inst:
+                    return Response({"detail": "BNPL schedule missing."}, status=500)
 
-            first_inst.mark_captured(subscription_payment.amount)
+                first_inst.mark_captured(subscription_payment.amount)
 
-            # 5) Clear cart items (same as your normal order flow)
-            products = OrderItem.objects.filter(order=order).values_list("product", flat=True)
-            CartItem.objects.filter(product__pk__in=list(products), cart__user=request.user).delete()
-            Cart.objects.filter(user=request.user).update(coupon=None)
+                # 5) Clear cart items (same as your normal order flow)
+                products = OrderItem.objects.filter(order=order).values_list("product", flat=True)
+                CartItem.objects.filter(product__pk__in=list(products), cart__user=request.user).delete()
+                Cart.objects.filter(user=request.user).update(coupon=None)
 
-            # 6) Coupon used_count handling (optional — but keep consistent with normal checkout)
-            if order.coupon_code:
-                coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
-                if coupon:
-                    coupon.used_count = coupon.used_count + 1
-                    coupon.save()
+                # 6) Coupon used_count handling (optional — but keep consistent with normal checkout)
+                if order.coupon_code:
+                    coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
+                    if coupon:
+                        coupon.used_count = coupon.used_count + 1
+                        coupon.save()
 
     except Exception as e:
         print(e)
