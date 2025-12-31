@@ -542,9 +542,6 @@ def checkout_create_order(request):
             customer_fees = _bnpl_customer_fees(principal_amount, plan)
             total_amount = _quant(principal_amount + customer_fees)
 
-            print("Principal Amount: ", principal_amount, " customer_fees: ",customer_fees)
-
-            print("Total Amount: ",total_amount)
             return Response({"status":"failed"}, status=status.HTTP_403_FORBIDDEN)
             agreement = BNPLAgreement.objects.create(
                 order=order,
