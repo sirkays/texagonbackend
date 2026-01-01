@@ -938,12 +938,13 @@ def orders_list(request):
 
                 if unpaid:
                     next_payment = unpaid[0].due_at.isoformat()
-
             data.append({
                 "id": str(o.id),
                 "status": o.status,
                 "grand_total": str(o.grand_total),
                 "created_at": o.created_at.isoformat(),
+                "shipments_count": o.shipments.count(),
+                "has_shipment": o.shipments.exists(),
 
                 # ✅ customer
                 "customer": {
@@ -1401,7 +1402,7 @@ def shipment_update_status(request, shipment_id: str):
 
 # ---------- tracking events (manual + webhook) ----------
 
-@api_view(["POST"])
+@api_view(["GET","POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def shipment_add_event(request, shipment_id: str):
@@ -1409,36 +1410,56 @@ def shipment_add_event(request, shipment_id: str):
     Staff-only: add a tracking event.
     Body: {event_code, description?, occurred_at?, city?, state?, country?, postal_code?, carrier_status?}
     """
-    if not getattr(request.user, "is_staff", False):
-        return Response({"detail": "Forbidden."}, status=403)
-
     try:
-        s = Shipment.objects.select_related("carrier").get(pk=shipment_id)
-    except Shipment.DoesNotExist:
-        return Response({"detail": "Not found."}, status=404)
+        print(" scbndjhcbdjhcbdjhcb")
+        if not getattr(request.user, "is_staff", False):
+            return Response({"detail": "Forbidden."}, status=403)
 
-    code = request.data.get("event_code")
-    valid = {c for c, _ in TrackingEvent.EventCode.choices}
-    if code not in valid:
-        return Response({"detail": "Invalid event_code."}, status=400)
+        try:
+            shipment = Shipment.objects.select_related("carrier").get(pk=shipment_id)
+        except Shipment.DoesNotExist:
+            return Response({"detail": "Not found."}, status=404)
 
-    occurred = request.data.get("occurred_at")
-    occurred_dt = timezone.now() if not occurred else timezone.datetime.fromisoformat(occurred)
-    e = TrackingEvent.objects.create(
-        shipment=s,
-        event_code=code,
-        description=request.data.get("description", ""),
-        city=request.data.get("city",""),
-        state=request.data.get("state",""),
-        country=request.data.get("country",""),
-        postal_code=request.data.get("postal_code",""),
-        occurred_at=occurred_dt,
-        carrier_status=request.data.get("carrier_status",""),
-        raw_payload=None,
-    )
-    _advance_shipment_status_from_event(s, code, occurred_dt)
-    return Response({"id": str(e.id)}, status=201)
+        if request.method == "GET":
+            qs = shipment.events.order_by("-occurred_at")
+            return Response([
+                {
+                "id": str(e.id),
+                "event_code": e.event_code,
+                "description": e.description,
+                "occurred_at": e.occurred_at.isoformat(),
+                "city": e.city,
+                "state": e.state,
+                "country": e.country,
+                "postal_code": e.postal_code,
+                "carrier_status": e.carrier_status,
+                } for e in qs
+            ])
+        else:
+            code = request.data.get("event_code")
+            valid = {c for c, _ in TrackingEvent.EventCode.choices}
+            if code not in valid:
+                return Response({"detail": "Invalid event_code."}, status=400)
 
+            occurred = request.data.get("occurred_at")
+            occurred_dt = timezone.now() if not occurred else timezone.datetime.fromisoformat(occurred)
+            e = TrackingEvent.objects.create(
+                shipment=shipment,
+                event_code=code,
+                description=request.data.get("description", ""),
+                city=request.data.get("city",""),
+                state=request.data.get("state",""),
+                country=request.data.get("country",""),
+                postal_code=request.data.get("postal_code",""),
+                occurred_at=occurred_dt,
+                carrier_status=request.data.get("carrier_status",""),
+                raw_payload=None,
+            )
+            _advance_shipment_status_from_event(shipment, code, occurred_dt)
+            return Response({"id": str(e.id)}, status=201)
+    except Exception as e:
+        print(e)
+        
 @api_view(["POST"])
 @permission_classes([HasAPIKey])                   # Keep API key; session token not required for carriers—still accepted.
 @authentication_classes([SessionTokenAuthentication])
@@ -1481,3 +1502,44 @@ def tracking_webhook(request):
     )
     _advance_shipment_status_from_event(s, code, occurred_dt)
     return Response({"detail": "ok", "event_id": str(e.id)}, status=202)
+
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])                   # Keep API key; session token not required for carriers—still accepted.
+@authentication_classes([SessionTokenAuthentication])
+def list_shipments(request):
+    user = request.user
+    if not AdminAccess.user_has_admin_access(user):
+        return Response({"detail": "Forbidden"}, status=403)
+
+    qs = (
+        Shipment.objects
+        .select_related("order", "carrier", "method")
+        .order_by("-created_at")
+    )
+
+    # Optional filters
+    status = request.query_params.get("status")
+    order_id = request.query_params.get("order_id")
+    if status:
+        qs = qs.filter(status=status)
+    if order_id:
+        qs = qs.filter(order_id=order_id)
+
+    data = []
+    for s in qs:
+        data.append({
+            "id": str(s.id),
+            "order_id": str(s.order_id),
+            "status": s.status,
+            "carrier_code": getattr(s.carrier, "code", ""),   # ✅ important for UI
+            "tracking_number": s.tracking_number or None,
+            "tracking_url": s.tracking_url or None,
+            "label_url": s.label_url or None,
+            "shipped_at": s.shipped_at.isoformat() if s.shipped_at else None,
+            "delivered_at": s.delivered_at.isoformat() if s.delivered_at else None,
+        })
+
+    return Response(data)

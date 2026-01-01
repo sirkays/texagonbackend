@@ -50,6 +50,7 @@ urlpatterns = [
     path("shipments/<uuid:shipment_id>/status/", views.shipment_update_status, name="shipment-update-status"),
     path("shipments/<uuid:shipment_id>/events/", views.shipment_add_event, name="shipment-add-event"),
     path("shipping/options/", views.shipping_options),
+    path("list/shipments/", views.list_shipments, name="store-shipments-list"),
 
     # Webhook (carrier updates)
     path("webhooks/tracking/", views.tracking_webhook, name="tracking-webhook"),
