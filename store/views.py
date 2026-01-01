@@ -116,24 +116,65 @@ def _get_or_create_cart(request) -> Cart:
         cart.save(update_fields=["user"])
     return cart
 
+# store/views.py (or wherever _product_to_dict is)
+
 def _product_to_dict(p: Product, request=None) -> dict:
-    first_image = p.images.order_by("sort_order").first()
-    image_url = first_image.get_absolute_url(request) if first_image else None
+    images_qs = p.images.order_by("sort_order", "created_at")
+
+    images = [
+        {
+            "id": str(img.id),
+            "url": img.get_absolute_url(request),
+            "alt_text": img.alt_text or "",
+            "sort_order": img.sort_order,
+        }
+        for img in images_qs
+        if img.get_absolute_url(request)
+    ]
+
+    # keep the first image for backward compatibility
+    first_image_url = images[0]["url"] if images else None
+
+    # reviews (latest first)
+    reviews_qs = (
+        p.reviews.select_related("user")
+        .order_by("-created_at")
+    )
+
+    reviews = [
+        {
+            "id": str(r.id),
+            "rating": int(r.rating),
+            "title": r.title or "",
+            "body": r.body or "",
+            "user_name": (r.user.get_full_name() or r.user.email or "").strip() if r.user else "",
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in reviews_qs
+    ]
 
     return {
         "id": str(p.id),
         "title": p.title,
         "slug": p.slug,
         "type": p.product_type,
-        "category": p.category.name,
-        "price": str(p.price) ,
-        "rating": float(p.rating),
-        "rating_count": p.rating_count,
-        "image": image_url,
-        "bnpl_enabled": getattr(p, "bnpl_enabled", True),
-        "description":p.description
-    }
+        "category": p.category.name if p.category else None,
+        "price": str(p.price),
+        "pay_in_4_amount": str(p.pay_in_4_amount) if p.pay_in_4_amount is not None else None,
 
+        "rating": float(p.rating),
+        "rating_count": int(p.rating_count),
+
+        # ✅ keep old key (your UI currently uses product.image)
+        "image": first_image_url,
+
+        # ✅ new keys
+        "images": images,
+        "reviews": reviews,
+
+        "bnpl_enabled": bool(getattr(p, "bnpl_enabled", True)),
+        "description": p.description or "",
+    }
 
 
 
@@ -259,13 +300,17 @@ def products_list(request):
 @authentication_classes([SessionTokenAuthentication])
 def product_detail(request, slug: str):
     try:
-        p = (Product.objects
-             .select_related("category")
-             .prefetch_related("images")
-             .get(slug=slug, is_active=True))
+        p = (
+            Product.objects
+            .select_related("category")
+            .prefetch_related("images", "reviews", "reviews__user")  # ✅ add reviews
+            .get(slug=slug, is_active=True)
+        )
     except Product.DoesNotExist:
         return Response({"detail": "Not found."}, status=404)
+
     return Response(_product_to_dict(p, request))
+
 
 # ---------- cart ----------
 
@@ -1084,29 +1129,6 @@ def order_detail(request, order_id: str):
     }
     return Response(data)
 
-# ---------- reviews ----------
-
-@api_view(["POST"])
-@permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
-def review_create(request, product_id: str):
-    user = _get_user_from_request(request)
-    if not user:
-        return Response({"detail": "Auth required."}, status=401)
-    rating = int(request.data.get("rating") or 0)
-    title = request.data.get("title","")
-    body = request.data.get("body","")
-    try:
-        product = Product.objects.get(pk=product_id, is_active=True)
-    except Product.DoesNotExist:
-        return Response({"detail": "Invalid product."}, status=400)
-
-    rv, created = Review.objects.update_or_create(
-        product=product, user=user,
-        defaults={"rating": rating, "title": title, "body": body}
-    )
-    # You likely have a signal to recompute Product.rating & rating_count
-    return Response({"id": str(rv.id), "detail": "Saved."}, status=201 if created else 200)
 
 # ---------- returns (RMA) ----------
 
@@ -1602,55 +1624,58 @@ class ProductReviewViewSet(APIKeySessionViewSet):
 
     @transaction.atomic
     def create(self, request, slug=None, *args, **kwargs):
-        """
-        Upsert: one review per user per product (your model enforces unique_together).
-        """
         try:
-            product = self._get_product(slug)
-        except Product.DoesNotExist:
-            return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+            """
+            Upsert: one review per user per product (your model enforces unique_together).
+            """
+            try:
+                product = self._get_product(slug)
+            except Product.DoesNotExist:
+                return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if not user_has_purchased_product(request.user, product):
+            if not user_has_purchased_product(request.user, product):
+                return Response(
+                    {"detail": "You can only review products you have purchased."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            payload = {
+                "rating": request.data.get("rating"),
+                "title": request.data.get("title", ""),
+                "body": request.data.get("body", ""),
+            }
+
+            existing = Review.objects.filter(product=product, user=request.user).first()
+            if existing:
+                ser = ReviewSerializer(existing, data=payload, partial=True)
+                ser.is_valid(raise_exception=True)
+                review = ser.save()
+            else:
+                ser = ReviewSerializer(data=payload)
+                ser.is_valid(raise_exception=True)
+                review = Review.objects.create(
+                    product=product,
+                    user=request.user,
+                    rating=ser.validated_data["rating"],
+                    title=ser.validated_data.get("title", ""),
+                    body=ser.validated_data.get("body", ""),
+                )
+
+            refresh_product_rating(product)
+
             return Response(
-                {"detail": "You can only review products you have purchased."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        payload = {
-            "rating": request.data.get("rating"),
-            "title": request.data.get("title", ""),
-            "body": request.data.get("body", ""),
-        }
-
-        existing = Review.objects.filter(product=product, user=request.user).first()
-        if existing:
-            ser = ReviewSerializer(existing, data=payload, partial=True)
-            ser.is_valid(raise_exception=True)
-            review = ser.save()
-        else:
-            ser = ReviewSerializer(data=payload)
-            ser.is_valid(raise_exception=True)
-            review = Review.objects.create(
-                product=product,
-                user=request.user,
-                rating=ser.validated_data["rating"],
-                title=ser.validated_data.get("title", ""),
-                body=ser.validated_data.get("body", ""),
-            )
-
-        refresh_product_rating(product)
-
-        return Response(
-            {
-                "review": ReviewSerializer(review).data,
-                "product": {
-                    "slug": product.slug,
-                    "rating": str(product.rating),
-                    "rating_count": product.rating_count,
+                {
+                    "review": ReviewSerializer(review).data,
+                    "product": {
+                        "slug": product.slug,
+                        "rating": str(product.rating),
+                        "rating_count": product.rating_count,
+                    },
                 },
-            },
-            status=status.HTTP_200_OK,
-        )
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            print(e)
 
     @action(detail=False, methods=["GET"], url_path="my-review")
     def my_review(self, request, slug=None):

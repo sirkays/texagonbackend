@@ -1,6 +1,7 @@
 from decimal import Decimal
 from django.utils import timezone
 from .models import Coupon, Product, Order, OrderItem, Review
+from django.db.models import F, Q, Avg, Count
 
 def is_coupon_usable(coupon: Coupon) -> bool:
     if not coupon or not coupon.active:

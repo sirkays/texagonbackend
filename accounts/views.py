@@ -827,13 +827,18 @@ def teacher_dashboard_overview(request):
     def format_datetime(dt):
         return timezone.localtime(dt).strftime("%b %d, %Y · %I:%M %p")
         
-    def safe_file_size_mb(file_field):
-        try:
-            if file_field and file_field.name:
-                return file_field.size / (1024 * 1024)
-        except (OSError, FileNotFoundError, ValueError):
-            pass
-        return 0
+        def safe_file_size_mb(file_field):
+            if not file_field:
+                return None
+
+            try:
+                size = getattr(file_field, "size", None)
+                if size is None:
+                    return None
+                return round(size / (1024 * 1024), 1)
+            except (OSError, FileNotFoundError, ValueError, TypeError):
+                return None
+
 
     try:
         user = request.user
@@ -1012,7 +1017,7 @@ def teacher_dashboard_overview(request):
 
         for l in recent_lessons:
             size_mb = safe_file_size_mb(getattr(l, "file", None))
-            size_str = f"{size_mb:.1f} MB" if size_mb else "0 MB"
+            size_str = f"{size_mb} MB" if size_mb is not None else "Unknown"
 
             views = 0  # placeholder
 
