@@ -17,7 +17,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
 from api.models import SessionToken
-from accounts.models import User
+from accounts.models import User,AdminAccess
 from core.utils import _resolve_org
 from billing.models import SubscriptionPayment, SubscriptionInvoice
 
@@ -377,13 +377,14 @@ def address_list_create(request):
             city=payload.get("city", ""),
             state=payload.get("state", ""),
             postal_code=payload.get("postal_code", ""),
-            country=payload.get("country", "US"),
-            phone=payload.get("phone", ""),
+            country=payload.get("country", "NG"),
+            phone=payload.get("phone_number", ""),
             is_default=bool(payload.get("is_default", False)),
         )
     except Exception as e:
         print(e)
     return Response({"id": str(addr.id)}, status=201)
+
 
 @api_view(["PATCH", "DELETE"])
 @permission_classes([HasAPIKey])
@@ -867,53 +868,145 @@ def bnpl_breakdown(request):
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def orders_list(request):
-    user = _get_user_from_request(request)
-    if not user:
-        return Response({"detail": "Auth required."}, status=401)
+    try:
+        user = _get_user_from_request(request)
+        if not user:
+            return Response({"detail": "Auth required."}, status=401)
 
-    orders = (
-    Order.objects.filter(user=user)
-    .select_related("bnpl_agreement", "bnpl_agreement__plan")
-    .prefetch_related("items__product", "shipments", "bnpl_agreement__installments")
-    .order_by("-created_at")[:50]
-    )
+        has_admin_access = AdminAccess.user_has_admin_access(user)
 
-    data = []
-    for o in orders:
-        bnpl = getattr(o, "bnpl_agreement", None)
+        # ✅ read status filter from query params
+        status_param = request.query_params.get("status")
+        status_list = None
 
-        next_payment = None
-        remaining = None
-        agreement_id = None
+        if status_param:
+            # allow: ?status=paid or ?status=paid,fulfilled
+            status_list = [s.strip() for s in status_param.split(",") if s.strip()]
+        if has_admin_access:
+            qs = (
+                Order.objects
+                .all()  # or .filter(user=user) for non-admin
+                .select_related(
+                    "user",
+                    "shipping_address",
+                    "billing_address",
+                    "bnpl_agreement",
+                    "bnpl_agreement__plan",
+                )
+                .prefetch_related(
+                    "items__product",
+                    "shipments",
+                    "bnpl_agreement__installments",
+                )
+            )
 
-        if bnpl:
-            agreement_id = str(bnpl.id)
+        else:
+            qs = (
+                Order.objects
+                .filter(user=user)
+                .select_related("bnpl_agreement", "bnpl_agreement__plan")
+                .prefetch_related(
+                    "items__product",
+                    "shipments",
+                    "bnpl_agreement__installments",
+                )
+            )            
 
-            # simplest: compute from installments (pending/authorized)
-            inst_qs = bnpl.installments.order_by("index")
-            unpaid = [i for i in inst_qs if i.status in {"pending", "authorized", "failed"}]
-            remaining = len(unpaid)
+        # ✅ apply status filter if provided
+        if status_list:
+            qs = qs.filter(status__in=status_list)
 
-            if unpaid:
-                next_payment = unpaid[0].due_at.isoformat()
+        orders = qs.order_by("-created_at")[:50]
 
-        data.append({
-            "id": str(o.id),
-            "status": o.status,
-            "grand_total": str(o.grand_total),
-            "created_at": o.created_at.isoformat(),
-            "items": [{"title": it.title_snapshot, "qty": it.quantity, "price": str(it.unit_price)} for it in o.items.all()],
+        data = []
+        for o in orders:
+            bnpl = getattr(o, "bnpl_agreement", None)
 
-            # ✅ BNPL fields for frontend
-            "is_bnpl": bool(bnpl),
-            "agreement_id": agreement_id,
-            "bnpl_status": bnpl.status if bnpl else None,
-            "bnpl_provider": bnpl.provider if bnpl else None,
-            "next_payment": next_payment,
-            "remaining_payments": remaining,
-        })
-    return Response({"results": data})
+            next_payment = None
+            remaining = None
+            agreement_id = None
 
+            if bnpl:
+                agreement_id = str(bnpl.id)
+
+                inst_qs = bnpl.installments.order_by("index")
+                unpaid = [
+                    i for i in inst_qs
+                    if i.status in {"pending", "authorized", "failed"}
+                ]
+                remaining = len(unpaid)
+
+                if unpaid:
+                    next_payment = unpaid[0].due_at.isoformat()
+
+            data.append({
+                "id": str(o.id),
+                "status": o.status,
+                "grand_total": str(o.grand_total),
+                "created_at": o.created_at.isoformat(),
+
+                # ✅ customer
+                "customer": {
+                    "id": str(o.user.id) if o.user else None,
+                    "full_name": (o.user.get_full_name() or "").strip() if o.user else "",
+                    "email": o.user.email if o.user else "",
+                    "phone": getattr(o.user, "phone", "") if o.user else "",
+                },
+
+                # ✅ shipping address (snapshot / selected address)
+                "shipping_address": (
+                    {
+                        "full_name": o.user.get_full_name(),
+                        "line1": o.shipping_address.line1,
+                        "line2": o.shipping_address.line2,
+                        "city": o.shipping_address.city,
+                        "state": o.shipping_address.state,
+                        "postal_code": o.shipping_address.postal_code,
+                        "country": o.shipping_address.country,
+                        "phone": o.shipping_address.phone,
+                    }
+                    if o.shipping_address else None
+                ),
+
+                # (optional) billing address
+                "billing_address": (
+                    {
+                        "full_name": o.billing_address.full_name,
+                        "line1": o.billing_address.line1,
+                        "line2": o.billing_address.line2,
+                        "city": o.billing_address.city,
+                        "state": o.billing_address.state,
+                        "postal_code": o.billing_address.postal_code,
+                        "country": o.billing_address.country,
+                        "phone": o.billing_address.phone,
+                    }
+                    if o.billing_address else None
+                ),
+
+                "items": [
+                    {
+                        "id": str(it.id),  # ✅ IMPORTANT for shipments
+                        "title": it.title_snapshot,
+                        "qty": it.quantity,
+                        "price": str(it.unit_price),
+                        "sku": it.product.sku,  # optional
+                    }
+                    for it in o.items.all()
+                ],
+
+                "is_bnpl": bool(bnpl),
+                "agreement_id": agreement_id,
+                "bnpl_status": bnpl.status if bnpl else None,
+                "bnpl_provider": bnpl.provider if bnpl else None,
+                "next_payment": next_payment,
+                "remaining_payments": remaining,
+            })
+
+        return Response({"results": data})
+
+    except Exception as e:
+        print("[orders_list error]", e)
+        return Response({"results": []})
 
 
 @api_view(["GET"])
@@ -1151,6 +1244,42 @@ def track_by_number(request):
     return Response(_shipment_to_dict(s))
 
 # ---------- staff/ops: create shipments, attach items, set tracking ----------
+# store/views.py
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def shipping_options(request):
+    user = _get_user_from_request(request)
+    if not user:
+        return Response({"detail": "Auth required."}, status=401)
+
+    # optionally restrict to admin
+    if not AdminAccess.user_has_admin_access(user):
+        return Response({"detail": "Forbidden"}, status=403)
+
+    carriers = ShippingCarrier.objects.filter(active=True).order_by("name")
+    methods = ShippingMethod.objects.filter(active=True, carrier__active=True).select_related("carrier").order_by("carrier__name","name")
+
+    return Response({
+        "carriers": [
+            {"id": str(c.id), "code": c.code, "name": c.name}
+            for c in carriers
+        ],
+        "methods": [
+            {
+                "id": str(m.id),
+                "carrier_id": str(m.carrier_id),
+                "carrier_code": m.carrier.code,
+                "name": m.name,
+                "service_code": m.service_code,
+                "est_min_days": m.est_min_days,
+                "est_max_days": m.est_max_days,
+            }
+            for m in methods
+        ]
+    })
+
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
