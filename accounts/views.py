@@ -838,7 +838,7 @@ def teacher_dashboard_overview(request):
                 return round(size / (1024 * 1024), 1)
             except (OSError, FileNotFoundError, ValueError, TypeError):
                 return None
-
+    print(" sjanckjdnckdncjkd ...")
 
     try:
         user = request.user
@@ -985,7 +985,7 @@ def teacher_dashboard_overview(request):
             "student_satisfaction": student_satisfaction,
             "test_pass_rate": test_pass_rate,
         }
-
+        print(performance, " pefr")
         # ---------- TOP COURSES ----------
         top_qs = (
             Course.objects.filter(teacher=teacher)
@@ -995,7 +995,7 @@ def teacher_dashboard_overview(request):
             )
             .order_by("-students")[:3]
         )
-
+        print(top_qs, " top...")
         top_courses = []
         for c in top_qs:
             top_courses.append({
@@ -1014,11 +1014,11 @@ def teacher_dashboard_overview(request):
         )
 
         recent_materials = []
-
+        print("befefmkdmcldmcl ")
         for l in recent_lessons:
             size_mb = safe_file_size_mb(getattr(l, "file", None))
             size_str = f"{size_mb} MB" if size_mb is not None else "Unknown"
-
+            print(size_str)
             views = 0  # placeholder
 
             recent_materials.append({
