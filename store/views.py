@@ -1073,7 +1073,7 @@ def order_detail(request, order_id: str):
         "id": str(o.id),
         "status": o.status,
         "grand_total": str(o.grand_total),
-        "items": [{"title": it.title_snapshot, "qty": it.quantity, "price": str(it.unit_price)} for it in o.items.all()],
+        "items": [{"title": it.title_snapshot,"product_slug": it.product.slug,"qty": it.quantity, "price": str(it.unit_price)} for it in o.items.all()],
         "shipments": shipments,
 
         # ✅ BNPL extras for frontend
