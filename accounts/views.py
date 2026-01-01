@@ -827,16 +827,16 @@ def teacher_dashboard_overview(request):
     def format_datetime(dt):
         return timezone.localtime(dt).strftime("%b %d, %Y · %I:%M %p")
         
-        def safe_file_size_mb(file_field):
-            if not file_field:
-                return None
+    def safe_file_size_mb(file_field):
+        if not file_field:
+            return None
 
-            try:
-                size = getattr(file_field, "size", None)
-                if size is None:
-                    return None
-                return round(size / (1024 * 1024), 1)
-            except (OSError, FileNotFoundError, ValueError, TypeError):
+        try:
+            size = getattr(file_field, "size", None)
+            if size is None:
+                return None
+            return round(size / (1024 * 1024), 1)
+        except (OSError, FileNotFoundError, ValueError, TypeError):
                 return None
     print(" sjanckjdnckdncjkd ...")
 
