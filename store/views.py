@@ -371,7 +371,7 @@ def address_list_create(request):
         payload = request.data
         addr = Address.objects.create(
             user=user,
-            full_name=payload.get("full_name", ""),
+            full_name=payload.get("full_name", user.get_full_name()),
             line1=payload.get("line1", ""),
             line2=payload.get("line2", ""),
             city=payload.get("city", ""),
