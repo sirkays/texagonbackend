@@ -4,12 +4,18 @@ import heapq
 from itertools import islice
 from decimal import Decimal
 from datetime import datetime
+
 from django.db import transaction
-from django.db.models import F, Q, Prefetch
+from django.db.models import F, Q, Avg, Count, Prefetch
 from django.utils import timezone
 
-from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework import status, viewsets
+from rest_framework.decorators import (
+    api_view,
+    permission_classes,
+    authentication_classes,
+    action,
+)
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 
@@ -17,13 +23,17 @@ from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
 from api.models import SessionToken
-from accounts.models import User,AdminAccess
+
+from accounts.models import User, AdminAccess
+
+from api.views import APIKeySessionViewSet
+
 from core.utils import _resolve_org
+
 from billing.models import SubscriptionPayment, SubscriptionInvoice
 
-from .utils import (calc_discount, is_coupon_usable,_bnpl_customer_fees,_quant,_to_bool)
-from texagonbackend.settings import TAX_RATE,FLAT_SHIPPING
-# Store-related models
+from texagonbackend.settings import TAX_RATE, FLAT_SHIPPING
+
 from store.models import (
     Category,
     Product,
@@ -49,7 +59,23 @@ from store.models import (
     ShippingMethod,
 )
 
-from .bnpl import pick_plan_for_product, check_eligibility, compute_bnpl_breakdown
+from store.serializers import ReviewSerializer
+
+from .utils import (
+    calc_discount,
+    is_coupon_usable,
+    _bnpl_customer_fees,
+    _quant,
+    _to_bool,
+    refresh_product_rating,
+    user_has_purchased_product,
+)
+
+from .bnpl import (
+    pick_plan_for_product,
+    check_eligibility,
+    compute_bnpl_breakdown,
+)
 
 # ---------- helpers ----------
 
@@ -986,6 +1012,7 @@ def orders_list(request):
 
                 "items": [
                     {
+                        "product_slug":it.product.slug,
                         "id": str(it.id),  # ✅ IMPORTANT for shipments
                         "title": it.title_snapshot,
                         "qty": it.quantity,
@@ -1543,3 +1570,96 @@ def list_shipments(request):
         })
 
     return Response(data)
+
+
+
+
+
+
+
+class ProductReviewViewSet(APIKeySessionViewSet):
+    """
+    Base URL: /store/api/products/<slug>/reviews/
+      - list (GET): public list for product
+      - create (POST): upsert current user's review (must have purchased)
+      - my_review (GET): /store/api/products/<slug>/reviews/my-review/
+    """
+
+    serializer_class = ReviewSerializer
+    queryset = Review.objects.none()  # not used directly
+
+    def _get_product(self, slug: str) -> Product:
+        return Product.objects.get(slug=slug, is_active=True)
+
+    def list(self, request, slug=None, *args, **kwargs):
+        try:
+            product = self._get_product(slug)
+        except Product.DoesNotExist:
+            return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        qs = Review.objects.filter(product=product).select_related("user").order_by("-created_at")
+        return Response({"results": ReviewSerializer(qs, many=True).data})
+
+    @transaction.atomic
+    def create(self, request, slug=None, *args, **kwargs):
+        """
+        Upsert: one review per user per product (your model enforces unique_together).
+        """
+        try:
+            product = self._get_product(slug)
+        except Product.DoesNotExist:
+            return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not user_has_purchased_product(request.user, product):
+            return Response(
+                {"detail": "You can only review products you have purchased."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        payload = {
+            "rating": request.data.get("rating"),
+            "title": request.data.get("title", ""),
+            "body": request.data.get("body", ""),
+        }
+
+        existing = Review.objects.filter(product=product, user=request.user).first()
+        if existing:
+            ser = ReviewSerializer(existing, data=payload, partial=True)
+            ser.is_valid(raise_exception=True)
+            review = ser.save()
+        else:
+            ser = ReviewSerializer(data=payload)
+            ser.is_valid(raise_exception=True)
+            review = Review.objects.create(
+                product=product,
+                user=request.user,
+                rating=ser.validated_data["rating"],
+                title=ser.validated_data.get("title", ""),
+                body=ser.validated_data.get("body", ""),
+            )
+
+        refresh_product_rating(product)
+
+        return Response(
+            {
+                "review": ReviewSerializer(review).data,
+                "product": {
+                    "slug": product.slug,
+                    "rating": str(product.rating),
+                    "rating_count": product.rating_count,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["GET"], url_path="my-review")
+    def my_review(self, request, slug=None):
+        try:
+            product = self._get_product(slug)
+        except Product.DoesNotExist:
+            return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        rev = Review.objects.filter(product=product, user=request.user).first()
+        if not rev:
+            return Response({"detail": "No review yet."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ReviewSerializer(rev).data)

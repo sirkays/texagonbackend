@@ -1,6 +1,17 @@
 from django.urls import path
 from . import views
 
+
+
+product_reviews = views.ProductReviewViewSet.as_view({
+    "get": "list",
+    "post": "create",
+})
+
+product_my_review = views.ProductReviewViewSet.as_view({
+    "get": "my_review",
+})
+
 urlpatterns = [
 
     # catalog
@@ -54,4 +65,9 @@ urlpatterns = [
 
     # Webhook (carrier updates)
     path("webhooks/tracking/", views.tracking_webhook, name="tracking-webhook"),
+
+
+    path("products/<slug:slug>/reviews/", product_reviews, name="product-reviews"),
+    path("products/<slug:slug>/reviews/my-review/", product_my_review, name="product-my-review")
+
 ]

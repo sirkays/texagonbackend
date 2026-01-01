@@ -1,6 +1,6 @@
 from decimal import Decimal
 from django.utils import timezone
-from .models import Coupon
+from .models import Coupon, Product, Order, OrderItem, Review
 
 def is_coupon_usable(coupon: Coupon) -> bool:
     if not coupon or not coupon.active:
@@ -54,3 +54,22 @@ def _bnpl_customer_fees(principal_amount: Decimal, plan) -> Decimal:
     rate = Decimal(plan.customer_fee_rate or Decimal("0.0000"))
     flat = Decimal(plan.customer_fee_flat or Decimal("0.00"))
     return _quant(flat + (principal_amount * rate))
+
+
+
+def user_has_purchased_product(user, product: Product) -> bool:
+    return OrderItem.objects.filter(
+        order__user=user,
+        order__status__in=[Order.Status.PAID, Order.Status.FULFILLED],
+        product=product,
+    ).exists()
+
+
+def refresh_product_rating(product: Product):
+    agg = Review.objects.filter(product=product).aggregate(avg=Avg("rating"), cnt=Count("id"))
+    avg = float(agg["avg"] or 0)
+    cnt = int(agg["cnt"] or 0)
+
+    product.rating = round(avg, 1)
+    product.rating_count = cnt
+    product.save(update_fields=["rating", "rating_count"])
