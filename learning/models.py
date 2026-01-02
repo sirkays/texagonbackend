@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from core.models import TimeStampedModel, NamedModel
 from live.models import TutoringBooking
+from cloudinary_storage.storage import RawMediaCloudinaryStorage
 
 class Course(NamedModel):
     USAGE_CHOICE = (
@@ -74,7 +75,11 @@ class Lesson(NamedModel):
     cover_image = models.ImageField(upload_to="texagon/covers/", blank=True, null=True)
     order = models.PositiveIntegerField(default=1)
     content_type = models.CharField(max_length=16, choices=ContentType.choices)
-    file = models.FileField(upload_to="texagon/lessons/files/", blank=True, null=True)
+    file = models.FileField(
+        upload_to="texagon/lessons/files/", 
+        storage=RawMediaCloudinaryStorage(),
+        blank=True, null=True
+    )
     url = models.URLField(blank=True)
     duration_seconds = models.PositiveIntegerField(default=0)
     meta = models.JSONField(default=dict, blank=True)
