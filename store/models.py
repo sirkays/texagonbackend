@@ -362,6 +362,26 @@ class BNPLAgreement(TimeStampedModel):
     def __str__(self):
         return f"BNPL {self.get_provider_display()} for Order {self.order_id} — {self.get_status_display()}"
 
+    def get_next_installment_to_pay(self, as_of=None):
+        """
+        Returns the next unpaid installment that is due.
+        """
+        as_of = as_of or timezone.now()
+
+        return (
+            self.installments.filter(
+                due_at__lte=as_of,
+                status__in=[
+                    BNPLInstallment.Status.PENDING,
+                    BNPLInstallment.Status.AUTHORIZED,
+                    BNPLInstallment.Status.FAILED,
+                ],
+            )
+            .exclude(amount_paid__gte=F("amount_due"))
+            .order_by("index")
+            .first()
+        )
+
     def initialize_schedule(self, first_charge_at: timezone.datetime | None = None):
         """
         Create BNPLInstallment rows based on the snapshot terms.

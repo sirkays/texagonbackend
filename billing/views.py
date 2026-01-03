@@ -130,13 +130,20 @@ def create_subscription_payment(request):
                 return Response({"detail": "Order is not found"}, status=status.HTTP_400_BAD_REQUEST)
 
             raw_amount = order.grand_total
-            if is_bnpl:
+            if installment_id and agreement_id:
                 inst_qs = BNPLInstallment.objects.filter(id=installment_id, agreement__id=agreement_id)
                 if inst_qs.exists():
                     raw_amount = inst_qs.first().amount_due
                 else:
                     raw_amount = None
-
+            elif is_bnpl:
+                agreement = order.bnpl_agreement
+                inst_qs = agreement.get_next_installment_to_pay()
+                if inst_qs:
+                    raw_amount = inst_qs.amount_due
+                else:
+                    raw_amount = None
+                    
             if raw_amount in (None, "", 0, "0"):
                 return Response({"detail": "Amount is not found"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -156,7 +163,7 @@ def create_subscription_payment(request):
                 due_at=timezone.now(),
             )
 
-
+            print(invoice, " als,cd,cldc;ld")
 
             if is_bnpl:
                 meta = {"bnpl_plan_id": bnpl_plan_id}
