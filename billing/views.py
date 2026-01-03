@@ -120,6 +120,8 @@ def create_subscription_payment(request):
         invoice = None
         membership = None
 
+        print(request.data, " ssbchdbcjdhbcjdbcjh")
+
         if is_store_payment:
             raw_amount = request.data.get("amount")
             order_id = request.data.get("order_id")
@@ -140,11 +142,14 @@ def create_subscription_payment(request):
             if membership is False:
                 membership = OrganizationMembership.fetch_defaults()
 
-            invoice, _created = SubscriptionInvoice.objects.get_or_create(
+            invoice = SubscriptionInvoice.objects.create(
                 organization_membership=membership,
                 status="pending",
-                defaults={"amount": amount, "due_at": timezone.now()},
+                amount=amount,
+                due_at=timezone.now(),
             )
+
+
 
             if is_bnpl:
                 meta = {"bnpl_plan_id": bnpl_plan_id}
@@ -155,21 +160,20 @@ def create_subscription_payment(request):
                 if installment_id:
                     meta["installment_id"] = str(installment_id)
 
-                invoice_type, _ = InvoiceType.objects.get_or_create(
+                invoice_type = InvoiceType.objects.get_or_create(
                     invoice=invoice,
                     invoice_type="store",
-                    defaults={
-                        "object_id": order_id,
-                        "object_type": "bnpl",
-                        "meta": meta,
-                    },
+                    object_id=order_id,
+                    object_type="bnpl",
+                    meta=meta,
                 )
 
             else:
-                invoice_type, _ = InvoiceType.objects.get_or_create(
+                invoice_type = InvoiceType.objects.create(
                     invoice=invoice,
                     invoice_type="store",
-                    defaults={"object_id": order_id, "object_type": "order"},
+                    object_id=order_id,
+                    object_type="order",
                 )
 
 
