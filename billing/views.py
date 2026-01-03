@@ -163,8 +163,6 @@ def create_subscription_payment(request):
                 due_at=timezone.now(),
             )
 
-            print(invoice, " als,cd,cldc;ld")
-
             if is_bnpl:
                 meta = {"bnpl_plan_id": bnpl_plan_id}
 

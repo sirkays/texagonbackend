@@ -1,6 +1,6 @@
 # store/models.py
 from __future__ import annotations
-
+from django.db.models import F
 import uuid
 from decimal import Decimal
 from django.conf import settings

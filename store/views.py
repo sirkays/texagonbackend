@@ -1533,7 +1533,6 @@ def shipment_add_event(request, shipment_id: str):
     Body: {event_code, description?, occurred_at?, city?, state?, country?, postal_code?, carrier_status?}
     """
     try:
-        print(" scbndjhcbdjhcbdjhcb")
         if not getattr(request.user, "is_staff", False):
             return Response({"detail": "Forbidden."}, status=403)
 
