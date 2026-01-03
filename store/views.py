@@ -69,6 +69,10 @@ from .utils import (
     _to_bool,
     refresh_product_rating,
     user_has_purchased_product,
+    compute_pricing,
+    _compute_totals,
+    _cart_to_dict
+
 )
 
 from .bnpl import (
@@ -176,60 +180,6 @@ def _product_to_dict(p: Product, request=None) -> dict:
         "description": p.description or "",
     }
 
-
-
-def _cart_to_dict(cart: Cart) -> dict:
-    items = []
-    subtotal = Decimal("0.00")
-    has_physical = False
-
-    for it in cart.items.select_related("product").prefetch_related("product__images"):
-        line = (Decimal(it.quantity) * it.product.price).quantize(Decimal("0.01"))
-
-        has_physical = it.product.is_digital is False
-
-        first_img = it.product.images.first()
-        image_url = first_img.product_image.url if first_img and first_img.product_image else None
-        
-        items.append({
-            "id": str(it.id),
-            "image_url": image_url,
-            "product_id": str(it.product_id),
-            "title": it.product.title,
-            "price": str(it.product.price),
-            "quantity": it.quantity,
-            "line_total": str(line),
-            "type": getattr(it.product, "type", "physical"),  # ✅ ensure frontend knows type
-        })
-        subtotal += line
-
-    subtotal = subtotal.quantize(Decimal("0.01"))
-
-    usable_coupon = cart.coupon if (cart.coupon and is_coupon_usable(cart.coupon)) else None
-    discount_total = calc_discount(subtotal, usable_coupon).quantize(Decimal("0.01"))
-
-    # ✅ discounted subtotal (your previous grand_total)
-    grand_total = (subtotal - discount_total).quantize(Decimal("0.01"))
-
-    # ✅ shipping & tax on backend
-    shipping_total = (FLAT_SHIPPING if has_physical else Decimal("0.00")).quantize(Decimal("0.01"))
-    tax_total = (grand_total * TAX_RATE).quantize(Decimal("0.01"))
-
-    # ✅ final payable amount
-    payable_total = (grand_total + shipping_total + tax_total).quantize(Decimal("0.01"))
-    #print(shipping_total, " sipping ",payable_total, " grand ", grand_total, " dis ", discount_total, " subtotal ", subtotal)
-    return {
-        "id": str(cart.id),
-        "items": items,
-        "coupon": usable_coupon.code if usable_coupon else None,
-        "subtotal": str(subtotal),
-        "discount_total": str(discount_total),
-        "grand_total": str(grand_total),            # subtotal - discount
-        "shipping_total": str(shipping_total),      # backend shipping
-        "tax_total": str(tax_total),                # backend tax
-        "payable_total": str(payable_total),        # grand + shipping + tax
-        
-    }
 
 
 
@@ -412,7 +362,6 @@ def cart_apply_coupon(request):
     cart.save(update_fields=["coupon"])
 
     cart_data = _cart_to_dict(cart)
-    
     request.session['grand_total'] = cart_data['grand_total']
     request.session['subtotal'] = cart_data['subtotal']
     request.session['discount_total'] = cart_data['discount_total']
@@ -478,18 +427,6 @@ def address_update_delete(request, address_id: str):
     addr.save()
     return Response({"detail": "Updated."})
 # ---------- checkout / orders / payments ----------
-
-def _compute_totals(cart: Cart) -> dict:
-    subtotal = sum((ci.quantity * ci.product.price for ci in cart.items.select_related("product")), Decimal("0.00"))
-    discount = Decimal("0.00")
-    if cart.coupon:
-        if cart.coupon.discount_type == Coupon.PERCENT:
-            discount = (subtotal * cart.coupon.value / Decimal("100")).quantize(Decimal("0.01"))
-        else:
-            discount = min(cart.coupon.value, subtotal)
-    tax_rate_amt = (subtotal * TAX_RATE).quantize(Decimal("0.01"))
-    grand = max(subtotal - discount + tax_rate_amt + FLAT_SHIPPING, Decimal("0.00")).quantize(Decimal("0.01"))
-    return {"subtotal": subtotal, "discount": discount, "tax": tax_rate_amt, "shipping": FLAT_SHIPPING, "grand": grand}
 
 
 
@@ -584,7 +521,7 @@ def checkout_create_order(request):
 
             discount_total = Decimal("0.00")  # request-item ignores coupons unless you support it
             grand_total = _quant(line_subtotal - discount_total + tax_total + shipping_total)
-
+            print(grand_total, " grands.... ")
             # Create Order
             order = Order.objects.create(
                 user=user,
@@ -764,14 +701,14 @@ def checkout_create_order(request):
         shipping = Address.objects.filter(user=user, id=shipping_id).first() if shipping_id else None
 
         totals = _compute_totals(cart)
-        
+
         order = Order.objects.create(
             user=user,
             subtotal=totals["subtotal"],
             discount_total=totals["discount"],
             tax_total=totals["tax"],
             shipping_total=totals["shipping"],
-            grand_total=totals["grand"],
+            grand_total=totals["grand_total"],  # ✅ changed from totals["grand"]
             coupon_code=cart.coupon.code if cart.coupon else "",
             billing_address=billing,
             shipping_address=shipping,
@@ -788,8 +725,11 @@ def checkout_create_order(request):
                 line_total=_quant(Decimal(ci.quantity) * (ci.product.price or Decimal("0.00"))),
             )
 
-        return Response({"id": str(order.id), "order_id": str(order.id), "grand_total": str(order.grand_total)}, 
-        status=status.HTTP_201_CREATED)
+        return Response(
+            {"id": str(order.id), "order_id": str(order.id), "grand_total": str(order.grand_total)},
+            status=status.HTTP_201_CREATED
+        )
+
 
     except Exception as e:
         print(e)
