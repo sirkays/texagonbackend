@@ -19,7 +19,7 @@ FLW_SECRET_KEY = os.environ.get("FLW_SECRET_KEY", "CHANGE_ME")
 
 
 TAX_RATE = Decimal("0.08")
-FLAT_SHIPPING = Decimal("9.99")
+FLAT_SHIPPING = Decimal("1000.99")
 
 if os.environ.get('LOCAL') == "0":
     CSRF_TRUSTED_ORIGINS = [
