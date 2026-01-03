@@ -333,6 +333,7 @@ def cart_add(request):
         cart = _get_or_create_cart(request)
         pid = request.data.get("product_id")
         qty = int(request.data.get("quantity") or 1)
+
         if not pid:
             return Response({"detail": "Product ID is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -524,13 +525,14 @@ def checkout_create_order(request):
         product_id = (request.data.get("product_id") or "").strip()
         quantity = int(request.data.get("quantity") or 1)
         bnpl_plan_id = request.data.get("bnpl_plan_id")
+        is_buy_now = (not is_bnpl) and bool(product_id)
 
         if quantity < 1:
             return Response({"detail": "quantity must be >= 1"}, status=status.HTTP_400_BAD_REQUEST)
-
         # ============================================================
         # BNPL PATH (request-item) — cart can be empty
         # ============================================================
+
         if is_bnpl:
             if not product_id:
                 return Response({"detail": "product_id is required for BNPL."}, status=status.HTTP_400_BAD_REQUEST)
@@ -677,6 +679,76 @@ def checkout_create_order(request):
                 status=status.HTTP_201_CREATED,
             )
 
+
+        # ============================================================
+        # BUY NOW PATH (single item, not BNPL) — cart can be empty
+        # ============================================================
+
+        if is_buy_now:
+            try:
+                product = Product.objects.select_related().prefetch_related("images").get(
+                    id=product_id, is_active=True
+                )
+            except Product.DoesNotExist:
+                return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            has_physical = (product.is_digital is False)
+
+            billing_id = request.data.get("billing_address_id")
+            shipping_id = request.data.get("shipping_address_id") if has_physical else None
+
+            billing = Address.objects.filter(user=user, id=billing_id).first() if billing_id else None
+            shipping = Address.objects.filter(user=user, id=shipping_id).first() if shipping_id else None
+
+            line_subtotal = _quant((product.price or Decimal("0.00")) * Decimal(quantity))
+            tax_total = _quant(line_subtotal * TAX_RATE)
+            shipping_total = _quant(FLAT_SHIPPING if has_physical else Decimal("0.00"))
+            discount_total = Decimal("0.00")  # optional: support coupons later
+            grand_total = _quant(line_subtotal - discount_total + tax_total + shipping_total)
+
+            order = Order.objects.create(
+                user=user,
+                subtotal=line_subtotal,
+                discount_total=_quant(discount_total),
+                tax_total=tax_total,
+                shipping_total=shipping_total,
+                grand_total=grand_total,
+                coupon_code="",
+                billing_address=billing,
+                shipping_address=shipping,
+                status=Order.Status.PENDING,
+            )
+
+            OrderItem.objects.create(
+                order=order,
+                product=product,
+                title_snapshot=product.title,
+                unit_price=_quant(product.price or Decimal("0.00")),
+                quantity=quantity,
+                line_total=_quant((product.price or Decimal("0.00")) * Decimal(quantity)),
+            )
+
+            first_img = product.images.first()
+            image_url = first_img.get_absolute_url(request) if first_img else None
+
+            return Response(
+                {
+                    "id": str(order.id),              # ✅ add this for your frontend convenience
+                    "order_id": str(order.id),
+                    "grand_total": str(order.grand_total),
+
+                    "is_buy_now": True,
+                    "product_details": {
+                        "image_url": image_url,
+                        "product_id": str(product.id),
+                        "title": product.title,
+                        "price": str(product.price),
+                        "quantity": quantity,
+                    },
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
         # ============================================================
         # NORMAL PATH (cart)
         # ============================================================
@@ -716,7 +788,8 @@ def checkout_create_order(request):
                 line_total=_quant(Decimal(ci.quantity) * (ci.product.price or Decimal("0.00"))),
             )
 
-        return Response({"order_id": str(order.id), "grand_total": str(order.grand_total)}, status=status.HTTP_201_CREATED)
+        return Response({"id": str(order.id), "order_id": str(order.id), "grand_total": str(order.grand_total)}, 
+        status=status.HTTP_201_CREATED)
 
     except Exception as e:
         print(e)
