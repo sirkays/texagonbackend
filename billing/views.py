@@ -120,15 +120,22 @@ def create_subscription_payment(request):
         invoice = None
         membership = None
 
-        print(request.data, " ssbchdbcjdhbcjdbcjh")
 
         if is_store_payment:
-            raw_amount = request.data.get("amount")
+            
             order_id = request.data.get("order_id")
 
             order = get_object_or_404_ajax(Order, pk=order_id)
             if not order:
                 return Response({"detail": "Order is not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+            raw_amount = order.grand_total
+            if is_bnpl:
+                inst_qs = BNPLInstallment.objects.filter(id=installment_id, agreement__id=agreement_id)
+                if inst_qs.exists():
+                    raw_amount = inst_qs.first().amount_due
+                else:
+                    raw_amount = None
 
             if raw_amount in (None, "", 0, "0"):
                 return Response({"detail": "Amount is not found"}, status=status.HTTP_400_BAD_REQUEST)
