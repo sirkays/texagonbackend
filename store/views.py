@@ -1047,7 +1047,7 @@ def orders_list(request):
         else:
             qs = (
                 Order.objects
-                .filter(user=user)
+                .filter(~Q(status="pending"), user=user)
                 .select_related("bnpl_agreement", "bnpl_agreement__plan")
                 .prefetch_related(
                     "items__product",
