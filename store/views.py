@@ -108,7 +108,6 @@ def _get_user_from_request(request):
 
 def _get_or_create_cart(request) -> Cart:
     user = _get_user_from_request(request)
-
     # Ensure there is a session key for anonymous carts
     if not request.session.session_key:
         request.session.create()
