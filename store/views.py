@@ -203,7 +203,7 @@ class CustomPagination(PageNumberPagination):
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
+@authentication_classes([])
 def products_list(request):
     """
     Query params: q, category, type, sort[=popular|rating|price_asc|price_desc|newest], min_price, max_price
