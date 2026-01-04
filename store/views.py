@@ -286,12 +286,13 @@ def product_detail(request, slug: str):
 @authentication_classes([])
 def cart_get(request):
     cart = _get_or_create_cart(request)
+    print(_cart_to_dict(cart))
     return Response(_cart_to_dict(cart))
 
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
+@authentication_classes([])
 def cart_add(request):
     """
     Body: {product_id, quantity}
@@ -300,7 +301,7 @@ def cart_add(request):
         cart = _get_or_create_cart(request)
         pid = request.data.get("product_id")
         qty = int(request.data.get("quantity") or 1)
-
+        print(cart, pid, qty)
         if not pid:
             return Response({"detail": "Product ID is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -313,7 +314,7 @@ def cart_add(request):
             product=product,
             defaults={"quantity": qty},
         )
-
+        print(item, " created ", created)
         if not created:
             item.quantity = F("quantity") + qty
             item.save(update_fields=["quantity"])
@@ -333,7 +334,7 @@ def cart_add(request):
 
 @api_view(["PATCH"])
 @permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
+@authentication_classes([])
 def cart_update_item(request, item_id: str):
     """
     Body: {quantity}
@@ -353,7 +354,7 @@ def cart_update_item(request, item_id: str):
 
 @api_view(["DELETE"])
 @permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
+@authentication_classes([])
 def cart_remove_item(request, item_id: str):
     cart = _get_or_create_cart(request)
     cart.items.filter(pk=item_id).delete()
@@ -362,7 +363,7 @@ def cart_remove_item(request, item_id: str):
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
+@authentication_classes([])
 def cart_apply_coupon(request):
     cart = _get_or_create_cart(request)
     code = (request.data.get("code") or "").strip().upper()

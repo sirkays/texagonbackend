@@ -21,6 +21,13 @@ FLW_SECRET_KEY = os.environ.get("FLW_SECRET_KEY", "CHANGE_ME")
 TAX_RATE = Decimal("0.08")
 FLAT_SHIPPING = Decimal("1000.99")
 
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "https://texagonbackend.onrender.com",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
 if os.environ.get('LOCAL') == "0":
     CSRF_TRUSTED_ORIGINS = [
         "https://texagonbackend.esm.name.ng",
@@ -36,6 +43,10 @@ if os.environ.get('LOCAL') == "0":
     CSRF_COOKIE_SECURE = True
 
 
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = True  # requires https
+CSRF_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SECURE = True
 
 # Application definition
 
@@ -68,6 +79,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
