@@ -164,7 +164,7 @@ def _product_to_dict(p: Product, request=None) -> dict:
         "type": p.product_type,
         "category": p.category.name if p.category else None,
         "price": str(p.price),
-        "pay_in_4_amount": str(p.pay_in_4_amount) if p.bnpl_enabled is not None else None,
+        "pay_in_4_amount": str(p.pay_in_4_amount) if p.bnpl_enabled else None,
 
         "rating": float(p.rating),
         "rating_count": int(p.rating_count),
