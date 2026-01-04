@@ -157,6 +157,7 @@ def _product_to_dict(p: Product, request=None) -> dict:
         for r in reviews_qs
     ]
 
+
     return {
         "id": str(p.id),
         "title": p.title,
@@ -176,7 +177,7 @@ def _product_to_dict(p: Product, request=None) -> dict:
         "images": images,
         "reviews": reviews,
 
-        "bnpl_enabled": bool(getattr(p, "bnpl_enabled", True)),
+        "bnpl_enabled": p.bnpl_enabled,
         "description": p.description or "",
     }
 
@@ -521,7 +522,6 @@ def checkout_create_order(request):
 
             discount_total = Decimal("0.00")  # request-item ignores coupons unless you support it
             grand_total = _quant(line_subtotal - discount_total + tax_total + shipping_total)
-            print(grand_total, " grands.... ")
             # Create Order
             order = Order.objects.create(
                 user=user,
