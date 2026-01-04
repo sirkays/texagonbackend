@@ -164,7 +164,7 @@ def _product_to_dict(p: Product, request=None) -> dict:
         "type": p.product_type,
         "category": p.category.name if p.category else None,
         "price": str(p.price),
-        "pay_in_4_amount": str(p.pay_in_4_amount) if p.pay_in_4_amount is not None else None,
+        "pay_in_4_amount": str(p.pay_in_4_amount) if p.bnpl_enabled is not None else None,
 
         "rating": float(p.rating),
         "rating_count": int(p.rating_count),
@@ -815,20 +815,24 @@ def bnpl_start(request, order_id: str):
 @authentication_classes([SessionTokenAuthentication])
 def bnpl_agreement_detail(request, agreement_id: str):
     try:
-        ag = BNPLAgreement.objects.prefetch_related("installments").get(pk=agreement_id)
-    except BNPLAgreement.DoesNotExist:
-        return Response({"detail": "Not found."}, status=404)
-    data = {
-        "id": str(ag.id), "order_id": str(ag.order_id), "provider": ag.provider,
-        "status": ag.status, "total_amount": str(ag.total_amount),
-        "amount_paid": str(ag.amount_paid), "amount_outstanding": str(ag.amount_outstanding),
-        "installments": [{
-            "id": str(inst.id), "index": inst.index, "due_at": inst.due_at.isoformat(),
-            "amount_due": str(inst.amount_due), "amount_paid": str(inst.amount_paid),
-            "status": inst.status
-        } for inst in ag.installments.order_by("index")]
-    }
-    return Response(data)
+        try:
+            ag = BNPLAgreement.objects.prefetch_related("installments").get(pk=agreement_id)
+        except BNPLAgreement.DoesNotExist:
+            return Response({"detail": "Not found."}, status=404)
+        data = {
+            "id": str(ag.id), "order_id": str(ag.order_id), "provider": ag.provider,
+            "status": ag.status, "total_amount": str(ag.total_amount),
+            "amount_paid": str(ag.amount_paid), "amount_outstanding": str(ag.amount_outstanding),
+            "installments": [{
+                "id": str(inst.id), "index": inst.index, "due_at": inst.due_at.isoformat(),
+                "amount_due": str(inst.amount_due), "amount_paid": str(inst.amount_paid),
+                "status": inst.status
+            } for inst in ag.installments.order_by("index")]
+        }
+        return Response(data)
+    except Exception as e:
+        print(e)
+    return Response({}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
