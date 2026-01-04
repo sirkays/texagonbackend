@@ -91,33 +91,50 @@ def _get_session_token_from_request(request) -> str | None:
             token = auth[len("Session "):].strip()
     return token
 
-def _get_user_from_request(request) -> User | None:
-    # SessionTokenAuthentication should already set request.user.
-    # Fallback in case you need it:
+def _get_user_from_request(request):
+    user = getattr(request, "user", None)
+    if user is not None and getattr(user, "is_authenticated", False):
+        return user
+
     token = _get_session_token_from_request(request)
     if not token:
-        return getattr(request, "user", None)
+        return None
     try:
         st = SessionToken.objects.select_related("user").get(key=token, is_active=True)
         return st.user
     except SessionToken.DoesNotExist:
-        return getattr(request, "user", None)
+        return None
+
 
 def _get_or_create_cart(request) -> Cart:
     user = _get_user_from_request(request)
-    session_key = request.session.session_key or request.session.save() or request.session.session_key
+
+    # Ensure there is a session key for anonymous carts
+    if not request.session.session_key:
+        request.session.create()
+    session_key = request.session.session_key
+
     qs = Cart.objects.filter(active=True)
-    cart = None
-    if user and qs.filter(user=user).exists():
-        cart = qs.get(user=user)
-    elif qs.filter(session_key=session_key).exists():
-        cart = qs.get(session_key=session_key)
-    else:
-        cart = Cart.objects.create(user=user, session_key=session_key, active=True)
-    # If user logs in later, attach:
-    if user and cart.user_id is None:
-        cart.user = user
-        cart.save(update_fields=["user"])
+
+    # Prefer user cart if logged in, otherwise use session cart
+    if user:
+        cart, created = qs.get_or_create(
+            user=user,
+            defaults={"session_key": session_key, "active": True},
+        )
+        # Optional: merge any existing anonymous cart for this session
+        qs.filter(user__isnull=True, session_key=session_key).exclude(id=cart.id).update(active=False)
+        # Keep session_key updated
+        if cart.session_key != session_key:
+            cart.session_key = session_key
+            cart.save(update_fields=["session_key"])
+        return cart
+
+    cart, created = qs.get_or_create(
+        user__isnull=True,
+        session_key=session_key,
+        defaults={"active": True},
+    )
     return cart
 
 # store/views.py (or wherever _product_to_dict is)
@@ -188,7 +205,7 @@ def _product_to_dict(p: Product, request=None) -> dict:
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
+@authentication_classes([])
 def categories_list(request):
     data = [{"id": str(c.id), "name": c.name, "slug": c.slug, "parent": str(c.parent_id) if c.parent_id else None}
             for c in Category.objects.order_by("name")]
@@ -248,7 +265,7 @@ def products_list(request):
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
+@authentication_classes([])
 def product_detail(request, slug: str):
     try:
         p = (
@@ -267,7 +284,7 @@ def product_detail(request, slug: str):
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
+@authentication_classes([])
 def cart_get(request):
     cart = _get_or_create_cart(request)
     return Response(_cart_to_dict(cart))
