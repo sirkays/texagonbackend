@@ -102,7 +102,11 @@ class Material(TimeStampedModel):
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="materials")
     title = models.CharField(max_length=255)
     kind = models.CharField(max_length=16, choices=Kind.choices)
-    file = models.FileField(upload_to="texagon/materials/files/", blank=True, null=True)
+    file = models.FileField(
+        upload_to="texagon/materials/files/", 
+        storage=RawMediaCloudinaryStorage(),
+        blank=True, null=True
+    )
     cover_image = models.ImageField(upload_to="texagon/materials/covers/", blank=True, null=True)
     url = models.URLField(blank=True)
     tags = models.JSONField(default=list, blank=True)
