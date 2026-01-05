@@ -211,3 +211,6 @@ def active_modules_for_user(request):
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
             err["traceback"] = traceback.format_exc()
         return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+

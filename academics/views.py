@@ -52,7 +52,8 @@ from core.utils import (
     _to_int,
     _sum_points,
     _cert_to_dict,
-    _gen_cert_number
+    _gen_cert_number,
+    _org_signatures_to_dict
 )
 
 from texagonbackend.settings import pass_mark as PASS_MARK, LOW_SCORE
@@ -1034,13 +1035,15 @@ def student_certificates_list(request):
 
     results = [_cert_to_dict(c, request=request) for c in qs]
 
+    signatures = _org_signatures_to_dict(org, request=request)
+
     return Response({
         "student_id": student.id,
         "count": len(results),
         "results": results,
+        "signatures": signatures,   # ✅ NEW
         "server_time": timezone.now(),
     })
-
 
 
 

@@ -376,3 +376,47 @@ class EnrollmentCertificate(models.Model):
         if by_user is not None:
             self.issued_by_user = by_user
         self.save(update_fields=["status", "revoked_at", "revoked_reason", "issued_by_user", "updated_at"])
+
+
+
+
+
+def org_cert_signature_upload_to(instance, filename):
+    # e.g. org_cert_signatures/org_12/director_1.png
+    org_id = getattr(instance.organization, "id", "unknown")
+    return f"org_cert_signatures/org_{org_id}/{filename}"
+
+
+class OrganizationCertificateSignatures(models.Model):
+    """
+    Stores certificate director signatures for an organization.
+    Exactly one row per organization.
+    """
+    organization = models.OneToOneField(
+        "orgs.Organization",
+        on_delete=models.CASCADE,
+        related_name="certificate_signatures",
+        db_index=True,
+    )
+
+    # Director 1
+    director_1_name = models.CharField(max_length=255, blank=True)
+    director_1_title = models.CharField(max_length=255, blank=True, default="Director")
+    director_1_signature = models.ImageField(
+        upload_to=org_cert_signature_upload_to, blank=True, null=True
+    )
+
+    # Director 2
+    director_2_name = models.CharField(max_length=255, blank=True)
+    director_2_title = models.CharField(max_length=255, blank=True, default="Director")
+    director_2_signature = models.ImageField(
+        upload_to=org_cert_signature_upload_to, blank=True, null=True
+    )
+
+    meta = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Certificate Signatures — Org {self.organization_id}"

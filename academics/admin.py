@@ -1,10 +1,8 @@
 from django.contrib import admin
 from .models import (Language, Classroom, Subject, StudentProfile, 
-    TeacherProfile, ParentProfile, ParentChildLink)
+    TeacherProfile, ParentProfile, ParentChildLink,OrganizationCertificateSignatures,EnrollmentCertificate)
 from django.utils import timezone
 from django.utils.html import format_html
-
-from .models import EnrollmentCertificate
 
 @admin.register(Classroom)
 class ClassroomAdmin(admin.ModelAdmin):
@@ -246,3 +244,38 @@ class EnrollmentCertificateAdmin(admin.ModelAdmin):
                 obj.issued_by_user = request.user
 
         super().save_model(request, obj, form, change)
+
+
+
+
+@admin.register(OrganizationCertificateSignatures)
+class OrganizationCertificateSignaturesAdmin(admin.ModelAdmin):
+    list_display = (
+        "organization",
+        "director_1_name",
+        "director_1_preview",
+        "director_2_name",
+        "director_2_preview",
+        "updated_at",
+    )
+    search_fields = ("organization__name", "director_1_name", "director_2_name")
+    readonly_fields = ("director_1_preview", "director_2_preview", "created_at", "updated_at")
+    autocomplete_fields = ("organization",)
+
+    fieldsets = (
+        ("Organization", {"fields": ("organization",)}),
+        ("Director 1", {"fields": ("director_1_name", "director_1_title", "director_1_signature", "director_1_preview")}),
+        ("Director 2", {"fields": ("director_2_name", "director_2_title", "director_2_signature", "director_2_preview")}),
+        ("Meta", {"fields": ("meta",)}),
+        ("System", {"fields": ("created_at", "updated_at")}),
+    )
+
+    def director_1_preview(self, obj):
+        if not obj.director_1_signature:
+            return "-"
+        return format_html('<img src="{}" style="height:48px;border:1px solid #ddd;" />', obj.director_1_signature.url)
+
+    def director_2_preview(self, obj):
+        if not obj.director_2_signature:
+            return "-"
+        return format_html('<img src="{}" style="height:48px;border:1px solid #ddd;" />', obj.director_2_signature.url)

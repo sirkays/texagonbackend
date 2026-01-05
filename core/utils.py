@@ -459,3 +459,34 @@ def _cert_to_dict(cert: EnrollmentCertificate, request=None) -> dict:
         "can_download": cert.can_download,
         "pdf_url": pdf_url if cert.can_download else "",  # gate the URL
     }
+
+
+
+def _org_signatures_to_dict(org, request=None) -> dict:
+    sig = getattr(org, "certificate_signatures", None)
+    if not sig:
+        return {
+            "director_1": {"name": "", "title": "", "signature_url": ""},
+            "director_2": {"name": "", "title": "", "signature_url": ""},
+        }
+
+    def abs_url(file_field):
+        if not file_field:
+            return ""
+        try:
+            return request.build_absolute_uri(file_field.url) if request else file_field.url
+        except Exception:
+            return getattr(file_field, "url", "") or ""
+
+    return {
+        "director_1": {
+            "name": sig.director_1_name or "",
+            "title": sig.director_1_title or "",
+            "signature_url": abs_url(sig.director_1_signature),
+        },
+        "director_2": {
+            "name": sig.director_2_name or "",
+            "title": sig.director_2_title or "",
+            "signature_url": abs_url(sig.director_2_signature),
+        },
+    }
