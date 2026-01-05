@@ -1,30 +1,63 @@
 from typing import Any, Dict, List, Optional
 import traceback
 from decimal import Decimal
-from datetime import timedelta, datetime
-from django.http import JsonResponse
+from datetime import datetime, timedelta
+
 from django.conf import settings
 from django.db.models import Q, Sum, Count, Avg, Max, Min
+from django.db.models.functions import Cast
+from django.http import JsonResponse
 from django.utils import timezone
 from django.contrib.auth.decorators import login_required
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
-from rest_framework.response import Response
+from django.db import transaction
 from rest_framework import status
+from rest_framework.decorators import (
+    api_view,
+    permission_classes,
+    authentication_classes,
+)
+from rest_framework.response import Response
+
 from rest_framework_api_key.permissions import HasAPIKey
+
 from api.authentication import SessionTokenAuthentication
+
 from orgs.models import Organization, OrganizationMembership
-from academics.models import StudentProfile, ParentProfile, TeacherProfile, Classroom, Subject
+from academics.models import (
+    StudentProfile,
+    ParentProfile,
+    TeacherProfile,
+    Classroom,
+    Subject,
+)
 from learning.models import Course, Enrollment, Lesson
 from assessments.models import Test, TestAttempt, TestAnswer, Question
-from gamification.models import (Badge, BadgeAward, PointTransaction, Streak, 
-    AchievementDefinition,AchievementAcquired,ActivityEvent
-)
 from attendance.models import AttendanceRecord, AttendanceSession
-from core.utils import _get_student_for_user, _to_int, _sum_points
-from django.db.models.functions import Cast
+
+from gamification.models import (
+    Badge,
+    BadgeAward,
+    PointTransaction,
+    Streak,
+    AchievementDefinition,
+    AchievementAcquired,
+    ActivityEvent,
+)
 from gamification.services.streaks import build_streak
-from texagonbackend.settings import pass_mark as PASS_MARK
-from texagonbackend.settings import LOW_SCORE
+
+from core.utils import (
+    _get_student_for_user,
+    _resolve_org,
+    _is_org_admin_or_teacher,
+    _to_int,
+    _sum_points,
+    _cert_to_dict,
+    _gen_cert_number
+)
+
+from texagonbackend.settings import pass_mark as PASS_MARK, LOW_SCORE
+
+from .models import EnrollmentCertificate
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -925,3 +958,249 @@ def generate_subs(request):
 
 
 
+
+@api_view(["GET"])
+# keep your existing auth classes
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def student_certificates_list(request):
+    """
+    List certificates acquired for a particular student (Enrollment certificates).
+
+    Access rules (typical):
+      - Org Admin/Teacher: can list any student in the org (student_id param required)
+      - Student: can list ONLY their own certificates (student_id optional; if provided must match)
+
+    Query params:
+      - org_id: optional (used by _resolve_org)
+      - student_id: optional for student users; required for admin/teacher
+      - status: optional filter ("issued" | "revoked")
+      - course_id: optional filter
+    """
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    # Decide which student we're listing for
+    requested_student_id = request.query_params.get("student_id")
+    course_id = request.query_params.get("course_id")
+    status_filter = request.query_params.get("status")
+
+    # Who is calling?
+    is_staffish = _is_org_admin_or_teacher(request, org)
+    caller_student = _get_student_for_user(request.user)
+
+    if is_staffish:
+        if not requested_student_id:
+            return Response({"detail": "student_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        student = StudentProfile.objects.filter(id=requested_student_id, organization=org).select_related("user").first()
+        if not student:
+            return Response({"detail": "Student not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+    else:
+        if not caller_student:
+            return Response({"detail": "Student profile not found for this user."}, status=status.HTTP_403_FORBIDDEN)
+        # If student_id provided, it must match caller
+        if requested_student_id and str(caller_student.id) != str(requested_student_id):
+            return Response({"detail": "You do not have permission to view this student's certificates."},
+                            status=status.HTTP_403_FORBIDDEN)
+        student = caller_student
+
+        # Extra org check (your StudentProfile sometimes has nullable org in older copies)
+        if getattr(student, "organization_id", None) and student.organization_id != org.id:
+            return Response({"detail": "You do not have access to this organization."},
+                            status=status.HTTP_403_FORBIDDEN)
+
+    # Query certificates
+    qs = (
+        EnrollmentCertificate.objects
+        .select_related("student__user", "course", "enrollment")
+        .filter(organization=org, student=student)
+        .order_by("-acquired_at")
+    )
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+
+    if course_id:
+        qs = qs.filter(course_id=course_id)
+
+    # Optional: limit/pagination-lite
+    limit = request.query_params.get("limit")
+    try:
+        limit = int(limit) if limit else 200
+    except Exception:
+        limit = 200
+    qs = qs[:max(1, min(limit, 500))]
+
+    results = [_cert_to_dict(c, request=request) for c in qs]
+
+    return Response({
+        "student_id": student.id,
+        "count": len(results),
+        "results": results,
+        "server_time": timezone.now(),
+    })
+
+
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def certificate_create(request):
+    """
+    Create an EnrollmentCertificate.
+
+    Access rules:
+      - Org Admin/Teacher: can create for any student in org (student_id required)
+      - Student: can create ONLY for self (student_id optional; if provided must match)
+
+    Body (JSON):
+      - student_id: required for staffish; optional for student
+      - enrollment_id: optional but recommended
+      - course_id: optional (if enrollment_id not provided)
+      - title: optional
+      - description: optional
+      - status: optional ("issued" | "revoked") default "issued"
+      - acquired_at: optional ISO datetime (default now)
+      - downloadable_at: optional ISO datetime (default acquired_at)
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        data = request.data or {}
+
+        requested_student_id = data.get("student_id")
+        enrollment_id = data.get("enrollment_id")
+        course_id = data.get("course_id")
+
+        title = (data.get("title") or "").strip()
+        description = (data.get("description") or "").strip()
+        status_value = (data.get("status") or "issued").strip().lower()
+
+        acquired_at = data.get("acquired_at")
+        downloadable_at = data.get("downloadable_at")
+
+        # Parse/normalize datetimes (best-effort)
+        # If you already have a datetime parser helper, use it.
+        try:
+            acquired_at = timezone.datetime.fromisoformat(acquired_at) if acquired_at else timezone.now()
+            if timezone.is_naive(acquired_at):
+                acquired_at = timezone.make_aware(acquired_at)
+        except Exception:
+            acquired_at = timezone.now()
+
+        try:
+            downloadable_at = timezone.datetime.fromisoformat(downloadable_at) if downloadable_at else acquired_at
+            if timezone.is_naive(downloadable_at):
+                downloadable_at = timezone.make_aware(downloadable_at)
+        except Exception:
+            downloadable_at = acquired_at
+
+        if status_value not in {"issued", "revoked"}:
+            return Response(
+                {"detail": "Invalid status. Use 'issued' or 'revoked'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Who is calling?
+        is_staffish = _is_org_admin_or_teacher(request, org)
+        caller_student = _get_student_for_user(request.user)
+
+        if is_staffish:
+            if not requested_student_id:
+                return Response({"detail": "student_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            student = (
+                StudentProfile.objects
+                .filter(id=requested_student_id, organization=org)
+                .select_related("user")
+                .first()
+            )
+            if not student:
+                return Response({"detail": "Student not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            if not caller_student:
+                return Response({"detail": "Student profile not found for this user."}, status=status.HTTP_403_FORBIDDEN)
+            if requested_student_id and str(caller_student.id) != str(requested_student_id):
+                return Response(
+                    {"detail": "You do not have permission to create certificates for this student."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            student = caller_student
+
+            if getattr(student, "organization_id", None) and student.organization_id != org.id:
+                return Response({"detail": "You do not have access to this organization."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Resolve enrollment/course
+        enrollment = None
+        course = None
+
+        if enrollment_id:
+            enrollment = (
+                Enrollment.objects
+                .select_related("course", "student")
+                .filter(id=enrollment_id, student=student, course__organization=org)
+                .first()
+            )
+            if not enrollment:
+                return Response(
+                    {"detail": "Enrollment not found for this student in this organization."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            course = enrollment.course
+
+        if not course and course_id:
+            course = Course.objects.filter(id=course_id, organization=org).first()
+            if not course:
+                return Response({"detail": "Course not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not course:
+            return Response(
+                {"detail": "Provide enrollment_id or course_id."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Defaults
+        if not title:
+            title = f"Certificate of Completion — {course.name}"
+
+        # Duplicate protection (tune this to your business rule)
+        # Example: one issued certificate per enrollment (or course if no enrollment)
+        dup_qs = EnrollmentCertificate.objects.filter(organization=org, student=student, status="issued")
+        if enrollment:
+            dup_qs = dup_qs.filter(enrollment=enrollment)
+        else:
+            dup_qs = dup_qs.filter(course=course)
+
+        if dup_qs.exists() and status_value == "issued":
+            return Response(
+                {"detail": "An issued certificate already exists for this enrollment/course."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        with transaction.atomic():
+            cert = EnrollmentCertificate.objects.create(
+                organization=org,
+                student=student,
+                enrollment=enrollment,
+                course=course,
+                number=_gen_cert_number(),
+                status=status_value,
+                title=title,
+                description=description,
+                acquired_at=acquired_at,
+            )
+
+            # If your model calculates can_download automatically, ignore this.
+            # Otherwise you can set it based on status/downloadable_at:
+            # cert.can_download = (cert.status == "issued" and cert.downloadable_at <= timezone.now())
+            # cert.save(update_fields=["can_download"])
+
+        return Response(
+            {"detail": "Certificate created.", "certificate": _cert_to_dict(cert, request=request)},
+            status=status.HTTP_201_CREATED,
+        )
+    except Exception as e:
+        print(e)

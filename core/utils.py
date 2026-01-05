@@ -1,5 +1,5 @@
 from orgs.models import OrganizationMembership,Organization
-from academics.models import StudentProfile,TeacherProfile,Classroom, Subject
+from academics.models import StudentProfile,TeacherProfile,Classroom, Subject,EnrollmentCertificate
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak,AchievementDefinition
 from django.db.models import Q, Sum, Count
 from django.utils import timezone
@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta
 from rest_framework import permissions
 import hmac, hashlib, uuid
 from django.conf import settings
+import secrets
 
 StatusLiteral = Literal["active", "inactive", "suspended"]
 
@@ -407,3 +408,54 @@ class IsOwnerOrOrgStaff(permissions.BasePermission):
             return True
         sp = _get_student_for_user(request.user)
         return bool(sp and getattr(obj, "student_id", None) == sp.id)
+
+
+
+
+def _gen_cert_number(prefix="CERT"):
+    # short, unique-ish human ID. If you already have a generator, use it instead.
+    return f"{prefix}-{timezone.now():%Y%m%d}-{secrets.token_hex(4).upper()}"
+
+
+
+
+
+
+def _cert_to_dict(cert: EnrollmentCertificate, request=None) -> dict:
+    # best-effort URLs
+    pdf_url = ""
+    if getattr(cert, "pdf_file", None):
+        try:
+            pdf_url = request.build_absolute_uri(cert.pdf_file.url) if request else cert.pdf_file.url
+        except Exception:
+            pdf_url = getattr(cert.pdf_file, "url", "") or ""
+
+    student_name = ""
+    try:
+        u = cert.student.user
+        student_name = (u.get_full_name() or u.email or "").strip()
+    except Exception:
+        pass
+
+    course_name = ""
+    try:
+        course_name = cert.course.name
+    except Exception:
+        pass
+
+    return {
+        "id": cert.id,
+        "number": cert.number,
+        "status": cert.status,
+        "title": cert.title,
+        "description": cert.description or "",
+        "student_id": cert.student_id,
+        "student_name": student_name,
+        "enrollment_id": cert.enrollment_id,
+        "course_id": cert.course_id,
+        "course_name": course_name,
+        "acquired_at": cert.acquired_at,
+        "downloadable_at": cert.downloadable_at,
+        "can_download": cert.can_download,
+        "pdf_url": pdf_url if cert.can_download else "",  # gate the URL
+    }
