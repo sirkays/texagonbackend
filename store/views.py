@@ -195,6 +195,7 @@ def _product_to_dict(p: Product, request=None) -> dict:
 
         "bnpl_enabled": p.bnpl_enabled,
         "description": p.description or "",
+        "stock":p.stock
     }
 
 
@@ -286,7 +287,6 @@ def product_detail(request, slug: str):
 @authentication_classes([])
 def cart_get(request):
     cart = _get_or_create_cart(request)
-    print(_cart_to_dict(cart))
     return Response(_cart_to_dict(cart))
 
 
