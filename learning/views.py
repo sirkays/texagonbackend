@@ -638,6 +638,8 @@ def save_lesson_to_my_materials(request, lesson_id: int):
 
         if has_file:
             m.file = lesson.file  # reference the same stored file
+            if lesson.cover_image:
+                m.cover_image = lesson.cover_image
 
         m.save()
 
