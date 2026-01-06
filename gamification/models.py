@@ -6,8 +6,6 @@ from orgs.models import Organization
 from gamification.services.streaks import build_streak
 
 
-
-
 class LeaderboardSeason(models.Model):
     """
     A season/session that leaderboards can be based on.

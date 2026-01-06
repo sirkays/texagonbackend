@@ -8,7 +8,11 @@ from gamification.models import (
     BadgeAward,
     PointTransaction,
     Streak,
+    LeaderboardSeason
 )
+from django.db import transaction
+
+
 
 @admin.register(AchievementDefinition)
 class AchievementDefinitionAdmin(admin.ModelAdmin):
@@ -51,3 +55,74 @@ class ActivityEventAdmin(admin.ModelAdmin):
 @admin.register(Streak)
 class StreakAdmin(admin.ModelAdmin):
     list_display = ("student", "current_days", "longest_days", "last_activity")
+
+
+
+
+
+@admin.register(LeaderboardSeason)
+class LeaderboardSeasonAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "organization",
+        "start_at",
+        "end_at",
+        "is_active",
+        "created_at",
+    )
+    list_filter = (
+        "organization",
+        "is_active",
+        "start_at",
+        "end_at",
+    )
+    search_fields = (
+        "name",
+        "slug",
+        "organization__name",
+    )
+    ordering = ("-start_at",)
+    date_hierarchy = "start_at"
+
+    prepopulated_fields = {
+        "slug": ("name",),
+    }
+
+    fieldsets = (
+        (None, {
+            "fields": (
+                "organization",
+                "name",
+                "slug",
+                "is_active",
+            )
+        }),
+        ("Season Dates", {
+            "fields": (
+                "start_at",
+                "end_at",
+            )
+        }),
+        ("Metadata", {
+            "fields": ("created_at",),
+            "classes": ("collapse",),
+        }),
+    )
+
+    readonly_fields = ("created_at",)
+
+    @transaction.atomic
+    def save_model(self, request, obj, form, change):
+        """
+        Enforce at most one active season per organization.
+        If this season is marked active, deactivate others.
+        """
+        super().save_model(request, obj, form, change)
+
+        if obj.is_active:
+            (
+                LeaderboardSeason.objects
+                .filter(organization=obj.organization, is_active=True)
+                .exclude(pk=obj.pk)
+                .update(is_active=False)
+            )
