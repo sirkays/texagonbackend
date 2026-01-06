@@ -6,21 +6,54 @@ from orgs.models import Organization
 from gamification.services.streaks import build_streak
 
 
+
+
+class LeaderboardSeason(models.Model):
+    """
+    A season/session that leaderboards can be based on.
+    Examples:
+      - 2025 Academic Year
+      - 2026 Academic Year
+      - Term 1 2026
+      - Summer Bootcamp 2026
+    """
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="leaderboard_seasons"
+    )
+
+    name = models.CharField(max_length=128)          # "2025", "2026", "Term 1 - 2026"
+    slug = models.SlugField(max_length=128)          # "2025", "2026-term-1"
+    start_at = models.DateTimeField(db_index=True)
+    end_at = models.DateTimeField(db_index=True)
+    is_active = models.BooleanField(default=False, db_index=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "slug"],
+                name="uniq_org_season_slug",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["organization", "is_active"]),
+            models.Index(fields=["organization", "start_at", "end_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.name}"
+
+    @classmethod
+    def get_active(cls, org):
+        # If multiple active exist, newest wins (or enforce one active in admin)
+        return cls.objects.filter(organization=org, is_active=True).order_by("-start_at").first()
+
+    def contains(self, dt):
+        return self.start_at <= dt < self.end_at
+
+
 class ActivityEvent(TimeStampedModel):
-    """
-    Generic event log for gamification.
-
-    You will record these events whenever a student does something:
-    - exercise_solved
-    - quiz_attempted
-    - quiz_passed
-    - course_completed
-    - daily_active
-    - time_spent_minutes
-    etc.
-
-    Achievements are computed from these events using JSON rules.
-    """
     organization = models.ForeignKey(
         Organization, on_delete=models.CASCADE, related_name="activity_events"
     )
@@ -30,16 +63,25 @@ class ActivityEvent(TimeStampedModel):
         related_name="activity_events",
     )
 
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activity_events",
+        db_index=True,
+    )
+
     event_type = models.CharField(max_length=64, db_index=True)
-    value = models.IntegerField(default=1)  # score, minutes, count=1, etc
+    value = models.IntegerField(default=1)
     meta = models.JSONField(default=dict, blank=True)
     dedupe_key = models.CharField(max_length=128, unique=True, db_index=True, blank=True, null=True)
     occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
 
     class Meta:
         indexes = [
-            models.Index(fields=["organization", "event_type", "occurred_at"]),
-            models.Index(fields=["student", "event_type", "occurred_at"]),
+            models.Index(fields=["organization", "season", "event_type", "occurred_at"]),
+            models.Index(fields=["student", "season", "event_type", "occurred_at"]),
         ]
 
     def __str__(self):
@@ -102,6 +144,14 @@ class AchievementAcquired(TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="achievements_acquired",
     )
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="achievement_acquired",
+        db_index=True,
+    )
     acquired_at = models.DateTimeField(default=timezone.now)
 
     # store computed progress at time of unlock (useful for debugging)
@@ -155,27 +205,45 @@ class BadgeAward(TimeStampedModel):
     )
     awarded_at = models.DateTimeField(auto_now_add=True)
     reason = models.CharField(max_length=255, blank=True)
-
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="badges_awarded",
+        db_index=True,
+    )
     class Meta:
         unique_together = ("badge", "student")
         indexes = [models.Index(fields=["student", "badge"])]
 
 
 class PointTransaction(TimeStampedModel):
-    """
-    A ledger of points. (Recommended)
-    """
     student = models.ForeignKey(
         "academics.StudentProfile",
         on_delete=models.CASCADE,
         related_name="point_transactions",
     )
+
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="point_transactions",
+        db_index=True,
+    )
+
     points = models.IntegerField()
     reason = models.CharField(max_length=255, blank=True)
     balance_after = models.IntegerField(default=0)
 
     class Meta:
-        indexes = [models.Index(fields=["student", "created_at"])]
+        indexes = [
+            models.Index(fields=["student", "season", "created_at"]),
+            models.Index(fields=["season", "created_at"]),
+        ]
+
 
 
 class Streak(TimeStampedModel):
@@ -188,12 +256,21 @@ class Streak(TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="streak",
     )
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="season_streaks",
+        db_index=True,
+    )
     current_days = models.PositiveIntegerField(default=0)
     longest_days = models.PositiveIntegerField(default=0)
     last_activity = models.DateField(null=True, blank=True)
 
     @classmethod
     def set_student_streak(cls, student, org, event_type, code):
+
         ev_qs = ActivityEvent.objects.filter(
             student=student,
             organization=org,
@@ -201,8 +278,24 @@ class Streak(TimeStampedModel):
         )
         if event_type == "daily_active" and code == "streak_champion":
             total = build_streak(ev_qs).count()
+            
+            org = student.organization
+            occurred_at = timezone.now()
+
+            # 1) Prefer active season if it contains the date
+            active = LeaderboardSeason.get_active(org)
+            if active and active.contains(occurred_at):
+                return active
+
+            # 2) Otherwise find by date range
+            season =  (LeaderboardSeason.objects
+                    .filter(organization=org, start_at__lte=occurred_at, end_at__gt=occurred_at)
+            .order_by("-start_at")
+            .first())
+
             streak, is_created = Streak.objects.update_or_create(
                 student=student,
+                season=season,
                 defaults={
                     "current_days":total,
                     "last_activity":timezone.localdate()
@@ -212,4 +305,5 @@ class Streak(TimeStampedModel):
             if streak.longest_days < total:
                 streak.longest_days = total
                 streak.save()
+
 

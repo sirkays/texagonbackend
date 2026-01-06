@@ -1,6 +1,6 @@
 from orgs.models import OrganizationMembership,Organization
 from academics.models import StudentProfile,TeacherProfile,Classroom, Subject,EnrollmentCertificate
-from gamification.models import Badge, BadgeAward, PointTransaction, Streak,AchievementDefinition
+from gamification.models import Badge, BadgeAward, PointTransaction, Streak,AchievementDefinition,LeaderboardSeason
 from django.db.models import Q, Sum, Count
 from django.utils import timezone
 from typing import Any, Dict, List, Optional,Literal, Tuple
@@ -490,3 +490,17 @@ def _org_signatures_to_dict(org, request=None) -> dict:
             "signature_url": abs_url(sig.director_2_signature),
         },
     }
+
+
+def resolve_season(org, occurred_at):
+    
+    # 1) Prefer active season if it contains the date
+    active = LeaderboardSeason.get_active(org)
+    if active and active.contains(occurred_at):
+        return active
+
+    # 2) Otherwise find by date range
+    return (LeaderboardSeason.objects
+            .filter(organization=org, start_at__lte=occurred_at, end_at__gt=occurred_at)
+            .order_by("-start_at")
+            .first())

@@ -9,6 +9,7 @@ from gamification.models import (
 )
 from django.utils import timezone
 from django.db import IntegrityError
+from core.utils import resolve_season
 
 def get_points_balance(student) -> int:
     # simplest: sum of transactions
@@ -34,9 +35,11 @@ def unlock_achievement(student, definition, value: int, meta: dict | None = None
     """
     Idempotent unlock. If already unlocked, returns False.
     """
+    season = resolve_season(student.organization, timezone.now())
     obj, created = AchievementAcquired.objects.get_or_create(
         student=student,
         definition=definition,
+        season=season,
         defaults={
             "value_at_unlock": int(value),
             "meta": meta or {},
@@ -60,10 +63,13 @@ def unlock_badge_if_eligible(student, badge) -> bool:
     balance = get_points_balance(student)
     if balance < int(badge.points):
         return False
+    
+    season = resolve_season(student.organization, timezone.now())
 
     obj, created = BadgeAward.objects.get_or_create(
         student=student,
         badge=badge,
+        season=season,
         defaults={"reason": f"Reached {badge.points} points"},
     )
     return created
@@ -80,10 +86,12 @@ def log_event(*, student, org, event_type, value=1, meta=None, dedupe_key=None, 
     # If you have a UniqueConstraint on (student, dedupe_key) or (org, student, dedupe_key),
     # then get_or_create is perfect:
     try:
+        season = resolve_season(org, occurred_at)
         obj, created = ActivityEvent.objects.get_or_create(
             student=student,
             organization=org,
             dedupe_key=dedupe_key,   # must exist in DB schema
+            season=season,
             defaults={
                 "event_type": event_type,
                 "value": value,

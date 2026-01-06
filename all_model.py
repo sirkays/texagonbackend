@@ -5,6 +5,7 @@
 
 # --- Imports collected from model files ---
 
+from __future__ import annotations
 from django.db import models
 from django.conf import settings
 from core.models import TimeStampedModel, NamedModel
@@ -104,7 +105,6 @@ from live.models import (
 from .models import SessionToken
 from store.models import Product
 from django.utils.translation import gettext_lazy as _
-from __future__ import annotations
 import uuid
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.postgres.fields import ArrayField
@@ -121,6 +121,9 @@ from academics.models import (
 from academics.models import StudentProfile
 from nanoid import generate
 from gamification.services.streaks import build_streak
+from cloudinary_storage.storage import RawMediaCloudinaryStorage
+from django.db.models import F
+from store.models import Review
 
 
 # --- Model classes collected from project ---
@@ -296,6 +299,238 @@ class ParentChildLink(TimeStampedModel):
 
 
 
+class EnrollmentCertificate(models.Model):
+    """
+    Certificate issued for a student's Enrollment in a Course.
+    Download becomes available ONLY after 7 days from acquired_at (issued_at).
+    """
+
+    class Status(models.TextChoices):
+        ISSUED = "issued", "Issued"
+        REVOKED = "revoked", "Revoked"
+
+    # Core links
+    organization = models.ForeignKey(
+        "orgs.Organization",
+        on_delete=models.CASCADE,
+        related_name="enrollment_certificates",
+        db_index=True,
+    )
+    enrollment = models.OneToOneField(
+        "learning.Enrollment",
+        on_delete=models.CASCADE,
+        related_name="certificate",
+        help_text="One certificate per enrollment.",
+    )
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="enrollment_certificates",
+        db_index=True,
+    )
+    course = models.ForeignKey(
+        "learning.Course",
+        on_delete=models.CASCADE,
+        related_name="enrollment_certificates",
+        db_index=True,
+    )
+
+    # Display fields
+    title = models.CharField(max_length=255, default="Certificate of Completion")
+    description = models.TextField(blank=True)
+
+    # Public identifiers
+    number = models.CharField(max_length=32, unique=True, db_index=True, editable=False)
+    verification_token = models.CharField(max_length=64, unique=True, db_index=True, editable=False)
+
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ISSUED, db_index=True)
+
+    # When the student "acquired" (earned) the certificate
+    acquired_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    # Download rule (7 days)
+    download_after_days = models.PositiveSmallIntegerField(default=7)
+
+    # Optional generated file
+    pdf_file = models.FileField(upload_to=certificate_pdf_upload_to, blank=True, null=True)
+
+    # Issuer info (optional)
+    issued_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="issued_enrollment_certificates",
+    )
+
+    meta = models.JSONField(default=dict, blank=True)
+
+    # Revocation fields
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_reason = models.CharField(max_length=255, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-acquired_at"]
+        indexes = [
+            models.Index(fields=["organization", "course", "acquired_at"]),
+            models.Index(fields=["student", "acquired_at"]),
+            models.Index(fields=["status", "acquired_at"]),
+        ]
+        constraints = [
+            # Ensure revoked_at is set iff status == revoked (soft safety)
+            models.CheckConstraint(
+                name="enroll_cert_revoked_requires_timestamp",
+                check=models.Q(status="issued", revoked_at__isnull=True)
+                | models.Q(status="revoked", revoked_at__isnull=False),
+            ),
+            # Unique certificate per (student, course) per enrollment is already enforced by OneToOne enrollment.
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.number} — enrollment={self.enrollment_id} ({self.status})"
+
+    @staticmethod
+    def _generate_number() -> str:
+        return f"CERT-{secrets.token_hex(4).upper()}-{secrets.token_hex(2).upper()}"
+
+    @staticmethod
+    def _generate_verification_token() -> str:
+        return secrets.token_urlsafe(32)[:64]
+
+    def clean(self):
+        super().clean()
+
+        # Keep data consistent with enrollment
+        if self.enrollment_id:
+            # enrollment.student is a StudentProfile per your model
+            if self.student_id and self.enrollment.student_id != self.student_id:
+                raise ValidationError({"student": "student must match enrollment.student."})
+
+            if self.course_id and self.enrollment.course_id != self.course_id:
+                raise ValidationError({"course": "course must match enrollment.course."})
+
+        # Ensure org matches student/course if those have organization
+        if self.organization_id:
+            if getattr(self.student, "organization_id", None) and self.student.organization_id != self.organization_id:
+                raise ValidationError({"organization": "organization must match student.organization."})
+            if getattr(self.course, "organization_id", None) and self.course.organization_id != self.organization_id:
+                raise ValidationError({"organization": "organization must match course.organization."})
+
+        # Download delay must be >= 0
+        if self.download_after_days is not None and self.download_after_days < 0:
+            raise ValidationError({"download_after_days": "Must be >= 0."})
+
+        if self.status == self.Status.REVOKED and not self.revoked_at:
+            raise ValidationError({"revoked_at": "revoked_at is required when status is REVOKED."})
+
+    def save(self, *args, **kwargs):
+        # Auto-fill from enrollment if not provided (nice DX)
+        if self.enrollment_id:
+            if not self.student_id:
+                self.student_id = self.enrollment.student_id
+            if not self.course_id:
+                self.course_id = self.enrollment.course_id
+
+            # If your Course has organization, prefer it. Else fall back to student org.
+            if not self.organization_id:
+                org_id = getattr(self.enrollment.course, "organization_id", None) or getattr(
+                    getattr(self.enrollment.student, "organization", None), "id", None
+                )
+                if org_id:
+                    self.organization_id = org_id
+
+        if not self.number:
+            for _ in range(5):
+                cand = self._generate_number()
+                if not EnrollmentCertificate.objects.filter(number=cand).exists():
+                    self.number = cand
+                    break
+
+        if not self.verification_token:
+            for _ in range(5):
+                cand = self._generate_verification_token()
+                if not EnrollmentCertificate.objects.filter(verification_token=cand).exists():
+                    self.verification_token = cand
+                    break
+
+        if self.status == self.Status.REVOKED and self.revoked_at is None:
+            self.revoked_at = timezone.now()
+
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    # --- Download gating ---
+
+    @property
+    def downloadable_at(self):
+        return self.acquired_at + timedelta(days=int(self.download_after_days or 0))
+
+    @property
+    def can_download(self) -> bool:
+        if self.status != self.Status.ISSUED:
+            return False
+        return timezone.now() >= self.downloadable_at
+
+    def assert_can_download(self):
+        """
+        Call this in your download view before serving the pdf.
+        """
+        if self.status != self.Status.ISSUED:
+            raise ValidationError("Certificate is not available (revoked).")
+        if not self.can_download:
+            raise ValidationError(
+                f"Certificate will be downloadable on {timezone.localtime(self.downloadable_at):%Y-%m-%d %H:%M}."
+            )
+
+    def revoke(self, reason: str = "", by_user=None):
+        self.status = self.Status.REVOKED
+        self.revoked_at = timezone.now()
+        self.revoked_reason = (reason or "")[:255]
+        if by_user is not None:
+            self.issued_by_user = by_user
+        self.save(update_fields=["status", "revoked_at", "revoked_reason", "issued_by_user", "updated_at"])
+
+
+
+class OrganizationCertificateSignatures(models.Model):
+    """
+    Stores certificate director signatures for an organization.
+    Exactly one row per organization.
+    """
+    organization = models.OneToOneField(
+        "orgs.Organization",
+        on_delete=models.CASCADE,
+        related_name="certificate_signatures",
+        db_index=True,
+    )
+
+    # Director 1
+    director_1_name = models.CharField(max_length=255, blank=True)
+    director_1_title = models.CharField(max_length=255, blank=True, default="Director")
+    director_1_signature = models.ImageField(
+        upload_to=org_cert_signature_upload_to, blank=True, null=True
+    )
+
+    # Director 2
+    director_2_name = models.CharField(max_length=255, blank=True)
+    director_2_title = models.CharField(max_length=255, blank=True, default="Director")
+    director_2_signature = models.ImageField(
+        upload_to=org_cert_signature_upload_to, blank=True, null=True
+    )
+
+    meta = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Certificate Signatures — Org {self.organization_id}"
+
+
+
 class UserManager(BaseUserManager):
     use_in_migrations = True
 
@@ -342,28 +577,37 @@ class User(AbstractUser):
 
 
 class AdminAccess(models.Model):
-    # Only allow staff or superusers to be selectable in forms/admin:
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
         limit_choices_to=Q(is_staff=True) | Q(is_superuser=True),
     )
     organizations = models.ManyToManyField("orgs.Organization", blank=True)
-    selected_organization = models.ForeignKey("orgs.Organization", 
-    related_name="adminaccess_all", on_delete=models.CASCADE, blank=True, null=True)
+    selected_organization = models.ForeignKey(
+        "orgs.Organization",
+        related_name="adminaccess_all",
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+    )
     active = models.BooleanField(default=True)
 
     def clean(self):
-        # Enforce at the model level (covers shell, scripts, fixtures, etc.)
         if self.user and not (self.user.is_staff or self.user.is_superuser):
             raise ValidationError({
                 "user": "AdminAccess can only be granted to staff or superusers."
             })
 
     def save(self, *args, **kwargs):
-        # Ensure clean() runs on every save
         self.full_clean()
         return super().save(*args, **kwargs)
+
+    # ✅ ADD THIS
+    @classmethod
+    def user_has_admin_access(cls, user):
+        if not user or not user.is_authenticated:
+            return False
+        return cls.objects.filter(user=user, active=True).exists()
 
 
 
@@ -400,6 +644,32 @@ class EmailOTP(models.Model):
 
     def is_valid(self) -> bool:
         return (not self.used) and (self.expires_at >= timezone.now())
+
+
+
+class AdminAccess(models.Model):
+    # Only allow staff or superusers to be selectable in forms/admin:
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        limit_choices_to=Q(is_staff=True) | Q(is_superuser=True),
+    )
+    organizations = models.ManyToManyField("orgs.Organization", blank=True)
+    selected_organization = models.ForeignKey("orgs.Organization", 
+    related_name="adminaccess_all", on_delete=models.CASCADE, blank=True, null=True)
+    active = models.BooleanField(default=True)
+
+    def clean(self):
+        # Enforce at the model level (covers shell, scripts, fixtures, etc.)
+        if self.user and not (self.user.is_staff or self.user.is_superuser):
+            raise ValidationError({
+                "user": "AdminAccess can only be granted to staff or superusers."
+            })
+
+    def save(self, *args, **kwargs):
+        # Ensure clean() runs on every save
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 
@@ -3487,58 +3757,6 @@ class Tier(models.Model):
 
 
 
-class TieringService:
-    """
-    Helper you can call from anywhere (views/serializers/model methods).
-    """
-    @staticmethod
-    def level_for_xp(xp: int) -> dict:
-        xp = max(int(xp or 0), 0)
-
-        # Current tier = highest threshold <= xp
-        current = (
-            Tier.objects
-            .filter(threshold_xp__lte=xp)
-            .order_by("-threshold_xp")
-            .first()
-        )
-
-        # If DB empty, fallback
-        if not current:
-            return {
-                "level_name": "Newbie",
-                "next_threshold": None,
-                "xp_to_next": 0,
-                "progress_to_next_pct": 100,
-            }
-
-        # Next tier = smallest threshold > xp
-        nxt = (
-            Tier.objects
-            .filter(threshold_xp__gt=current.threshold_xp)
-            .order_by("threshold_xp")
-            .first()
-        )
-
-        next_threshold = nxt.threshold_xp if nxt else None
-        xp_to_next = max(next_threshold - xp, 0) if next_threshold is not None else 0
-
-        floor = current.threshold_xp
-        if next_threshold is None:
-            pct = 100
-        else:
-            span = max(next_threshold - floor, 1)
-            pct = int(((xp - floor) / span) * 100)
-
-        return {
-            "level_name": current.name,
-            "next_threshold": next_threshold,
-            "xp_to_next": xp_to_next,
-            "progress_to_next_pct": pct,
-        }
-
-
-
 class ActivityEvent(TimeStampedModel):
     """
     Generic event log for gamification.
@@ -3649,3 +3867,600 @@ class PrivateTutoringRating(TimeStampedModel):
     rating = models.FloatField()
     comment = models.CharField(max_length=2500)
     is_active = models.BooleanField(default=True)
+
+
+
+class CancelTutoringBookingSerializer(serializers.Serializer):
+    booking_id = serializers.IntegerField()
+
+
+
+class OrganizationSubscription(TimeStampedModel):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        EXPIRED = "expired", "Expired"
+        CANCELLED = "cancelled", "Cancelled"
+        PAST_DUE = "past_due", "Past Due"
+
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="subscriptions")
+    plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT, related_name="subscriptions")
+    start_date = models.DateField(blank=True, null=True)
+    end_date = models.DateField(blank=True, null=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+    auto_renew = models.BooleanField(default=True)
+    payment_method = models.CharField(max_length=64, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
+
+
+
+class SubscriptionInvoice(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "pending"
+        OPEN = "open", "open"
+        PAID = "paid", "paid"
+        VOID = "void", "void"
+        UNCOLLECTIBLE = "uncollectible", "uncollectible"
+        ACTIVE = "active", "active"
+
+
+    def invoice_number():
+        return f"INV-{generate('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 10)}"
+
+    organization_membership = models.ForeignKey(OrganizationMembership, on_delete=models.CASCADE, 
+    related_name="my_invoices", blank=True, null=True)
+    subscription = models.ForeignKey(OrganizationSubscription, on_delete=models.CASCADE, related_name="invoices",
+    blank=True, null=True)
+    number = models.CharField(
+        max_length=20,
+        unique=True,
+        default=invoice_number,
+        editable=False
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=8, default="NGN")
+    issued_at = models.DateTimeField(default=timezone.now)
+    due_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)  # open, paid, void, 
+    meta = models.JSONField(default=dict, blank=True)
+    transaction_id = models.CharField(max_length=450, blank=True, null=True)
+
+    def clean(self):
+        super().clean()
+        membership = self.organization_membership
+        # Allow invoices attached to either teachers or parents
+        allowed_roles = {
+            OrganizationMembership.Role.PARENT,
+        }
+        if membership and membership.role not in allowed_roles:
+            raise ValidationError({
+                'organization_membership': 'organization_membership must be a Teacher or a Parent.'
+            })
+
+    def save(self, *args, **kwargs):
+        # ensure full_clean runs before saving (so DB never gets invalid data)
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+
+class InvoiceType(models.Model):
+    class Paytype(models.TextChoices):
+        TUTOR = "tutor","tutor",
+        SUBSCRIPTION = "subscription","subscription"
+        STORE = "store", "store"
+    invoice = models.OneToOneField(SubscriptionInvoice, on_delete=models.CASCADE)
+    invoice_type = models.CharField(max_length=16, choices=Paytype.choices, default=Paytype.SUBSCRIPTION)
+    object_id = models.CharField(max_length=250,blank=True, null=True)
+    object_type = models.CharField(max_length=10, blank=True, null=True)
+    meta = models.JSONField(default=dict, blank=True)
+
+
+
+class CodeSubmission(TimeStampedModel):
+    """
+    Submitted code by lesson (student). A teacher can grade/correct.
+    """
+    class Status(models.TextChoices):
+        SUBMITTED = "submitted", "Submitted"
+        GRADED = "graded", "Graded"
+        REVISED = "revised", "Revised"
+    title = models.CharField(max_length=255, blank=True, null=True)
+    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="code_submissions")
+    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="code_submissions")
+
+    language = models.CharField(max_length=64)
+    code_text = models.TextField()
+
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.SUBMITTED)
+
+    # grading / corrections
+    score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    feedback = models.TextField(blank=True)
+    correction_code = models.TextField(blank=True)  # teacher-proposed corrected solution
+    graded_by = models.ForeignKey(TeacherProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="graded_code_submissions")
+    graded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["lesson", "student"])]
+
+    def __str__(self):
+        return f"[Submission] lesson={self.lesson_id} student={self.student_id} status={self.status}"
+
+
+
+class CodeSubmissionSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    comments = CodeCommentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id",
+            "title",  # ✅ add
+            "lesson",
+            "student",
+            "language",
+            "code_text",
+            "status",
+            "score",
+            "feedback",
+            "correction_code",
+            "graded_by",
+            "graded_at",
+            "created_at",
+            "updated_at",
+            "comments",
+        ]
+        read_only_fields = [
+            "id",
+            "student",
+            "status",
+            "score",
+            "feedback",
+            "correction_code",
+            "graded_by",
+            "graded_at",
+            "created_at",
+            "updated_at",
+            "comments",
+        ]
+
+    def validate_title(self, value):
+        # Normalize whitespace/empty titles to None
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+
+class SubmissionListSerializer(serializers.ModelSerializer):
+    # Add title but normalize empty/" " to None
+    title = serializers.SerializerMethodField()
+
+    student_name = serializers.SerializerMethodField()
+    lesson_title = serializers.CharField(source="lesson.name", read_only=True)
+    course_name = serializers.SerializerMethodField()
+    class_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id",
+            "title",         # ✅ added
+            "created_at",    # ✅ already here, now frontend will display it
+            "updated_at",
+            "status",
+            "language",
+            "student_name",
+            "lesson_title",
+            "course_name",
+            "class_name",
+            "score",
+        ]
+
+    def get_title(self, obj: CodeSubmission):
+        t = (obj.title or "").strip()
+        return t or None
+
+    def get_student_name(self, obj: CodeSubmission) -> str:
+        u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
+        if u.strip():
+            return u
+        return getattr(getattr(obj.student, "user", None), "email", "") or f"student-{obj.student_id}"
+
+    def get_course_name(self, obj: CodeSubmission) -> str:
+        try:
+            return obj.lesson.module.course.name
+        except Exception:
+            return ""
+
+    def get_class_name(self, obj: CodeSubmission) -> str:
+        # Prefer course.classroom if available; fall back to student's classroom
+        try:
+            room = obj.lesson.module.course.classroom
+            if room:
+                return room.name
+        except Exception:
+            pass
+        try:
+            room = obj.student.classroom
+            if room:
+                return room.name
+        except Exception:
+            pass
+        return ""
+
+
+
+class StudentUpdateSubmissionSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    class Meta:
+        model = CodeSubmission
+        fields = ["title", "language", "code_text"]
+
+    def validate_title(self, value):
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+
+class TieringService:
+    """
+    Helper you can call from anywhere (views/serializers/model methods).
+    """
+    @staticmethod
+    def level_for_xp(xp: int) -> dict:
+        xp = max(int(xp or 0), 0)
+
+        # Current tier = highest threshold <= xp
+        current = (
+            Tier.objects
+            .filter(threshold_xp__lte=xp)
+            .order_by("-threshold_xp")
+            .first()
+        )
+
+        # If DB empty, fallback
+        if not current:
+            return {
+                "level_name": "Newbie",
+                "next_threshold": None,
+                "xp_to_next": 0,
+                "progress_to_next_pct": 100,
+            }
+
+        # Next tier = smallest threshold > xp
+        nxt = (
+            Tier.objects
+            .filter(threshold_xp__gt=current.threshold_xp)
+            .order_by("threshold_xp")
+            .first()
+        )
+
+        next_threshold = nxt.threshold_xp if nxt else None
+        xp_to_next = max(next_threshold - xp, 0) if next_threshold is not None else 0
+
+        floor = current.threshold_xp
+        if next_threshold is None:
+            pct = 100
+        else:
+            span = max(next_threshold - floor, 1)
+            pct = int(((xp - floor) / span) * 100)
+
+        return {
+            "level_name": current.name,
+            "next_threshold": next_threshold,
+            "xp_to_next": xp_to_next,
+            "progress_to_next_pct": pct,
+        }
+
+
+
+class Course(NamedModel):
+    USAGE_CHOICE = (
+        ('public','public'),
+        ('private','private'),
+    )
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="courses")
+    subject = models.ForeignKey("academics.Subject", on_delete=models.PROTECT)
+    classroom = models.ForeignKey("academics.Classroom", on_delete=models.PROTECT)
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="courses")
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    course_type = models.CharField(
+        max_length=20,
+        choices=USAGE_CHOICE,
+        default='public',
+    )
+
+
+    def __str__(self):
+        return f"{self.subject.name} Teacher: {self.teacher.user.email}, Name: {self.name}"
+
+    class Meta:
+        unique_together = ("organization", "subject", "classroom", "teacher")
+
+
+
+class Enrollment(TimeStampedModel):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        COMPLETED = "completed", "Completed"
+        DROPPED = "dropped", "Dropped"
+
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="enrollments")
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="enrollments")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+    progress_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    
+
+    class Meta:
+        unique_together = ("student", "course")
+
+
+
+class Lesson(NamedModel):
+    class ContentType(models.TextChoices):
+        VIDEO = "video", "Video"
+        AUDIO = "audio", "Audio"
+        PDF = "pdf", "PDF"
+        DOC = "doc", "Document"
+        LINK = "link", "External Link"
+
+    module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name="lessons")
+    cover_image = models.ImageField(upload_to="texagon/covers/", blank=True, null=True)
+    order = models.PositiveIntegerField(default=1)
+    content_type = models.CharField(max_length=16, choices=ContentType.choices)
+    file = models.FileField(
+        upload_to="texagon/lessons/files/", 
+        storage=RawMediaCloudinaryStorage(),
+        blank=True, null=True
+    )
+    url = models.URLField(blank=True)
+    duration_seconds = models.PositiveIntegerField(default=0)
+    meta = models.JSONField(default=dict, blank=True)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["order"]
+        unique_together = ("module", "order")
+
+
+
+class Material(TimeStampedModel):
+    class Kind(models.TextChoices):
+        VIDEO = "video", "Video"
+        AUDIO = "audio", "Audio"
+        PDF = "pdf", "PDF"
+        DOC = "doc", "Document"
+        IMAGE = "image", "Image"
+        OTHER = "other", "Other"
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="materials")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="materials")
+    title = models.CharField(max_length=255)
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    file = models.FileField(
+        upload_to="texagon/materials/files/", 
+        storage=RawMediaCloudinaryStorage(),
+        blank=True, null=True
+    )
+    cover_image = models.ImageField(upload_to="texagon/materials/covers/", blank=True, null=True)
+    url = models.URLField(blank=True)
+    tags = models.JSONField(default=list, blank=True)
+    is_public = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="materials", 
+        blank=True, null=True
+    )
+
+    def __str__(self):
+        return self.title
+
+
+
+class OrganizationMembership(TimeStampedModel):
+    class Role(models.TextChoices):
+        OWNER = "owner", "Owner"
+        ADMIN = "admin", "Admin"
+        TEACHER = "teacher", "Teacher"
+        STUDENT = "student", "Student"
+        PARENT = "parent", "Parent"
+        STAFF = "staff", "Staff"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="memberships")
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="memberships")
+    role = models.CharField(max_length=16, choices=Role.choices)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ("user", "organization", "role")
+        indexes = [models.Index(fields=["organization", "role"])]
+
+    def __str__(self):
+        return f"{self.user} @ {self.organization} ({self.role})"
+
+    @classmethod
+    def fetch_defaults(cls, user):
+        org = Organization.objects.get_or_create(
+            slug="default",
+        )
+        return cls.objects.get_or_create(
+            user=user,
+            organization=org,
+            role="owner",
+        )
+
+
+
+class ProductImage(TimeStampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="images")
+    product_image = models.ImageField(upload_to="texagon/product_images/", blank=True, null=True)  # use ImageField
+    alt_text = models.CharField(max_length=200, blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "created_at"]
+
+    def get_absolute_url(self, request=None):
+        if self.product_image:
+            if request:
+                return request.build_absolute_uri(self.product_image.url)
+            return f"{settings.MEDIA_URL}{self.product_image.name}"
+        return ""
+
+
+
+class Order(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        PAID = "paid", _("Paid")
+        FULFILLED = "fulfilled", _("Fulfilled")
+        CANCELLED = "cancelled", _("Cancelled")
+        REFUNDED = "refunded", _("Refunded")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="orders")
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING, db_index=True)
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    discount_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    tax_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    shipping_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    grand_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+
+    coupon_code = models.CharField(max_length=40, blank=True)
+    notes = models.TextField(blank=True)
+
+    billing_address = models.ForeignKey(Address, null=True, blank=True, on_delete=models.SET_NULL, related_name="billing_orders")
+    shipping_address = models.ForeignKey(Address, null=True, blank=True, on_delete=models.SET_NULL, related_name="shipping_orders")
+
+    def __str__(self):
+        return f"Order {self.pk} — {self.get_status_display()}"
+
+    def reduce_stock(self):
+        order_items = self.items.all()
+        for order_item in order_items:
+            product = order_item.product
+            if product.stock >= order_item.quantity:
+                product.stock = product.stock - order_item.quantity
+                product.save()
+
+
+
+class BNPLAgreement(TimeStampedModel):
+    """
+    A BNPL contract tied to a single Order.
+    We snapshot key plan details, totals, and provider references at checkout.
+    """
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")          # created but not confirmed by provider
+        ACTIVE = "active", _("Active")             # schedule created; collecting installments
+        COMPLETED = "completed", _("Completed")    # all installments settled
+        FAILED = "failed", _("Failed")             # unrecoverable failure
+        CANCELLED = "cancelled", _("Cancelled")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.OneToOneField("Order", on_delete=models.CASCADE, related_name="bnpl_agreement")
+    plan = models.ForeignKey(BNPLPlanTemplate, on_delete=models.PROTECT, related_name="agreements")
+    provider = models.CharField(max_length=20, choices=BNPLPlanTemplate.Provider.choices)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING, db_index=True)
+
+    # Snapshot of plan terms used at the moment of checkout
+    num_installments = models.PositiveSmallIntegerField()
+    interval_days = models.PositiveSmallIntegerField()
+    take_downpayment_now = models.BooleanField(default=True)
+
+    currency = models.CharField(max_length=10, default="NGN")
+    principal_amount = models.DecimalField(max_digits=12, decimal_places=2)  # based on order.grand_total
+    customer_fee_flat = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    customer_fee_rate = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0.0000"))
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2)  # principal + customer fees
+
+    # Provider references
+    provider_checkout_id = models.CharField(max_length=120, blank=True)
+    provider_agreement_id = models.CharField(max_length=120, blank=True)
+
+    # Convenience aggregates
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    amount_outstanding = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["provider", "status"]),
+        ]
+
+    def __str__(self):
+        return f"BNPL {self.get_provider_display()} for Order {self.order_id} — {self.get_status_display()}"
+
+    def get_next_installment_to_pay(self, as_of=None):
+        """
+        Returns the next unpaid installment that is due.
+        """
+        as_of = as_of or timezone.now()
+
+        return (
+            self.installments.filter(
+                due_at__lte=as_of,
+                status__in=[
+                    BNPLInstallment.Status.PENDING,
+                    BNPLInstallment.Status.AUTHORIZED,
+                    BNPLInstallment.Status.FAILED,
+                ],
+            )
+            .exclude(amount_paid__gte=F("amount_due"))
+            .order_by("index")
+            .first()
+        )
+
+    def initialize_schedule(self, first_charge_at: timezone.datetime | None = None):
+        """
+        Create BNPLInstallment rows based on the snapshot terms.
+        Call this once after the provider approves the agreement.
+        """
+        assert self.pk, "Save agreement before initializing schedule."
+        BNPLInstallment.objects.filter(agreement=self).delete()
+
+        per_inst = (self.total_amount / Decimal(self.num_installments)).quantize(Decimal("0.01"))
+        # Adjust last installment to fix rounding pennies
+        running_total = Decimal("0.00")
+        now = timezone.now()
+        first_due = first_charge_at or now
+
+        for i in range(1, self.num_installments + 1):
+            due = first_due if i == 1 else first_due + timedelta(days=self.interval_days * (i - 1))
+            amount = per_inst
+            if i == self.num_installments:
+                amount = (self.total_amount - running_total).quantize(Decimal("0.01"))
+            BNPLInstallment.objects.create(
+                agreement=self,
+                index=i,
+                due_at=due,
+                amount_due=amount,
+                capture_immediately=(i == 1 and self.take_downpayment_now),
+            )
+            running_total += amount
+
+        # initialize aggregates
+        self.amount_outstanding = self.total_amount
+        self.save(update_fields=["amount_outstanding"])
+
+
+
+class ReviewSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Review
+        fields = ["id", "product", "user", "user_name", "rating", "title", "body", "created_at", "updated_at"]
+        read_only_fields = ["id", "product", "user", "user_name", "created_at", "updated_at"]
+
+    def get_user_name(self, obj):
+        u = obj.user
+        return getattr(u, "get_full_name", lambda: "")() or getattr(u, "username", "") or getattr(u, "email", "")
