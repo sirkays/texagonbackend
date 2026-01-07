@@ -13,12 +13,14 @@ from api.authentication import SessionTokenAuthentication  # your existing class
 from orgs.models import OrganizationMembership
 from academics.models import StudentProfile
 from learning.models import (
-    Module, Lesson, Course, Enrollment,
+    Module, Lesson, Course, Enrollment,CoursePassCriteria
 )
-from .utils import _get_student_for_user,_is_org_admin_or_teacher,_season_to_dict,_parse_dt,_resolve_org
+from .utils import (_get_student_for_user,_is_org_admin_or_teacher,_season_to_dict,
+    _parse_dt,_resolve_org,_criteria_to_dict,_parse_positive_int)
 from gamification.models import LeaderboardSeason
 from django.db import  transaction
 from django.utils.text import slugify
+from django.shortcuts import get_object_or_404
 
 
 @api_view(["GET"])
@@ -420,6 +422,141 @@ def leaderboard_season_set_active_view(request, season_id: int):
         return Response(_season_to_dict(s), status=status.HTTP_200_OK)
 
     except Exception as e:
+        traceback.print_exc()
+        return Response(
+            {"detail": "Unexpected error", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+
+
+@api_view(["GET", "POST", "PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def course_pass_criteria_view(request, course_id: int):
+    """
+    GET   /api/admin/courses/<course_id>/pass-criteria
+    POST  /api/admin/courses/<course_id>/pass-criteria   (create or replace)
+    PATCH /api/admin/courses/<course_id>/pass-criteria   (partial update)
+
+    Headers:
+      Authorization: Api-Key <YOUR_API_KEY>
+      X-Session-Token: <session_token>
+
+    Body (POST/PATCH):
+      {
+        "no_of_cbt": 10,
+        "no_of_code_submission": 10,
+        "total_pass_mark_cbt": 500,
+        "total_pass_mark_code": 500
+      }
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        course = get_object_or_404(Course, id=course_id, organization=org)
+
+        # GET
+        if request.method == "GET":
+            criteria = getattr(course, "pass_criteria", None)
+            if not criteria:
+                # return defaults (optional) or 404. I prefer "empty + defaults" for UI simplicity.
+                return Response(
+                    {
+                        "course_id": course.id,
+                        "no_of_cbt": 10,
+                        "no_of_code_submission": 10,
+                        "total_pass_mark_cbt": 500,
+                        "total_pass_mark_code": 500,
+                        "exists": False,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            d = _criteria_to_dict(criteria)
+            d["exists"] = True
+            return Response(d, status=status.HTTP_200_OK)
+
+        # POST/PATCH (upsert)
+        data = request.data or {}
+
+        # Defaults:
+        default_no_of_cbt = 10
+        default_no_of_code_submission = 10
+        default_total_pass_mark_cbt = 500
+        default_total_pass_mark_code = 500
+
+        # For PATCH: only update provided fields
+        is_patch = request.method == "PATCH"
+
+        no_of_cbt, err_resp = _parse_positive_int(
+            data.get("no_of_cbt"), "no_of_cbt", default=None if is_patch else default_no_of_cbt
+        )
+        if err_resp:
+            return err_resp
+
+        no_of_code_submission, err_resp = _parse_positive_int(
+            data.get("no_of_code_submission"),
+            "no_of_code_submission",
+            default=None if is_patch else default_no_of_code_submission,
+        )
+        if err_resp:
+            return err_resp
+
+        total_pass_mark_cbt, err_resp = _parse_positive_int(
+            data.get("total_pass_mark_cbt"),
+            "total_pass_mark_cbt",
+            default=None if is_patch else default_total_pass_mark_cbt,
+        )
+        if err_resp:
+            return err_resp
+
+        total_pass_mark_code, err_resp = _parse_positive_int(
+            data.get("total_pass_mark_code"),
+            "total_pass_mark_code",
+            default=None if is_patch else default_total_pass_mark_code,
+        )
+        if err_resp:
+            return err_resp
+
+        with transaction.atomic():
+            criteria, created = CoursePassCriteria.objects.get_or_create(course=course)
+
+            # Apply fields (POST replaces all; PATCH only updates provided)
+            if not is_patch or "no_of_cbt" in data:
+                criteria.no_of_cbt = no_of_cbt if no_of_cbt is not None else criteria.no_of_cbt
+            if not is_patch or "no_of_code_submission" in data:
+                criteria.no_of_code_submission = (
+                    no_of_code_submission
+                    if no_of_code_submission is not None
+                    else criteria.no_of_code_submission
+                )
+            if not is_patch or "total_pass_mark_cbt" in data:
+                criteria.total_pass_mark_cbt = (
+                    total_pass_mark_cbt
+                    if total_pass_mark_cbt is not None
+                    else criteria.total_pass_mark_cbt
+                )
+            if not is_patch or "total_pass_mark_code" in data:
+                criteria.total_pass_mark_code = (
+                    total_pass_mark_code
+                    if total_pass_mark_code is not None
+                    else criteria.total_pass_mark_code
+                )
+
+            criteria.save()
+
+        out = _criteria_to_dict(criteria)
+        out["created"] = created
+        return Response(out, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    except Exception as e:
+        print(e)
         traceback.print_exc()
         return Response(
             {"detail": "Unexpected error", "error": str(e)},

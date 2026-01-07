@@ -22,7 +22,13 @@ class Test(TimeStampedModel):
     def __str__(self):
         return self.title
 
-
+    def update_total_marks(self):
+        total = self.questions.aggregate(
+            total=Sum("points")
+        )["total"] or 0
+        self.total_marks = total
+        self.save(update_fields=["total_marks"])
+        
 
 class Question(TimeStampedModel):
     class Type(models.TextChoices):

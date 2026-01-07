@@ -1696,6 +1696,8 @@ def add_question(request, test_id: int):
                 'difficulty': data.get('difficulty', 'Medium')
             }
         )
+
+        question.test.update_total_marks()
         
         # Create choices if provided
         options = data.get('options', [])
@@ -1805,6 +1807,7 @@ def update_question(request, test_id: int, question_id: int):
             question.meta = meta
             question.save()
         serialized_question = _serialize_question(question)
+        question.test.update_total_marks()
         return Response({
             "question": serialized_question,
             "message": "Question updated successfully."
@@ -1838,10 +1841,13 @@ def delete_question(request, test_id: int, question_id: int):
                 test_id=test_id,
                 test__course__teacher=teacher
             )
+            test = question
         except Question.DoesNotExist:
             return Response({"detail": "Question not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
         
         question.delete()
+
+        test.update_total_marks()
         
         return Response({
             "message": "Question deleted successfully."

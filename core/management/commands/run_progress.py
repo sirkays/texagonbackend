@@ -91,8 +91,7 @@ class Command(BaseCommand):
         # Your CodeSubmission is in ide/models.py
         CodeSubmission = _get_model_any(
             [
-                ("ide", "CodeSubmission"),
-                ("learning", "CodeSubmission"),
+                ("codeide", "CodeSubmission"),
             ]
         )
 

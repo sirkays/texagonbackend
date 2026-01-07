@@ -8,7 +8,7 @@ import traceback
 from decimal import Decimal
 from django.shortcuts import _get_queryset
 from accounts.models import User
-from learning.models import Course, Module, Enrollment,Lesson,Module
+from learning.models import Course, Module, Enrollment,Lesson,Module,CoursePassCriteria
 from calendar import monthrange
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from datetime import date, datetime, timedelta
@@ -535,3 +535,32 @@ def _season_to_dict(s: LeaderboardSeason):
         "created_at": s.created_at.isoformat() if s.created_at else None,
     }
 
+def _criteria_to_dict(c: CoursePassCriteria):
+    return {
+        "course_id": c.course_id,
+        "no_of_cbt": c.no_of_cbt,
+        "no_of_code_submission": c.no_of_code_submission,
+        "total_pass_mark_cbt": c.total_pass_mark_cbt,
+        "total_pass_mark_code": c.total_pass_mark_code,
+    }
+
+
+def _parse_positive_int(val, field_name, default=None):
+    """
+    Accepts int-like strings; returns (value, error_response_or_None)
+    """
+    if val is None:
+        return default, None
+    try:
+        n = int(val)
+    except (TypeError, ValueError):
+        return None, Response(
+            {"detail": f"{field_name} must be an integer."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if n < 0:
+        return None, Response(
+            {"detail": f"{field_name} must be >= 0."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return n, None
