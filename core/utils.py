@@ -374,7 +374,6 @@ def _ach_to_dict(a: AchievementDefinition) -> dict:
         "description": a.description or "",
         "icon": a.icon,
         "category": a.category,
-        "target_value": a.target_value,
         "points": a.points,
         "is_active": bool(a.is_active),
     }

@@ -30,6 +30,7 @@ from core.utils import (
     _resolve_org,
     _status_from_user_membership,
     _avatar_url_for,
+    resolve_season,
 )
 
 # ---------- helpers ----------
@@ -47,6 +48,11 @@ def _get_student_for_user(user) -> Optional[StudentProfile]:
     return (StudentProfile.objects
             .filter(user=user).select_related("user", "organization")
             .order_by("-id").first())
+from typing import Any, Dict, List, Optional
+
+from django.db.models import Count
+# from academics.models import StudentProfile
+# from achievements.models import BadgeAward, Streak
 
 
 def _avatar_url(u) -> Optional[str]:
@@ -67,48 +73,77 @@ def _name_from_user(u) -> str:
 
 
 def _top_rows(qs, top: int) -> List[Dict[str, Any]]:
-    # qs is a values/annotate set with fields: student_id, xp
+    # qs is a values/annotate queryset with fields: student_id, xp
+    top = max(int(top or 0), 0)
+    if top == 0:
+        return []
     return list(qs.order_by("-xp", "student_id")[:top])
 
 
-def _badge_count_map(student_ids: List[int]) -> Dict[int, int]:
+def _badge_count_map(student_ids: List[int], season=None) -> Dict[int, int]:
+    """
+    Returns {student_id: badge_award_count}.
+
+    If season is provided, counts only awards in that season
+    (aligns with the season-filtered leaderboard endpoint).
+    """
     if not student_ids:
         return {}
-    rows = (BadgeAward.objects.filter(student_id__in=student_ids)
-            .values("student_id")
-            .annotate(cnt=Count("id")))
-    return {r["student_id"]: int(r["cnt"]) for r in rows}
+
+    qs = BadgeAward.objects.filter(student_id__in=student_ids)
+    if season is not None:
+        qs = qs.filter(season=season)
+
+    rows = qs.values("student_id").annotate(cnt=Count("id"))
+    return {int(r["student_id"]): int(r["cnt"] or 0) for r in rows}
 
 
-def _streak_map(student_ids: List[int]) -> Dict[int, int]:
+def _streak_map(student_ids: List[int], season=None) -> Dict[int, int]:
+    """
+    Returns {student_id: current_streak_days}.
+
+    If season is provided, reads streaks for that season.
+    If no season is provided, reads any streak row (typically "all-time" behavior).
+    """
     if not student_ids:
         return {}
-    rows = Streak.objects.filter(student_id__in=student_ids)\
-                         .values("student_id", "current_days")
-    return {r["student_id"]: int(r["current_days"] or 0) for r in rows}
+
+    qs = Streak.objects.filter(student_id__in=student_ids)
+    if season is not None:
+        qs = qs.filter(season=season)
+
+    rows = qs.values("student_id", "current_days")
+    return {int(r["student_id"]): int(r["current_days"] or 0) for r in rows}
 
 
-def _profiles_map(student_ids: List[int]) -> Dict[int, StudentProfile]:
+def _profiles_map(student_ids: List[int]) -> Dict[int, "StudentProfile"]:
     if not student_ids:
         return {}
-    profs = (StudentProfile.objects.filter(id__in=student_ids)
-             .select_related("user", "organization"))
-    return {p.id: p for p in profs}
+    profs = (
+        StudentProfile.objects.filter(id__in=student_ids)
+        .select_related("user", "organization")
+    )
+    return {int(p.id): p for p in profs}
 
 
 def _rank_for_student(all_qs, student_id: int, student_points: int) -> Optional[int]:
     """
     Compute rank = 1 + count(students with xp > student_points).
-    all_qs must be: PointTransaction.objects.values("student_id").annotate(xp=Sum("points"))
+
+    IMPORTANT: all_qs MUST already be season-filtered (and org-filtered where applicable)
+    to match the endpoint.
+    Example:
+      all_qs = PointTransaction.objects.filter(season=season).values("student_id").annotate(xp=Sum("points"))
     """
     if student_id is None:
         return None
     try:
+        # ensure int to avoid weird comparisons
+        student_points = int(student_points or 0)
         higher = all_qs.filter(xp__gt=student_points).count()
         return int(higher) + 1
     except Exception:
         return None
-
 
 # ---------- endpoint ----------
 @api_view(["GET"])
@@ -118,8 +153,14 @@ def leaderboard_overview(request):
     """
     Data for the Leaderboard UI (leaderboard.tsx).
 
+    Seasonal behavior:
+      - Resolves the season using resolve_season(org, now)
+      - Filters ALL point-based leaderboards/stats by that season
+      - (Optionally) filters badges/streaks by season if your helpers support it
+
     Response:
       {
+        "season": {id, name, slug, start_at, end_at, is_active} | null,
         "stats": {
           "global_rank": int|None,
           "school_rank": int|None,
@@ -142,12 +183,34 @@ def leaderboard_overview(request):
         user = request.user
         student = _get_student_for_user(user)
         if not student:
-            # No student context → return full dummy payload that matches the UI
-            return Response(_dummy_payload(), status=status.HTTP_200_OK)
+            return Response({
+                "season": None,
+                "stats": {
+                    "global_rank": None,
+                    "school_rank": None,
+                    "total_points": 0,
+                    "weekly_points": 0,
+                    "competitors": 0,
+                },
+                "global": [],
+                "school": [],
+                "weekly": [],
+            }, status=status.HTTP_200_OK)
+
 
         org = student.organization
         now = timezone.now()
         week_since = now - timedelta(days=7)
+        month_since = now - timedelta(days=30)
+
+        # ---- resolve current season ----
+        # Uses your helper:
+        #   - prefers active season if it contains now
+        #   - else finds by date range
+        season = resolve_season(org, now)
+        def _season_filter(qs, season_obj):
+            """If season exists, restrict to that season; else leave queryset unchanged (all-time)."""
+            return qs.filter(season=season_obj) if season_obj else qs
 
         def _i(s, d):  # safe int
             try:
@@ -159,37 +222,39 @@ def leaderboard_overview(request):
         top_school = _i(request.query_params.get("top_school"), 10)
         top_weekly = _i(request.query_params.get("top_weekly"), 10)
 
-        # ---- TOTAL points for current student ----
+        # ---- TOTAL points for current student (seasonal) ----
         student_total_points = int(
-            PointTransaction.objects.filter(student=student)
-            .aggregate(x=Sum("points")).get("x") or 0
+            _season_filter(PointTransaction.objects.filter(student=student), season)
+            .aggregate(x=Sum("points"))
+            .get("x") or 0
         )
+        # ---- GLOBAL leaderboard (all orgs, season-filtered) ----
+        global_base = _season_filter(PointTransaction.objects.all(), season)
+        global_all = global_base.values("student_id").annotate(xp=Sum("points"))
 
-        # ---- GLOBAL leaderboard (all orgs) ----
-        global_all = (PointTransaction.objects
-                      .values("student_id")
-                      .annotate(xp=Sum("points")))
         global_top = _top_rows(global_all, top_global)
         global_ids = [r["student_id"] for r in global_top]
 
-        # include current student if not present
         if student.id not in global_ids:
             global_ids.append(student.id)
 
-        global_badges = _badge_count_map(global_ids)
-        global_streaks = _streak_map(global_ids)
+        # If your helpers accept season, pass it.
+        # If they don't, remove season=season from these calls.
+        global_badges = _badge_count_map(global_ids, season=season)
+        global_streaks = _streak_map(global_ids, season=season)
         global_profiles = _profiles_map(global_ids)
 
         global_list: List[Dict[str, Any]] = []
         rank_counter = 1
-        # Rebuild in sorted order (and ensure current user is included once)
         seen = set()
+
         for row in sorted(global_top, key=lambda r: (-int(r["xp"] or 0), r["student_id"])):
             sid = row["student_id"]
             seen.add(sid)
             prof = global_profiles.get(sid)
             if not prof:
                 continue
+
             global_list.append({
                 "rank": rank_counter,
                 "name": _name_from_user(prof.user),
@@ -201,12 +266,9 @@ def leaderboard_overview(request):
                 "isCurrentUser": bool(sid == student.id),
             })
             rank_counter += 1
-
         if student.id not in seen:
-            # append current user (not top N)
             prof = global_profiles.get(student.id)
             if prof:
-                # compute approximate rank accurately
                 global_rank = _rank_for_student(global_all, student.id, student_total_points)
                 global_list.append({
                     "rank": global_rank or None,
@@ -219,28 +281,31 @@ def leaderboard_overview(request):
                     "isCurrentUser": True,
                 })
 
-        # ---- SCHOOL leaderboard (within same org) ----
-        school_all = (PointTransaction.objects
-                      .filter(student__organization=org)
-                      .values("student_id")
-                      .annotate(xp=Sum("points")))
+        # ---- SCHOOL leaderboard (within same org, season-filtered) ----
+        school_base = PointTransaction.objects.filter(student__organization=org)
+        school_base = _season_filter(school_base, season)
+        school_all = school_base.values("student_id").annotate(xp=Sum("points"))
+
         school_top = _top_rows(school_all, top_school)
         school_ids = [r["student_id"] for r in school_top]
         if student.id not in school_ids:
             school_ids.append(student.id)
 
-        school_badges = _badge_count_map(school_ids)
-        school_streaks = _streak_map(school_ids)
+        school_badges = _badge_count_map(school_ids, season=season)
+        school_streaks = _streak_map(school_ids, season=season)
         school_profiles = _profiles_map(school_ids)
 
         school_list: List[Dict[str, Any]] = []
         rank_counter = 1
         seen = set()
+
         for row in sorted(school_top, key=lambda r: (-int(r["xp"] or 0), r["student_id"])):
-            sid = row["student_id"]; seen.add(sid)
+            sid = row["student_id"]
+            seen.add(sid)
             prof = school_profiles.get(sid)
             if not prof:
                 continue
+
             school_list.append({
                 "rank": rank_counter,
                 "name": _name_from_user(prof.user),
@@ -266,44 +331,51 @@ def leaderboard_overview(request):
                     "isCurrentUser": True,
                 })
 
-        # ---- WEEKLY leaderboard (points earned in last 7 days, within org) ----
-        weekly_all = (PointTransaction.objects
-                      .filter(student__organization=org, created_at__gte=week_since)
-                      .values("student_id")
-                      .annotate(xp=Sum("points")))
+        # ---- WEEKLY leaderboard (last 7 days, within org, season-filtered) ----
+        weekly_base = PointTransaction.objects.filter(
+            student__organization=org,
+            created_at__gte=week_since,
+        )
+        weekly_base = _season_filter(weekly_base, season)
+        weekly_all = weekly_base.values("student_id").annotate(xp=Sum("points"))
+
         weekly_top = _top_rows(weekly_all, top_weekly)
         weekly_ids = [r["student_id"] for r in weekly_top]
         if student.id not in weekly_ids:
             weekly_ids.append(student.id)
 
         weekly_profiles = _profiles_map(weekly_ids)
-        weekly_streaks = _streak_map(weekly_ids)
+        weekly_streaks = _streak_map(weekly_ids, season=season)
 
         weekly_list: List[Dict[str, Any]] = []
         rank_counter = 1
         seen = set()
+
         for row in sorted(weekly_top, key=lambda r: (-int(r["xp"] or 0), r["student_id"])):
-            sid = row["student_id"]; seen.add(sid)
+            sid = row["student_id"]
+            seen.add(sid)
             prof = weekly_profiles.get(sid)
             if not prof:
                 continue
+
             weekly_list.append({
                 "rank": rank_counter,
                 "name": _name_from_user(prof.user),
-                "points": int(row["xp"] or 0),  # "points this week"
+                "points": int(row["xp"] or 0),
                 "avatar": _avatar_url(prof.user),
                 "streak": weekly_streaks.get(sid, 0),
                 "isCurrentUser": bool(sid == student.id),
             })
             rank_counter += 1
 
-        # append current user weekly entry if missing
         if student.id not in seen:
             prof = weekly_profiles.get(student.id)
             if prof:
                 my_week_pts = int(
-                    PointTransaction.objects.filter(student=student, created_at__gte=week_since)
-                    .aggregate(x=Sum("points")).get("x") or 0
+                    _season_filter(
+                        PointTransaction.objects.filter(student=student, created_at__gte=week_since),
+                        season,
+                    ).aggregate(x=Sum("points")).get("x") or 0
                 )
                 my_week_rank = _rank_for_student(weekly_all, student.id, my_week_pts)
                 weekly_list.append({
@@ -315,25 +387,48 @@ def leaderboard_overview(request):
                     "isCurrentUser": True,
                 })
 
-        # ---- stats header ----
+        # ---- stats header (season-filtered ranks) ----
         global_rank = _rank_for_student(global_all, student.id, student_total_points)
         school_rank = _rank_for_student(school_all, student.id, student_total_points)
         weekly_points = next((i["points"] for i in weekly_list if i.get("isCurrentUser")), 0)
 
-        # "competitors": active learners in school (students with any points in last 30 days)
-        month_since = now - timedelta(days=30)
-        competitors = (PointTransaction.objects
-                       .filter(student__organization=org, created_at__gte=month_since)
-                       .values("student_id").distinct().count())
+        # competitors: active learners in school in last 30 days (season-filtered)
+        competitors_qs = PointTransaction.objects.filter(
+            student__organization=org,
+            created_at__gte=month_since,
+        )
+        competitors_qs = _season_filter(competitors_qs, season)
+
+        competitors = competitors_qs.values("student_id").distinct().count()
         if competitors == 0:
-            # fallback to count students in org
             competitors = StudentProfile.objects.filter(organization=org).count() or 0
 
         # ---- if everything is empty, provide nice dummies ----
         if not global_list and not school_list and not weekly_list:
-            return Response(_dummy_payload(), status=status.HTTP_200_OK)
+            return Response({
+                "season": None,
+                "stats": {
+                    "global_rank": None,
+                    "school_rank": None,
+                    "total_points": 0,
+                    "weekly_points": 0,
+                    "competitors": 0,
+                },
+                "global": [],
+                "school": [],
+                "weekly": [],
+            }, status=status.HTTP_200_OK)
+
 
         payload = {
+            "season": None if not season else {
+                "id": season.id,
+                "name": season.name,
+                "slug": season.slug,
+                "start_at": season.start_at,
+                "end_at": season.end_at,
+                "is_active": season.is_active,
+            },
             "stats": {
                 "global_rank": global_rank,
                 "school_rank": school_rank,
@@ -348,47 +443,11 @@ def leaderboard_overview(request):
         return Response(payload, status=status.HTTP_200_OK)
 
     except Exception as e:
+        print(e)
         err = {"detail": "Failed to load leaderboard.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
             err["traceback"] = traceback.format_exc()
         return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-# ---------- dummy payload (when no data/student) ----------
-def _dummy_payload() -> Dict[str, Any]:
-    return {
-        "stats": {
-            "global_rank": 4,
-            "school_rank": 1,
-            "total_points": 7500,
-            "weekly_points": 450,
-            "competitors": 2847,
-        },
-        "global": [
-            {"rank": 1, "name": "Sarah Dan freak", "school": "Tech High School", "points": 15420,
-             "avatar": None, "streak": 45, "badges": 12},
-            {"rank": 2, "name": "Alex Rodriguez", "school": "Innovation Academy", "points": 14890,
-             "avatar": None, "streak": 38, "badges": 11},
-            {"rank": 3, "name": "Emma Thompson", "school": "Future Leaders School", "points": 14250,
-             "avatar": None, "streak": 42, "badges": 10},
-            {"rank": 4, "name": "John Doe", "school": "Your School", "points": 7500,
-             "avatar": None, "streak": 15, "badges": 3, "isCurrentUser": True},
-            {"rank": 5, "name": "Maria Garcia", "school": "Excellence Institute", "points": 13100,
-             "avatar": None, "streak": 28, "badges": 9},
-        ],
-        "school": [
-            {"rank": 1, "name": "John Doe", "points": 7500, "avatar": None, "streak": 15, "badges": 3, "isCurrentUser": True},
-            {"rank": 2, "name": "Lisa Wang", "points": 6800, "avatar": None, "streak": 22, "badges": 5},
-            {"rank": 3, "name": "Mike Johnson", "points": 6200, "avatar": None, "streak": 18, "badges": 4},
-            {"rank": 4, "name": "Anna Smith", "points": 5900, "avatar": None, "streak": 12, "badges": 3},
-            {"rank": 5, "name": "David Lee", "points": 5400, "avatar": None, "streak": 25, "badges": 6},
-        ],
-        "weekly": [
-            {"rank": 1, "name": "John Doe", "points": 450, "avatar": None, "streak": 7, "isCurrentUser": True},
-            {"rank": 2, "name": "Lisa Wang", "points": 380, "avatar": None, "streak": 6},
-            {"rank": 3, "name": "Mike Johnson", "points": 320, "avatar": None, "streak": 5},
-        ],
-    }
 
 
 
