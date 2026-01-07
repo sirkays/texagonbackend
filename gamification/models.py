@@ -43,9 +43,11 @@ class LeaderboardSeason(models.Model):
         return f"{self.organization_id}:{self.name}"
 
     @classmethod
-    def get_active(cls, org):
+    def get_active(cls, org=None):
         # If multiple active exist, newest wins (or enforce one active in admin)
-        return cls.objects.filter(organization=org, is_active=True).order_by("-start_at").first()
+        if org:
+            return cls.objects.filter(organization=org, is_active=True).order_by("-start_at").first()
+        return cls.objects.filter(is_active=True).order_by("-start_at").first()
 
     def contains(self, dt):
         return self.start_at <= dt < self.end_at
@@ -277,17 +279,16 @@ class Streak(TimeStampedModel):
         if event_type == "daily_active" and code == "streak_champion":
             total = build_streak(ev_qs).count()
             
-            org = student.organization
             occurred_at = timezone.now()
 
             # 1) Prefer active season if it contains the date
-            active = LeaderboardSeason.get_active(org)
+            active = LeaderboardSeason.get_active(None)
             if active and active.contains(occurred_at):
                 return active
 
             # 2) Otherwise find by date range
             season =  (LeaderboardSeason.objects
-                    .filter(organization=org, start_at__lte=occurred_at, end_at__gt=occurred_at)
+                    .filter(start_at__lte=occurred_at, end_at__gt=occurred_at)
             .order_by("-start_at")
             .first())
 

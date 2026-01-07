@@ -15,8 +15,10 @@ from academics.models import StudentProfile
 from learning.models import (
     Module, Lesson, Course, Enrollment,
 )
-from core.utils import _get_student_for_user
-
+from .utils import _get_student_for_user,_is_org_admin_or_teacher,_season_to_dict,_parse_dt,_resolve_org
+from gamification.models import LeaderboardSeason
+from django.db import  transaction
+from django.utils.text import slugify
 
 
 @api_view(["GET"])
@@ -214,3 +216,212 @@ def active_modules_for_user(request):
 
 
 
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def leaderboard_seasons_view(request):
+    """
+    GET  /api/admin/settings/leaderboard-seasons
+    POST /api/admin/settings/leaderboard-seasons
+
+    Headers:
+      Authorization: Api-Key <YOUR_API_KEY>
+      X-Session-Token: <session_token>
+
+    Body (POST):
+      {
+        "name": "2026 Academic Year",
+        "slug": "2026-academic-year",   # optional; will slugify(name) if omitted
+        "start_at": "2026-01-01T00:00:00Z",
+        "end_at": "2026-12-31T23:59:59Z",
+        "is_active": false              # optional
+      }
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        if request.method == "GET":
+            qs = LeaderboardSeason.objects.filter(organization=org).order_by("-start_at", "-id")
+            return Response([_season_to_dict(s) for s in qs])
+
+        # POST (create)
+        data = request.data or {}
+
+        name = (data.get("name") or "").strip()
+        if not name:
+            return Response({"detail": "name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        slug = (data.get("slug") or "").strip()
+        if not slug:
+            slug = slugify(name)[:128]
+
+        start_at = _parse_dt(data.get("start_at"))
+        end_at = _parse_dt(data.get("end_at"))
+        if not start_at or not end_at:
+            return Response(
+                {"detail": "start_at and end_at must be valid ISO 8601 datetimes."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if start_at >= end_at:
+            return Response({"detail": "start_at must be before end_at."}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_active = bool(data.get("is_active", False))
+
+        with transaction.atomic():
+            # if making active, deactivate others first
+            if is_active:
+                LeaderboardSeason.objects.filter(organization=org, is_active=True).update(is_active=False)
+
+            s = LeaderboardSeason.objects.create(
+                organization=org,
+                name=name,
+                slug=slug,
+                start_at=start_at,
+                end_at=end_at,
+                is_active=is_active,
+            )
+
+        return Response(_season_to_dict(s), status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response(
+            {"detail": "Unexpected error", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def leaderboard_season_detail_view(request, season_id: int):
+    """
+    GET    /api/admin/settings/leaderboard-seasons/<season_id>
+    PATCH  /api/admin/settings/leaderboard-seasons/<season_id>
+    DELETE /api/admin/settings/leaderboard-seasons/<season_id>
+
+    Body (PATCH): any of
+      {
+        "name": "...",
+        "slug": "...",
+        "start_at": "ISO",
+        "end_at": "ISO",
+        "is_active": true/false
+      }
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            s = LeaderboardSeason.objects.get(id=season_id, organization=org)
+        except LeaderboardSeason.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == "GET":
+            return Response(_season_to_dict(s))
+
+        if request.method == "DELETE":
+            s.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        # PATCH
+        data = request.data or {}
+
+        name = data.get("name", None)
+        slug = data.get("slug", None)
+        start_at_val = data.get("start_at", None)
+        end_at_val = data.get("end_at", None)
+        is_active_val = data.get("is_active", None)
+
+        if name is not None:
+            name = (name or "").strip()
+            if not name:
+                return Response({"detail": "name cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+            s.name = name
+            # if slug not explicitly provided, keep existing slug
+
+        if slug is not None:
+            slug = (slug or "").strip()
+            if not slug:
+                return Response({"detail": "slug cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+            s.slug = slug
+
+        if start_at_val is not None:
+            start_at = _parse_dt(start_at_val)
+            if not start_at:
+                return Response({"detail": "start_at must be valid ISO 8601 datetime."}, status=status.HTTP_400_BAD_REQUEST)
+            s.start_at = start_at
+
+        if end_at_val is not None:
+            end_at = _parse_dt(end_at_val)
+            if not end_at:
+                return Response({"detail": "end_at must be valid ISO 8601 datetime."}, status=status.HTTP_400_BAD_REQUEST)
+            s.end_at = end_at
+
+        # validate date range if either changed
+        if s.start_at and s.end_at and s.start_at >= s.end_at:
+            return Response({"detail": "start_at must be before end_at."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            if is_active_val is not None:
+                make_active = bool(is_active_val)
+                if make_active:
+                    LeaderboardSeason.objects.filter(organization=org, is_active=True).exclude(id=s.id).update(is_active=False)
+                s.is_active = make_active
+
+            s.save()
+
+        return Response(_season_to_dict(s), status=status.HTTP_200_OK)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response(
+            {"detail": "Unexpected error", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def leaderboard_season_set_active_view(request, season_id: int):
+    """
+    POST /api/admin/settings/leaderboard-seasons/<season_id>/set-active
+    Sets this season as the ONLY active season for the org (atomic).
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            s = LeaderboardSeason.objects.get(id=season_id, organization=org)
+        except LeaderboardSeason.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            LeaderboardSeason.objects.filter(organization=org, is_active=True).exclude(id=s.id).update(is_active=False)
+            s.is_active = True
+            s.save()
+
+        return Response(_season_to_dict(s), status=status.HTTP_200_OK)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response(
+            {"detail": "Unexpected error", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )

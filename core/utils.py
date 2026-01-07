@@ -16,6 +16,7 @@ from rest_framework import permissions
 import hmac, hashlib, uuid
 from django.conf import settings
 import secrets
+from django.utils.dateparse import parse_datetime
 
 StatusLiteral = Literal["active", "inactive", "suspended"]
 
@@ -494,12 +495,43 @@ def _org_signatures_to_dict(org, request=None) -> dict:
 def resolve_season(org, occurred_at):
     
     # 1) Prefer active season if it contains the date
-    active = LeaderboardSeason.get_active(org)
+    active = LeaderboardSeason.get_active(None)
     if active and active.contains(occurred_at):
         return active
 
     # 2) Otherwise find by date range
     return (LeaderboardSeason.objects
-            .filter(organization=org, start_at__lte=occurred_at, end_at__gt=occurred_at)
+            .filter(start_at__lte=occurred_at, end_at__gt=occurred_at)
             .order_by("-start_at")
             .first())
+
+
+
+def _parse_dt(value):
+    """
+    Accept ISO 8601 string. Example:
+      "2026-01-01T00:00:00Z" or "2026-01-01T00:00:00+01:00"
+    """
+    if not value:
+        return None
+    if isinstance(value, str):
+        dt = parse_datetime(value)
+        if dt is None:
+            return None
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+        return dt
+    return None
+
+def _season_to_dict(s: LeaderboardSeason):
+    return {
+        "id": s.id,
+        "organization_id": s.organization_id,
+        "name": s.name,
+        "slug": s.slug,
+        "start_at": s.start_at.isoformat() if s.start_at else None,
+        "end_at": s.end_at.isoformat() if s.end_at else None,
+        "is_active": s.is_active,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
+

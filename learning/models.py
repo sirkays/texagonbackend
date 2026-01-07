@@ -22,11 +22,21 @@ class Course(NamedModel):
     )
 
 
+
     def __str__(self):
         return f"{self.subject.name} Teacher: {self.teacher.user.email}, Name: {self.name}"
 
     class Meta:
         unique_together = ("organization", "subject", "classroom", "teacher")
+
+class CoursePassCriteria(models.Model):
+    course = models.OneToOneField(Course, on_delete=models.CASCADE, related_name="pass_criteria")
+    no_of_cbt = models.PositiveIntegerField(default=10)
+    no_of_code_submission = models.PositiveIntegerField(default=10)
+    total_pass_mark_cbt = models.PositiveIntegerField(default=500)
+    total_pass_mark_code = models.PositiveIntegerField(default=500)
+
+
 
 class Enrollment(TimeStampedModel):
     class Status(models.TextChoices):
