@@ -9,7 +9,7 @@ from django.apps import apps
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Q
-
+from gamification.services.engine import log_event
 
 def _get_model_any(candidates: Iterable[Tuple[str, str]]):
     """
@@ -131,7 +131,6 @@ class Command(BaseCommand):
                     # ---------- CBT side ----------
                     cbt_needed = int(criteria.no_of_cbt or 0)
                     cbt_total = Decimal(criteria.total_pass_mark_cbt or 0)
-
                     # If your "submitted" logic differs, adjust this filter:
                     cbt_attempts_qs = (
                         TestAttempt.objects.filter(
@@ -198,21 +197,38 @@ class Command(BaseCommand):
                     pct = _q2(pct)
 
                     # ✅ Auto-complete if progress is 100
+                    old_status = enr.status
                     new_status = enr.status
                     if pct >= Decimal("100.00"):
                         pct = Decimal("100.00")
                         new_status = Enrollment.Status.COMPLETED
 
+                    # AFTER you compute new_status, but BEFORE save (either is fine):
+                    if old_status != Enrollment.Status.COMPLETED and new_status == Enrollment.Status.COMPLETED:
+                        student = enr.student
+                        org = enr.course.organization  # Course has organization FK
+
+                        log_event(
+                            student=student,
+                            org=org,
+                            event_type="course_completed",
+                            value=1,
+                            meta={
+                                "course_id": enr.course_id,
+                                "enrollment_id": enr.id,  # optional but helpful for debugging
+                            },
+                            dedupe_key=f"course_completed:org={org.id}:student={student.id}:course={enr.course_id}",
+                            occurred_at=getattr(enr, "updated_at", None),  # optional; or omit to use now()
+                        )
+
                     old_pct = Decimal(enr.progress_pct or 0).quantize(Decimal("0.01"))
                     changed = (old_pct != pct) or (enr.status != new_status)
-
                     if changed:
                         updated += 1
                         old_status = enr.status
 
                         enr.progress_pct = pct
                         enr.status = new_status
-
                         if commit:
                             enr.save(update_fields=["progress_pct", "status", "updated_at"])
 

@@ -5,7 +5,6 @@ from orgs.models import Organization
 from gamification.models import AchievementDefinition, Badge
 from gamification.services.rules import compute_rule_value, get_target
 from gamification.services.engine import unlock_achievement, unlock_badge_if_eligible
-from learning.course import CoursePassCriteria
 
 
 class Command(BaseCommand):
