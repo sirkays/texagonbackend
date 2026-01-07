@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Course, Enrollment, Module, Lesson, Material, Bookmark, Note,ModuleCategory
+from .models import Course, Enrollment, Module, Lesson, Material, Bookmark, Note,ModuleCategory,CoursePassCriteria
 
 class EnrollmentInline(admin.TabularInline):
     model = Enrollment
