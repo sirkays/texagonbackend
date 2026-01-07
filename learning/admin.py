@@ -67,3 +67,5 @@ class NoteAdmin(admin.ModelAdmin):
 
 
 admin.site.register(ModuleCategory)
+
+admin.site.register(CoursePassCriteria)
