@@ -1080,7 +1080,7 @@ def course_update(request, course_id: int):
         if "is_active" in data:
             c.is_active = bool(data.get("is_active"))
         if "usage_type" in data:
-            c.course_type = data.get("usage_type") or c.usage_type
+            c.course_type = data.get("usage_type") or c.course_type
 
         c.save()
 
