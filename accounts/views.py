@@ -294,7 +294,7 @@ def fetch_user_detail(request):
 
         is_activated = None
 
-        if user.primary_org_id and user.memberships.filter(is_active=True).exits():
+        if user.primary_org_id and user.memberships.filter(is_active=True).exists():
             is_activated = user.primary_org_id
 
 
@@ -505,7 +505,7 @@ def verify_and_update_user(request):
     if not user.primary_org:
         user.primary_org = organization
         user.save()
-        
+
     # Allowed fields
     if profile_type == "parent":
         allowed_fields = {"address", "last_billed_at"}
