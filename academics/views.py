@@ -1144,12 +1144,12 @@ def certificate_create(request):
             enrollment = (
                 Enrollment.objects
                 .select_related("course", "student")
-                .filter(id=enrollment_id, student=student, course__organization=org)
+                .filter(id=enrollment_id, student=student, course__organization=org, status=Enrollment.Status.COMPLETED)
                 .first()
             )
             if not enrollment:
                 return Response(
-                    {"detail": "Enrollment not found for this student in this organization."},
+                    {"detail": "Student has not completed course or student did not enroll for the course."},
                     status=status.HTTP_404_NOT_FOUND,
                 )
             course = enrollment.course
