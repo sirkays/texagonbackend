@@ -1017,7 +1017,7 @@ def course_create(request):
             teacher_id=teacher_id,
             description=data.get("description", ""),
             is_active=bool(data.get("is_active", True)),
-            usage_type=data.get("usage_type", "public"),
+            course_type=data.get("course_type", "public"),
         )
 
         c = (Course.objects
@@ -1080,7 +1080,7 @@ def course_update(request, course_id: int):
         if "is_active" in data:
             c.is_active = bool(data.get("is_active"))
         if "usage_type" in data:
-            c.usage_type = data.get("usage_type") or c.usage_type
+            c.course_type = data.get("usage_type") or c.usage_type
 
         c.save()
 
