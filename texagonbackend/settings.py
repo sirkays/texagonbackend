@@ -9,10 +9,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "CHANGE_ME")
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
-FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "https://texagon.epichouse.online")
+FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "https://texagon.onrender.com")
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
 PAYMENT_TEST = os.environ.get("PAYMENT_TEST", "1") == "1"
-LOGO_URL = os.environ.get("LOGO_URL", "https://texagon.epichouse.online/logo.png")
+LOGO_URL = os.environ.get("LOGO_URL", "https://texagon.onrender.com/logo.png")
 
 TEST_KEY_SECRET = os.environ.get("TEST_KEY_SECRET", "CHANGE_ME")
 FLW_SECRET_KEY = os.environ.get("FLW_SECRET_KEY", "CHANGE_ME")
@@ -24,6 +24,7 @@ FLAT_SHIPPING = Decimal("1000.99")
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://texagonbackend.onrender.com",
+    "https://texagon.onrender.com",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
