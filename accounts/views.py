@@ -9,6 +9,7 @@ from django.db.models.functions import Coalesce
 from django.http import (
     JsonResponse
 )
+from django.contrib.auth import authenticate
 from core.models import Tier
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
@@ -70,6 +71,71 @@ def create_admin(request):
         )
 
 
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([])  # API key only
+def resend_email_otp_view(request):
+    """
+    Resend OTP to email if user exists and is not active yet.
+
+    Request body:
+    { "email": "teacher@example.com" }
+
+    Response is ALWAYS generic to avoid leaking which emails exist.
+    """
+    email = (request.data.get("email") or "").strip().lower()
+    if not email:
+        return Response({"detail": "email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Always return generic success (anti-enumeration)
+    generic_ok = Response(
+        {"detail": "If this email exists, a new code has been sent."},
+        status=status.HTTP_200_OK,
+    )
+
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return generic_ok
+
+    # If already verified/active, don't resend
+    if user.is_active:
+        return generic_ok
+
+    # Simple resend cooldown using last OTP created time
+    last_otp = (
+        EmailOTP.objects.filter(user=user)
+        .order_by("-created_at")
+        .first()
+    )
+
+    # Optional: 30s cooldown to prevent spam
+    COOLDOWN_SECONDS = 30
+    if last_otp and (timezone.now() - last_otp.created_at).total_seconds() < COOLDOWN_SECONDS:
+        # Still generic, but you can include retry_after for UX
+        retry_after = COOLDOWN_SECONDS - int((timezone.now() - last_otp.created_at).total_seconds())
+        return Response(
+            {"detail": "Please wait before requesting another code.", "retry_after": max(retry_after, 1)},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    otp = EmailOTP.create_for_user(user, minutes_valid=10)
+
+    try:
+        send_mail(
+            subject="Verify your email",
+            message=f"Your OTP is {otp.code}",
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+    except Exception as e:
+        return Response(
+            {"detail": "Failed to send email", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return generic_ok
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
@@ -181,7 +247,52 @@ def create_account_view(request):
 
 
 
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([])
+def resume_parent_flow_view(request):
+    try:
+        email = (request.data.get("email") or "").strip().lower()
+        password = request.data.get("password") or ""
 
+        if not email or not password:
+            return Response({"detail": "email and password are required."}, status=400)
+
+        # Authenticate using email (your User.USERNAME_FIELD = "email")
+        user = authenticate(request, email=email, password=password)
+
+        # Avoid leaking whether email exists
+        if not user:
+            return Response({"detail": "Invalid credentials."}, status=400)
+
+        # If you require verified email before resuming:
+        if not user.is_active:
+            return Response(
+                {"detail": "Email not verified. Please verify your email first."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Must be a parent account
+        try:
+            parent_profile = user.parent_profile
+        except Exception:
+            return Response({"detail": "This account is not a parent account."}, status=400)
+
+        return Response(
+            {
+                "userId": user.id,
+                "email": user.email,
+                "accountType": "parent",
+                "parentProfileId": parent_profile.id,
+                "studentProfileId": None,
+            },
+            status=200,
+        )
+
+    except Exception as e:
+        print(e)
+    return Response({"detail": "An error occured"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([])  # API key only
