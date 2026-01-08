@@ -88,14 +88,6 @@ def create_account_view(request):
     # ✅ clean "already exists" check
     if User.objects.filter(email=email).exists():
         return Response({"detail": "A user with this email already exists."}, status=400)
-    primary_org_id = request.data.get("primary_org_id")
-    org = None
-
-    if primary_org_id:
-        try:
-            org = Organization.objects.get(pk=primary_org_id)
-        except Organization.DoesNotExist:
-            return Response({"detail": "Invalid primary_org_id"}, status=400)
 
     user = None
     parent_profile = None
@@ -112,13 +104,11 @@ def create_account_view(request):
                 last_name=request.data.get("last_name", ""),
                 phone=request.data.get("phone", ""),
                 is_active=False,
-                primary_org=org,
             )
 
             if account_type == "parent":
                 parent_profile = ParentProfile.objects.create(
                     user=user,
-                    organization=org,
                     address=request.data.get("address", ""),
                 )
 
@@ -136,7 +126,6 @@ def create_account_view(request):
 
                 student_profile = StudentProfile.objects.create(
                     user=user,
-                    organization=org or parent_profile.organization,
                     admission_no=request.data.get("admission_no", ""),
                 )
 
@@ -512,6 +501,11 @@ def verify_and_update_user(request):
         organization=organization,
         role=profile_type,
     )
+
+    if not user.primary_org:
+        user.primary_org = organization
+        user.save()
+        
     # Allowed fields
     if profile_type == "parent":
         allowed_fields = {"address", "last_billed_at"}
