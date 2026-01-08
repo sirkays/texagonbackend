@@ -150,7 +150,6 @@ def create_account_view(request):
             otp = EmailOTP.create_for_user(user, minutes_valid=10)
 
         # Send OTP email after transaction is committed
-        print("Before email was sent to user....", otp.code, user.email, " dm,vkdmvflkm ",getattr(settings, "DEFAULT_FROM_EMAIL", None))
         try:
             send_mail(
                 subject="Verify your email",
@@ -304,6 +303,13 @@ def fetch_user_detail(request):
         except Exception:
             avatar_url = None  # swallow any avatar-related error
 
+        is_activated = None
+
+        if user.primary_org_id and user.memberships.filter(is_active=True).exits():
+            is_activated = user.primary_org_id
+
+
+
         # Base user payload
         data = {
             "success": True,
@@ -314,7 +320,7 @@ def fetch_user_detail(request):
             "last_name": user.last_name,
             "phone": user.phone,
             "avatar": avatar_url,
-            "primary_org_id": user.primary_org_id,
+            "primary_org_id": is_activated,
             "is_active": user.is_active,
             "is_staff": user.is_staff,
             "profile_type": "user",  # will be overridden below if a profile exists
@@ -493,7 +499,6 @@ def verify_and_update_user(request):
     elif hasattr(user, "adminaccess") is False:
         profile, stat = TeacherProfile.objects.get_or_create(user=user,organization=organization)
         profile_type = "teacher"
-        print(profile, " professor...")
     else:
         return Response(
             {"detail": "User does not have a Parent, Teacher, or Student profile."},
@@ -840,7 +845,6 @@ def teacher_dashboard_overview(request):
             return round(size / (1024 * 1024), 1)
         except (OSError, FileNotFoundError, ValueError, TypeError):
                 return None
-    print(" sjanckjdnckdncjkd ...")
 
     try:
         user = request.user
@@ -987,7 +991,6 @@ def teacher_dashboard_overview(request):
             "student_satisfaction": student_satisfaction,
             "test_pass_rate": test_pass_rate,
         }
-        print(performance, " pefr")
         # ---------- TOP COURSES ----------
         top_qs = (
             Course.objects.filter(teacher=teacher)
@@ -997,7 +1000,6 @@ def teacher_dashboard_overview(request):
             )
             .order_by("-students")[:3]
         )
-        print(top_qs, " top...")
         top_courses = []
         for c in top_qs:
             top_courses.append({
@@ -1016,11 +1018,10 @@ def teacher_dashboard_overview(request):
         )
 
         recent_materials = []
-        print("befefmkdmcldmcl ")
+
         for l in recent_lessons:
             size_mb = safe_file_size_mb(getattr(l, "file", None))
             size_str = f"{size_mb} MB" if size_mb is not None else "Unknown"
-            print(size_str)
             views = 0  # placeholder
 
             recent_materials.append({
