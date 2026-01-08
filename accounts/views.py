@@ -150,6 +150,7 @@ def create_account_view(request):
             otp = EmailOTP.create_for_user(user, minutes_valid=10)
 
         # Send OTP email after transaction is committed
+        print("Before email was sent to user....", otp.code, user.email, " dm,vkdmvflkm ",getattr(settings, "DEFAULT_FROM_EMAIL", None))
         try:
             send_mail(
                 subject="Verify your email",
@@ -159,6 +160,7 @@ def create_account_view(request):
                 fail_silently=False,
             )
         except Exception as e:
+            print(e)
             return Response(
                 {"detail": "Failed to send email", "error": str(e)},
                 status=500,
