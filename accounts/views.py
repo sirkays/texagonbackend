@@ -35,7 +35,7 @@ from assessments.models import Test, TestAttempt
 from gamification.models import (Badge, BadgeAward, PointTransaction, 
     Streak, AchievementDefinition, AchievementAcquired,ActivityEvent
 )
-from billing.models import SubscriptionInvoice, SubscriptionPayment
+from billing.models import SubscriptionInvoice, SubscriptionPayment,OrganizationSubscription
 from notifications.models import Notification
 import traceback
 from .models import AdminAccess, User,EmailOTP
@@ -612,6 +612,10 @@ def verify_and_update_user(request):
         organization=organization,
         role=profile_type,
     )
+
+    org_sub = OrganizationSubscription.get_lastest_org_sub(organization)
+
+    profile.organization_subscription = org_sub
 
     if not user.primary_org:
         user.primary_org = organization

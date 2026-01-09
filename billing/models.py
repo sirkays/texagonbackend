@@ -34,6 +34,23 @@ class OrganizationSubscription(TimeStampedModel):
     payment_method = models.CharField(max_length=64, blank=True)
     meta = models.JSONField(default=dict, blank=True)
 
+    @classmethod
+    def get_lastest_org_sub(cls, organization):
+        sub = cls.objects.filter(organization=organization)
+        if sub.exists():
+            return sub.last()
+        plan = SubscriptionPlan.objects.all()
+        if not plan:
+            plan = SubscriptionPlan.objects.create(
+                price=10000,
+            )
+        else:
+            plan = plan.last()
+        return cls.objects.create(
+            organization=organization,
+            plan=plan
+        )
+
 class SubscriptionInvoice(TimeStampedModel):
     class Status(models.TextChoices):
         PENDING = "pending", "pending"

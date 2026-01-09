@@ -77,6 +77,7 @@ def generate_parent_children_subscription_invoices(
 
     # Map parent_id -> subscription/plan/billing_days/membership
     parent_meta: Dict[int, dict] = {}
+    print(parents, " all parents...")
     for p in parents:
         sub = p.organization_subscription
         plan = getattr(sub, "plan", None)
@@ -92,7 +93,8 @@ def generate_parent_children_subscription_invoices(
             role=OrganizationMembership.Role.PARENT,
             defaults={"is_active": True},
         )
-
+        
+        print(p.user, " user....")
         parent_meta[p.id] = {
             "parent": p,
             "subscription": sub,
