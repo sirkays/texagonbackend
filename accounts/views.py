@@ -617,6 +617,8 @@ def verify_and_update_user(request):
 
     profile.organization_subscription = org_sub
 
+    print(org_sub, " smkdmvlfvmfklvm ")
+
     if not user.primary_org:
         user.primary_org = organization
         user.save()

@@ -1,16 +1,22 @@
+from __future__ import annotations
+
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from nanoid import generate
+
 from core.models import TimeStampedModel, NamedModel
-from orgs.models import OrganizationMembership
+from orgs.models import OrganizationMembership, Organization
 from store.models import Product, Payment
 from live.models import TutoringBooking
-from nanoid import generate
+
 
 class SubscriptionPlan(NamedModel):
     price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
@@ -143,6 +149,102 @@ class InvoiceType(models.Model):
     object_id = models.CharField(max_length=250,blank=True, null=True)
     object_type = models.CharField(max_length=10, blank=True, null=True)
     meta = models.JSONField(default=dict, blank=True)
+
+
+
+
+
+class UserAccountSubscription(TimeStampedModel):
+    """
+    Tracks subscription at the USER level (student/parent/etc), scoped to an organization.
+    This is your source of truth for: is this user subscribed? is it expired?
+    """
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        EXPIRED = "expired", "Expired"
+        CANCELLED = "cancelled", "Cancelled"
+        PAST_DUE = "past_due", "Past Due"
+
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="user_subscriptions"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="subscriptions"
+    )
+
+    # plan controls pricing + billing period (days)
+    plan = models.ForeignKey(
+        SubscriptionPlan, on_delete=models.PROTECT, related_name="user_subscriptions"
+    )
+
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.ACTIVE, db_index=True
+    )
+
+    start_at = models.DateTimeField(default=timezone.now, db_index=True)
+    end_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    auto_renew = models.BooleanField(default=True)
+
+    # Optional: who pays (useful for your parent->child billing)
+    billed_to_parent = models.ForeignKey(
+        "academics.ParentProfile",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="billed_child_subscriptions",
+    )
+
+    # Optional: amounts “locked” per subscription (if you want plan changes not to affect existing subs)
+    amount = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        validators=[MinValueValidator(0)],
+        default=Decimal("0.00")
+    )
+    currency = models.CharField(max_length=8, default="NGN")
+
+    meta = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "user", "status"]),
+            models.Index(fields=["organization", "status", "end_at"]),
+        ]
+        constraints = [
+            # One active subscription per user per org (prevents duplicates)
+            models.UniqueConstraint(
+                fields=["organization", "user"],
+                condition=Q(status="active"),
+                name="uniq_active_user_subscription_per_org",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} @ org {self.organization_id} ({self.status})"
+
+    @property
+    def is_expired(self) -> bool:
+        if self.status in {self.Status.EXPIRED, self.Status.CANCELLED}:
+            return True
+        if self.end_at and timezone.now() >= self.end_at:
+            return True
+        return False
+
+    def refresh_status(self, save=True) -> str:
+        """
+        Update status based on end_at.
+        """
+        if self.status == self.Status.CANCELLED:
+            return self.status
+
+        if self.end_at and timezone.now() >= self.end_at:
+            self.status = self.Status.EXPIRED
+        else:
+            self.status = self.Status.ACTIVE
+
+        if save:
+            self.save(update_fields=["status", "updated_at"])
+        return self.status
 
 
 class Complaint(models.Model):  # or inherit your TimeStampedModel
@@ -293,3 +395,6 @@ class ComplaintAttachment(models.Model):
 
     original_name = models.CharField(max_length=255, blank=True)
     content_type = models.CharField(max_length=100, blank=True)
+
+
+

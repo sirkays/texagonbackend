@@ -4,7 +4,7 @@ from django.db.models import Q
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-
+from django.utils import timezone
 from .models import (
     SubscriptionPlan,
     OrganizationSubscription,
@@ -13,7 +13,8 @@ from .models import (
     Complaint,
     ComplaintResponse,
     ComplaintAttachment,
-    InvoiceType
+    InvoiceType,
+    UserAccountSubscription
 )
 
 # ---------- Helpers ----------
@@ -290,3 +291,127 @@ class InvoiceTypeAdmin(admin.ModelAdmin):
             "fields": ("object_type", "object_id", "meta"),
         }),
     )
+
+
+
+
+
+@admin.register(UserAccountSubscription)
+class UserAccountSubscriptionAdmin(admin.ModelAdmin):
+    # ---- List ----
+    list_display = (
+        "id",
+        "user_email",
+        "organization",
+        "plan",
+        "status",
+        "start_at",
+        "end_at",
+        "is_expired_badge",
+        "auto_renew",
+        "billed_to_parent",
+        "created_at",
+    )
+    list_display_links = ("id", "user_email")
+
+    list_filter = (
+        "status",
+        "auto_renew",
+        "organization",
+        "plan",
+        ("start_at", admin.DateFieldListFilter),
+        ("end_at", admin.DateFieldListFilter),
+        ("created_at", admin.DateFieldListFilter),
+    )
+
+    search_fields = (
+        "user__email",
+        "user__first_name",
+        "user__last_name",
+        "organization__name",
+        "plan__name",
+        "billed_to_parent__user__email",
+        "billed_to_parent__user__first_name",
+        "billed_to_parent__user__last_name",
+    )
+
+    ordering = ("-created_at",)
+    date_hierarchy = "created_at"
+    list_select_related = ("user", "organization", "plan", "billed_to_parent", "billed_to_parent__user")
+
+    # ---- Detail ----
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "is_expired_preview",
+    )
+
+    fieldsets = (
+        ("Core", {
+            "fields": (
+                "organization",
+                "user",
+                "plan",
+                "status",
+            )
+        }),
+        ("Billing", {
+            "fields": (
+                "amount",
+                "currency",
+                "auto_renew",
+                "billed_to_parent",
+                "start_at",
+                "end_at",
+                "is_expired_preview",
+            )
+        }),
+        ("Meta", {
+            "fields": ("meta",)
+        }),
+        ("Timestamps", {
+            "fields": ("created_at", "updated_at")
+        }),
+    )
+
+    # ---- Actions ----
+    actions = ("mark_active", "mark_expired", "refresh_status_from_end_at")
+
+    @admin.action(description="Mark selected subscriptions as Active")
+    def mark_active(self, request, queryset):
+        queryset.update(status=UserAccountSubscription.Status.ACTIVE, updated_at=timezone.now())
+
+    @admin.action(description="Mark selected subscriptions as Expired")
+    def mark_expired(self, request, queryset):
+        queryset.update(status=UserAccountSubscription.Status.EXPIRED, updated_at=timezone.now())
+
+    @admin.action(description="Refresh status from end_at (Active/Expired)")
+    def refresh_status_from_end_at(self, request, queryset):
+        now = timezone.now()
+        # Keep cancelled as-is; expire anything past end_at; else active
+        cancelled = queryset.filter(status=UserAccountSubscription.Status.CANCELLED)
+        others = queryset.exclude(pk__in=cancelled.values_list("pk", flat=True))
+
+        expired = others.filter(end_at__isnull=False, end_at__lte=now)
+        active = others.exclude(pk__in=expired.values_list("pk", flat=True))
+
+        expired.update(status=UserAccountSubscription.Status.EXPIRED, updated_at=now)
+        active.update(status=UserAccountSubscription.Status.ACTIVE, updated_at=now)
+
+    # ---- Helpers (columns) ----
+    @admin.display(description="User", ordering="user__email")
+    def user_email(self, obj: UserAccountSubscription):
+        u = obj.user
+        full = (u.get_full_name() or "").strip()
+        return full or u.email
+
+    @admin.display(description="Expired?")
+    def is_expired_badge(self, obj: UserAccountSubscription):
+        # Uses your model property `is_expired`
+        if obj.is_expired:
+            return format_html('<span style="color:#b91c1c;font-weight:600;">Expired</span>')
+        return format_html('<span style="color:#15803d;font-weight:600;">Active</span>')
+
+    @admin.display(description="Is expired (computed)")
+    def is_expired_preview(self, obj: UserAccountSubscription):
+        return "Yes" if obj.is_expired else "No"
