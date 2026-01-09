@@ -4,8 +4,8 @@ from decimal import Decimal
 from datetime import datetime, timedelta
 
 from django.conf import settings
-from django.db.models import Q, Sum, Count, Avg, Max, Min
-from django.db.models.functions import Cast
+from django.db.models import Q, Sum, Count, Avg, Max, Min, F, Value, ExpressionWrapper, DateTimeField
+from django.db.models.functions import Cast, Now
 from django.http import JsonResponse
 from django.utils import timezone
 from django.contrib.auth.decorators import login_required
@@ -1025,6 +1025,18 @@ def student_certificates_list(request):
     if course_id:
         qs = qs.filter(course_id=course_id)
 
+    # ✅ Only return certificates whose download window is open:
+    # downloadable_at = acquired_at + (download_after_days * 1 day)
+    qs = qs.annotate(
+        downloadable_at_db=ExpressionWrapper(
+            F("acquired_at") + (F("download_after_days") * Value(timedelta(days=1))),
+            output_field=DateTimeField(),
+        )
+    ).filter(
+        downloadable_at_db__lte=Now(),
+        status=EnrollmentCertificate.Status.ISSUED,  # optional but recommended
+    )
+
     # Optional: limit/pagination-lite
     limit = request.query_params.get("limit")
     try:
@@ -1034,14 +1046,13 @@ def student_certificates_list(request):
     qs = qs[:max(1, min(limit, 500))]
 
     results = [_cert_to_dict(c, request=request) for c in qs]
-
     signatures = _org_signatures_to_dict(org, request=request)
 
     return Response({
         "student_id": student.id,
         "count": len(results),
         "results": results,
-        "signatures": signatures,   # ✅ NEW
+        "signatures": signatures,
         "server_time": timezone.now(),
     })
 
