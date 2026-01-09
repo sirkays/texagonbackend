@@ -2,6 +2,9 @@ from django.db import models
 from django.utils import timezone
 from core.models import TimeStampedModel
 from decimal import Decimal
+from django.db.models import (
+    Sum,
+)
 
 class Test(TimeStampedModel):
     class Visibility(models.TextChoices):
