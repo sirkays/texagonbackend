@@ -14,7 +14,7 @@ from django.db.models import (
     F,
     Value,
     ExpressionWrapper,
-    DateTimeField,
+    DateTimeField,Exists, OuterRef
 )
 from django.db.models.functions import Cast, Now
 from django.http import JsonResponse
@@ -472,14 +472,12 @@ def student_course_activity_metrics(request, course_id: int, student_id: int):
 
     # Count "done" as submitted/graded (or submitted_at set)
     cbt_done_filter = Q(status__in=["submitted", "graded"]) | Q(submitted_at__isnull=False)
-
     if season_start and season_end:
         # choose a consistent timestamp field; created_at comes from TimeStampedModel
         cbt_qs = cbt_qs.filter(created_at__gte=season_start, created_at__lt=season_end)
 
     cbt_attempts_submitted = cbt_qs.filter(cbt_done_filter).count()
     cbt_tests_taken_distinct = cbt_qs.filter(cbt_done_filter).values("test_id").distinct().count()
-
     # -----------------------------
     # Code Submission metrics
     # -----------------------------
@@ -1511,12 +1509,33 @@ def student_certificates_list(request):
                             status=status.HTTP_403_FORBIDDEN)
 
     # Query certificates
+    teacher_approval_qs = StudentEnrollmentCertificateApproval.objects.filter(
+        certificate=OuterRef("pk"),
+        user_type=StudentEnrollmentCertificateApproval.UserType.TEACHER,
+        approval=True,
+    )
+
+    admin_approval_qs = StudentEnrollmentCertificateApproval.objects.filter(
+        certificate=OuterRef("pk"),
+        user_type=StudentEnrollmentCertificateApproval.UserType.ADMIN,
+        approval=True,
+    )
+
     qs = (
         EnrollmentCertificate.objects
         .select_related("student__user", "course", "enrollment")
         .filter(organization=org, student=student)
+        .annotate(
+            has_teacher_approval=Exists(teacher_approval_qs),
+            has_admin_approval=Exists(admin_approval_qs),
+        )
+        .filter(
+            has_teacher_approval=True,
+            has_admin_approval=True,
+        )
         .order_by("-acquired_at")
     )
+
 
     if status_filter:
         qs = qs.filter(status=status_filter)

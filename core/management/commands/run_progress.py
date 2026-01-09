@@ -4,12 +4,14 @@ from __future__ import annotations
 from contextlib import contextmanager
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable, Tuple
-
+from django.utils import timezone
 from django.apps import apps
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Q
 from gamification.services.engine import log_event
+from core.utils import resolve_season
+
 
 def _get_model_any(candidates: Iterable[Tuple[str, str]]):
     """
@@ -128,6 +130,13 @@ class Command(BaseCommand):
                         skipped_no_criteria += 1
                         continue
 
+                    season_obj = resolve_season(enr.student.organization, timezone.now())
+                    season_start = None
+                    season_end = None
+                    if season_obj:
+                        season_start = season_obj.start_at
+                        season_end = season_obj.end_at
+
                     # ---------- CBT side ----------
                     cbt_needed = int(criteria.no_of_cbt or 0)
                     cbt_total = Decimal(criteria.total_pass_mark_cbt or 0)
@@ -140,6 +149,11 @@ class Command(BaseCommand):
                         .filter(Q(status="submitted") | Q(submitted_at__isnull=False))
                         .order_by("-score")
                     )
+
+                    if season_start and season_end:
+                        # choose a consistent timestamp field; created_at comes from TimeStampedModel
+                        cbt_attempts_qs = cbt_attempts_qs.filter(created_at__gte=season_start, created_at__lt=season_end)
+
 
                     if cbt_needed > 0:
                         cbt_scores = list(
@@ -174,6 +188,9 @@ class Command(BaseCommand):
                         .exclude(score__isnull=True)
                         .order_by("-score")
                     )
+
+                    if season_start and season_end:
+                        code_qs = code_qs.filter(created_at__gte=season_start, created_at__lt=season_end)
 
                     if code_needed > 0:
                         code_scores = list(code_qs.values_list("score", flat=True)[:code_needed])
@@ -220,6 +237,8 @@ class Command(BaseCommand):
                             dedupe_key=f"course_completed:org={org.id}:student={student.id}:course={enr.course_id}",
                             occurred_at=getattr(enr, "updated_at", None),  # optional; or omit to use now()
                         )
+                        enr.completed_at = timezone.now()
+                        enr.save()
 
                     old_pct = Decimal(enr.progress_pct or 0).quantize(Decimal("0.01"))
                     changed = (old_pct != pct) or (enr.status != new_status)

@@ -7,6 +7,8 @@ from .views import (dashboard_summary,courses_list,courses_stats_header,course_f
     badges_view, badge_detail,
     achievements_view, achievement_detail,
     gamification_leaderboard,
+    admin_student_enrollments,admin_available_courses_for_student
+
 )
 from rest_framework.routers import DefaultRouter
 
@@ -40,7 +42,9 @@ urlpatterns = [
     path("api/admin/gamification/achievements", achievements_view),
     path("api/admin/gamification/achievements/<int:achievement_id>", achievement_detail),
     path("api/admin/gamification/leaderboard", gamification_leaderboard),
-]
 
+    path("api/admin/students/<int:student_id>/enrollments/", admin_student_enrollments),
+    path("api/admin/students/<int:student_id>/available-courses/", admin_available_courses_for_student),
+]
 # append, don't overwrite
 urlpatterns += router.urls

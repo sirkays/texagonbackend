@@ -573,3 +573,30 @@ def _is_course_teacher(request, cert: EnrollmentCertificate) -> bool:
         return cert.course.teacher.user_id == request.user.id
     except Exception:
         return False
+
+
+def _enrollment_to_dict(e: Enrollment) -> dict:
+    c = e.course
+    teacher_name = ""
+    try:
+        teacher_name = c.teacher.user.get_full_name() or c.teacher.user.email or ""
+    except Exception:
+        pass
+
+    return {
+        "id": e.id,
+        "status": e.status,
+        "progress_pct": float(e.progress_pct or Decimal("0")),
+        "completed_at": e.completed_at,
+        "created_at": getattr(e, "created_at", None),
+
+        "course": {
+            "id": c.id,
+            "name": c.name,
+            "subject": getattr(getattr(c, "subject", None), "name", ""),
+            "classroom": getattr(getattr(c, "classroom", None), "name", ""),
+            "teacher": teacher_name,
+            "is_active": bool(getattr(c, "is_active", True)),
+            "course_type": getattr(c, "course_type", "public"),
+        },
+    }

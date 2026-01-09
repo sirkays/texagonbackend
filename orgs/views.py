@@ -4,9 +4,21 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from io import StringIO
 from typing import Any, Literal, Tuple
+from calendar import monthrange
 
 from django.db import transaction
-from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Sum, Value,Avg,DecimalField
+from django.db.models import (
+    Count,
+    F,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+    Avg,
+    DecimalField,
+)
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.utils import timezone
@@ -33,13 +45,24 @@ from academics.models import (
     ParentProfile,
     ParentChildLink,
 )
-from gamification.models import Badge, BadgeAward, PointTransaction, Streak, AchievementDefinition  # noqa
+from gamification.models import (
+    Badge,
+    BadgeAward,
+    PointTransaction,
+    Streak,
+    AchievementDefinition,
+)
 from assessments.models import Submission, TestAttempt
-from billing.models import SubscriptionPayment,SubscriptionPlan, OrganizationSubscription, SubscriptionInvoice
-from learning.models import Course, Enrollment,Lesson, Module
+from billing.models import (
+    SubscriptionPayment,
+    SubscriptionPlan,
+    OrganizationSubscription,
+    SubscriptionInvoice,
+)
+from learning.models import Course, Enrollment, Lesson, Module
 from orgs.models import Organization, OrganizationMembership
 from accounts.models import User
-from rest_framework import status
+
 from .serializers import (
     ClassroomListSerializer,
     ClassroomWriteSerializer,
@@ -53,8 +76,7 @@ from .serializers import (
     ParentDetailSerializer,
     ParentListSerializer,
     SubjectWriteSerializer,
-    SubjectListItemSerializer
-
+    SubjectListItemSerializer,
 )
 
 from core.utils import (
@@ -76,11 +98,11 @@ from core.utils import (
     _int,
     _member_display_name,
     _month_bounds,
-    
-    
+    _parse_positive_int,
+    _enrollment_to_dict,
+    resolve_season,
 )
 
-from calendar import monthrange
 
 
 @api_view(["GET"])
@@ -1341,7 +1363,7 @@ class ClassroomViewSet(viewsets.ModelViewSet):
 
         courses_sq = (
             Course.objects
-            .filter(organization=org, classroom=OuterRef("pk"))
+            .filter(organization=org, course_type="public", classroom=OuterRef("pk"))
             .values("classroom")
             .annotate(c=Count("id"))
             .values("c")[:1]
@@ -2430,3 +2452,146 @@ class ParentViewSet(viewsets.ModelViewSet):
 
 
 
+
+
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_student_enrollments(request, student_id: int):
+    """
+    GET: List all enrollments for student (org scoped) + optional search.
+    POST: Assign a new enrollment to the student. Body: { "course_id": <int> }
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        student = (StudentProfile.objects
+                   .select_related("user", "organization")
+                   .filter(id=student_id, organization=org)
+                   .first())
+        if not student:
+            return Response({"detail": "Student not found in this organization."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == "GET":
+            q = (request.query_params.get("q") or "").strip()
+
+            qs = (Enrollment.objects
+                  .filter(student=student)
+                  .select_related("course__subject", "course__classroom", "course__teacher__user")
+                  .order_by("-id"))
+
+            if q:
+                qs = qs.filter(
+                    Q(course__name__icontains=q) |
+                    Q(course__subject__name__icontains=q) |
+                    Q(course__classroom__name__icontains=q) |
+                    Q(course__teacher__user__first_name__icontains=q) |
+                    Q(course__teacher__user__last_name__icontains=q) |
+                    Q(course__teacher__user__email__icontains=q)
+                )
+
+            return Response([_enrollment_to_dict(e) for e in qs], status=status.HTTP_200_OK)
+
+        # POST -> create enrollment
+        data = request.data or {}
+        course_id, err = _parse_positive_int(data.get("course_id"), "course_id")
+        if err:
+            return err
+        if not course_id:
+            return Response({"detail": "course_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        course = (Course.objects
+                  .select_related("subject", "classroom", "teacher__user")
+                  .filter(id=course_id, organization=org)
+                  .first())
+        if not course:
+            return Response({"detail": "Course not found in this organization."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        exists = Enrollment.objects.filter(student=student, course=course).exists()
+        if exists:
+            return Response({"detail": "Student is already enrolled in this course."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        leaderboard_season = resolve_season(org, timezone.now())
+        
+        e = Enrollment.objects.create(student=student, course=course, leaderboard_season=leaderboard_season)
+        e = (Enrollment.objects
+             .select_related("course__subject", "course__classroom", "course__teacher__user")
+             .get(id=e.id))
+
+        return Response(_enrollment_to_dict(e), status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        print("Error in admin_student_enrollments:", e)
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_available_courses_for_student(request, student_id: int):
+    """
+    GET: List active courses in org that student is NOT yet enrolled in.
+    Optional: ?q=search
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        student = StudentProfile.objects.filter(id=student_id, organization=org).first()
+        if not student:
+            return Response({"detail": "Student not found in this organization."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        q = (request.query_params.get("q") or "").strip()
+        enrolled_ids = Enrollment.objects.filter(student=student).values_list("course_id", flat=True)
+
+        qs = (Course.objects
+              .filter(organization=org, is_active=True, course_type='public')
+              .exclude(id__in=enrolled_ids)
+              .select_related("subject", "classroom", "teacher__user")
+              .order_by("name"))
+
+        if q:
+            qs = qs.filter(
+                Q(name__icontains=q) |
+                Q(subject__name__icontains=q) |
+                Q(classroom__name__icontains=q) |
+                Q(teacher__user__first_name__icontains=q) |
+                Q(teacher__user__last_name__icontains=q) |
+                Q(teacher__user__email__icontains=q)
+            )
+
+        # Reuse your course card shape (optional). Here’s a minimal option:
+        data = []
+        for c in qs:
+            teacher = c.teacher.user.get_full_name() or c.teacher.user.email or ""
+            data.append({
+                "id": c.id,
+                "name": c.name,
+                "subject": c.subject.name,
+                "classroom": c.classroom.name,
+                "teacher": teacher,
+                "course_type": c.course_type,
+            })
+
+        return Response(data, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print("Error in admin_available_courses_for_student:", e)
+        traceback.print_exc()
+        return Response({"detail": "An unexpected error occurred.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
