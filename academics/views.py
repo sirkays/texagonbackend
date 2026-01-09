@@ -2,14 +2,25 @@ from typing import Any, Dict, List, Optional
 import traceback
 from decimal import Decimal
 from datetime import datetime, timedelta
-
 from django.conf import settings
-from django.db.models import Q, Sum, Count, Avg, Max, Min, F, Value, ExpressionWrapper, DateTimeField
+from django.db import transaction
+from django.db.models import (
+    Q,
+    Sum,
+    Count,
+    Avg,
+    Max,
+    Min,
+    F,
+    Value,
+    ExpressionWrapper,
+    DateTimeField,
+)
 from django.db.models.functions import Cast, Now
 from django.http import JsonResponse
 from django.utils import timezone
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+
 from rest_framework import status
 from rest_framework.decorators import (
     api_view,
@@ -61,6 +72,10 @@ from core.utils import (
 from texagonbackend.settings import pass_mark as PASS_MARK, LOW_SCORE
 
 from .models import EnrollmentCertificate, StudentEnrollmentCertificateApproval
+from accounts.models import AdminAccess
+
+from learning.models import Module, CoursePassCriteria
+from codeide.models import CodeSubmission
 
 
 @api_view(["GET"])
@@ -176,23 +191,34 @@ def course_completed_students(request, course_id: int):
     if not _is_org_admin_or_teacher(request, org):
         return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
 
+    is_admin_user = AdminAccess.user_has_admin_access(request.user)
+    if is_admin_user:
+        course = Course.objects.filter(id=course_id, organization=org).first()
+    else:
+        course = Course.objects.filter(id=course_id, organization=org, teacher__user__id=request.user.id).first()
 
-    course = Course.objects.filter(id=course_id, organization=org, teacher__user__id=request.user.id).first()
     if not course:
         return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
 
     leaderboard_season = resolve_season(org, timezone.now())
-    
+
     # Completed enrollments only
     enrollments = (Enrollment.objects
-                   .filter(course_id=course.id, status="completed")  # <-- adjust rule
+                   .filter(course_id=course.id)  # <-- adjust rule
                    .select_related("student__user")                  # Enrollment.student is StudentProfile
                    .order_by("-id"))
 
+    season = None
     if leaderboard_season:
         enrollments = enrollments.filter(
             leaderboard_season=leaderboard_season
         )
+
+        season = {
+            'name':leaderboard_season.name,
+            'start_at':leaderboard_season.start_at,
+            'end_at': leaderboard_season.end_at
+        }
 
     results = []
     for e in enrollments:
@@ -201,14 +227,18 @@ def course_completed_students(request, course_id: int):
         certificate = None
 
         if  getattr(e, "certificate", None):
-            teacher_approved = e.certificate.is_teacher_approved(request.user)
+            if is_admin_user:
+                teacher_approved = e.certificate.is_teacher_approved()
+            else:
+                teacher_approved = e.certificate.is_teacher_approved(request.user)
             admin_approved = e.certificate.is_admin_approved()
             certificate = {
                 "number":e.certificate.number,
                 "title":e.certificate.title,
                 "id":e.certificate.id,
                 "teacher_approved":teacher_approved,
-                "admin_approved":admin_approved
+                "admin_approved":admin_approved,
+
             }
 
         results.append({
@@ -218,12 +248,13 @@ def course_completed_students(request, course_id: int):
             "student_name": (u.get_full_name() or u.email or "").strip(),
             "student_email": u.email,
             "completed_at": e.completed_at,
-            "certificate":certificate
+            "certificate":certificate,
         })
 
     return Response({
         "course": {"id": course.id, "name": course.name},
-        "results": results
+        "results": results,
+        'season':season
     })
 
 
@@ -363,6 +394,169 @@ def course_completed_enrollments(request, course_id: int):
         "results": results,
     })
 
+
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def student_course_activity_metrics(request, course_id: int, student_id: int):
+    """
+    Returns CBT + Code Submission counts for a student in a given course.
+
+    Access:
+      - Org admin/owner/teacher can view
+      - Student can view own record (optional, enabled below)
+
+    Query params:
+      - season=1  (optional) -> if provided, filter activity within resolved season bounds
+    """
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    # Allow org admins/teachers OR the student themself
+    is_staff = _is_org_admin_or_teacher(request, org)
+    if not is_staff:
+        sp = _get_student_for_user(request.user)
+        if not sp or sp.id != student_id:
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    # Course must belong to org; if teacher (not admin), must be their course
+    is_admin_user = AdminAccess.user_has_admin_access(request.user)
+    if is_admin_user:
+        course = Course.objects.filter(id=course_id, organization=org).first()
+    else:
+        # teacher restriction
+        course = Course.objects.filter(
+            id=course_id,
+            organization=org,
+            teacher__user__id=request.user.id
+        ).first()
+
+    if not course:
+        return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    student = StudentProfile.objects.select_related("user").filter(
+        id=student_id,
+        organization=org
+    ).first()
+    if not student:
+        return Response({"detail": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Optional season filtering (same approach you used)
+    #use_season = str(request.query_params.get("season") or "").strip() in ("1", "true", "True", "yes")
+    use_season = True
+    season_obj = resolve_season(org, timezone.now()) if use_season else None
+
+    season_dict = None
+    season_start = None
+    season_end = None
+    if season_obj:
+        season_start = season_obj.start_at
+        season_end = season_obj.end_at
+        season_dict = {
+            "name": season_obj.name,
+            "start_at": season_obj.start_at,
+            "end_at": season_obj.end_at,
+        }
+
+    # -----------------------------
+    # CBT metrics (TestAttempt)
+    # -----------------------------
+    cbt_qs = TestAttempt.objects.filter(
+        student=student,
+        test__course=course,
+    )
+
+    # Count "done" as submitted/graded (or submitted_at set)
+    cbt_done_filter = Q(status__in=["submitted", "graded"]) | Q(submitted_at__isnull=False)
+
+    if season_start and season_end:
+        # choose a consistent timestamp field; created_at comes from TimeStampedModel
+        cbt_qs = cbt_qs.filter(created_at__gte=season_start, created_at__lt=season_end)
+
+    cbt_attempts_submitted = cbt_qs.filter(cbt_done_filter).count()
+    cbt_tests_taken_distinct = cbt_qs.filter(cbt_done_filter).values("test_id").distinct().count()
+
+    # -----------------------------
+    # Code Submission metrics
+    # -----------------------------
+    code_qs = CodeSubmission.objects.filter(
+        student=student,
+        lesson__module__course=course,
+    )
+    if season_start and season_end:
+        code_qs = code_qs.filter(created_at__gte=season_start, created_at__lt=season_end)
+
+    code_submissions_total = code_qs.count()
+    code_submissions_submitted = code_qs.filter(status__in=["submitted", "graded", "revised"]).count()
+    code_submissions_graded = code_qs.filter(status="graded").count()
+
+    # -----------------------------
+    # Pass criteria (targets)
+    # -----------------------------
+
+    criteria = CoursePassCriteria.objects.filter(course=course).first()
+    target_cbt_count = int(getattr(criteria, "no_of_cbt", 0) or 0)
+    target_code_count = int(getattr(criteria, "no_of_code_submission", 0) or 0)
+
+    pass_mark_cbt = int(getattr(criteria, "total_pass_mark_cbt", 0) or 0)
+    pass_mark_code = int(getattr(criteria, "total_pass_mark_code", 0) or 0)
+
+    # ---- CBT earned marks so far ----
+    cbt_earned = cbt_qs.filter(cbt_done_filter).aggregate(
+        total=Sum("score")
+    )["total"] or Decimal("0")
+
+    # ---- Code earned marks so far ----
+    # Use graded only for "earned marks" (safe & accurate)
+    code_earned = code_qs.filter(status="graded").aggregate(
+        total=Sum("score")
+    )["total"] or Decimal("0")
+
+    def pct_marks(earned: Decimal, required: int) -> int:
+        if not required or required <= 0:
+            return 0
+        try:
+            return int(round((Decimal(earned) / Decimal(required)) * 100))
+        except Exception:
+            return 0
+
+    payload = {
+        "course": {"id": course.id, "name": course.name},
+        "student": {
+            "id": student.id,
+            "name": (student.user.get_full_name() or student.user.email or "").strip(),
+            "email": student.user.email,
+        },
+        "season": season_dict,
+
+        # ✅ Targets: count + pass marks
+        "targets": {
+            "cbt_required_count": target_cbt_count,
+            "code_required_count": target_code_count,
+            "cbt_required_pass_mark": pass_mark_cbt,
+            "code_required_pass_mark": pass_mark_code,
+        },
+
+        "cbt": {
+            "attempts_submitted": cbt_attempts_submitted,
+            "tests_taken_distinct": cbt_tests_taken_distinct,
+            "earned_marks": str(cbt_earned),  # keep as string for JSON decimal safety
+            "marks_progress_pct": pct_marks(cbt_earned, pass_mark_cbt),
+        },
+        "code": {
+            "submissions_total": code_submissions_total,
+            "submissions_submitted": code_submissions_submitted,
+            "submissions_graded": code_submissions_graded,
+            "earned_marks": str(code_earned),
+            "marks_progress_pct": pct_marks(code_earned, pass_mark_code),
+        },
+    }
+
+    return Response(payload, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])

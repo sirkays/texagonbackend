@@ -6,6 +6,7 @@ courses_completion_dashboard,course_completed_enrollments,
     certificate_admin_approve,
     certificate_teacher_approve,
     certificate_approval_status,
+    student_course_activity_metrics,
 )
 
 urlpatterns = [
@@ -45,4 +46,11 @@ urlpatterns = [
         certificate_admin_approve,
         name="certificate-admin-approve",
     ),
+
+    path(
+        "api/courses/<int:course_id>/students/<int:student_id>/activity-metrics/",
+        student_course_activity_metrics,
+        name="student-course-activity-metrics",
+    ),
+
 ]
