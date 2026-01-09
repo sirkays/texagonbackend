@@ -7,7 +7,10 @@ from .views import (dashboard_summary,courses_list,courses_stats_header,course_f
     badges_view, badge_detail,
     achievements_view, achievement_detail,
     gamification_leaderboard,
-    admin_student_enrollments,admin_available_courses_for_student
+    admin_student_enrollments,admin_available_courses_for_student,
+    billing_plans,billing_plan_update,billing_plan_activate,admin_complaints,
+    admin_complaint_detail,admin_complaint_add_response,invoice_pdf
+
 
 )
 from rest_framework.routers import DefaultRouter
@@ -33,8 +36,20 @@ urlpatterns = [
     path("api/admin/module/list/", modules_list, name="module-admin-list"),
     path("api/admin/module/lessons/<int:module_id>/", module_lessons, name="module-admin-lesson"),
 
-    path("api/admin/billing/dashboard", billing_dashboard, name="billing_dashboard"),
-    path("api/admin/billing/invoices/<int:invoice_id>", invoice_detail, name="invoice_detail"),
+    path("api/admin/billing/dashboard/", billing_dashboard, name="billing_dashboard"),
+    path("api/admin/billing/invoices/<int:invoice_id>/", invoice_detail, name="invoice_detail"),
+
+    path("api/admin/billing/plans/", billing_plans, name="billing_plans"),
+    path("api/admin/billing/plans/<int:plan_id>/", billing_plan_update, name="billing_plan_update"),
+    path("api/admin/billing/plans/<int:plan_id>/activate/", billing_plan_activate, name="billing_plan_activate"),
+
+
+    path("api/admin/complaints/", admin_complaints, name="admin_complaints"),
+    path("api/admin/complaints/<uuid:complaint_id>/", admin_complaint_detail, name="admin_complaint_detail"),
+    path("api/admin/complaints/<uuid:complaint_id>/responses/", admin_complaint_add_response, name="admin_complaint_add_response"),
+    path("api/admin/billing/invoices/<int:invoice_id>/pdf/", invoice_pdf, name="invoice_pdf"),
+
+
 
     path("api/admin/gamification/summary", gamification_summary),
     path("api/admin/gamification/badges", badges_view),

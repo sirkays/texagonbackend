@@ -66,6 +66,7 @@ class OrganizationSubscriptionAdmin(admin.ModelAdmin):
 @admin.register(SubscriptionInvoice)
 class SubscriptionInvoiceAdmin(admin.ModelAdmin):
     list_display = (
+        "organization_membership",
         "number",
         "subscription",
         "amount",

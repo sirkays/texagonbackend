@@ -2,7 +2,7 @@ import csv
 import traceback
 from datetime import datetime, timedelta
 from decimal import Decimal
-from io import StringIO
+from io import StringIO, BytesIO
 from typing import Any, Literal, Tuple
 from calendar import monthrange
 
@@ -58,6 +58,8 @@ from billing.models import (
     SubscriptionPlan,
     OrganizationSubscription,
     SubscriptionInvoice,
+    Complaint,
+    ComplaintResponse,
 )
 from learning.models import Course, Enrollment, Lesson, Module
 from orgs.models import Organization, OrganizationMembership
@@ -103,6 +105,9 @@ from core.utils import (
     resolve_season,
 )
 
+# PDF generation
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 
 @api_view(["GET"])
@@ -457,6 +462,360 @@ def gamification_leaderboard(request):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def invoice_pdf(request, invoice_id: int):
+    """
+    GET /api/admin/billing/invoices/<invoice_id>/pdf
+    Returns an actual PDF file download.
+    """
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    inv = (
+        SubscriptionInvoice.objects
+        .select_related("subscription__plan", "subscription__organization", "organization_membership__user")
+        .filter(subscription__organization=org, id=invoice_id)
+        .first()
+    )
+    if not inv:
+        return Response({"detail": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    plan = getattr(inv.subscription, "plan", None)
+
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+
+    # Header
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(40, height - 60, "Invoice")
+
+    c.setFont("Helvetica", 10)
+    c.drawString(40, height - 85, f"Invoice No: {inv.number}")
+    c.drawString(40, height - 100, f"Status: {inv.status}")
+    c.drawString(40, height - 115, f"Issued: {inv.issued_at.strftime('%Y-%m-%d %H:%M') if inv.issued_at else ''}")
+    c.drawString(40, height - 130, f"Due: {inv.due_at.strftime('%Y-%m-%d %H:%M') if inv.due_at else ''}")
+
+    # Bill to
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, height - 160, "Bill To")
+    c.setFont("Helvetica", 10)
+    c.drawString(40, height - 175, _member_display_name(inv.organization_membership))
+
+    # Line item
+    y = height - 220
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(40, y, "Item")
+    c.drawString(350, y, "Amount")
+
+    c.setFont("Helvetica", 10)
+    y -= 20
+    title = f"{plan.name if plan else 'Plan'} Subscription"
+    c.drawString(40, y, title)
+    c.drawRightString(520, y, f"{inv.currency} {Decimal(inv.amount):.2f}")
+
+    # Total
+    y -= 50
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(40, y, "Total")
+    c.drawRightString(520, y, f"{inv.currency} {Decimal(inv.amount):.2f}")
+
+    c.showPage()
+    c.save()
+
+    pdf = buf.getvalue()
+    buf.close()
+
+    resp = HttpResponse(pdf, content_type="application/pdf")
+    resp["Content-Disposition"] = f'attachment; filename="{inv.number}.pdf"'
+    return resp
+
+
+
+
+
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def billing_plans(request):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == "GET":
+        qs = SubscriptionPlan.objects.all().order_by("id")
+        return Response([
+            {
+                "id": p.id,
+                "name": p.name,
+                "price": f"{p.price:.2f}",
+                "billing_period": p.billing_period,
+                "student_limit": p.student_limit,
+                "features": p.features or [],
+            }
+            for p in qs
+        ])
+
+    # POST create
+    data = request.data or {}
+    name = (data.get("name") or "").strip()
+    price = data.get("price")
+    billing_period = str(data.get("billing_period") or "30")
+    student_limit = int(data.get("student_limit") or 0)
+    features = data.get("features") or []
+
+    if not name:
+        return Response({"detail": "name is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    p = SubscriptionPlan.objects.create(
+        name=name,
+        price=price,
+        billing_period=billing_period,
+        student_limit=student_limit,
+        features=features,
+    )
+    return Response({
+        "id": p.id,
+        "name": p.name,
+        "price": f"{p.price:.2f}",
+        "billing_period": p.billing_period,
+        "student_limit": p.student_limit,
+        "features": p.features or [],
+    }, status=status.HTTP_201_CREATED)
+
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def billing_plan_update(request, plan_id: int):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    p = SubscriptionPlan.objects.filter(id=plan_id).first()
+    if not p:
+        return Response({"detail": "Plan not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    data = request.data or {}
+    if "name" in data: p.name = (data.get("name") or "").strip()
+    if "price" in data: p.price = data.get("price")
+    if "billing_period" in data: p.billing_period = str(data.get("billing_period") or p.billing_period)
+    if "student_limit" in data: p.student_limit = int(data.get("student_limit") or 0)
+    if "features" in data: p.features = data.get("features") or []
+
+    p.save()
+    return Response({
+        "id": p.id,
+        "name": p.name,
+        "price": f"{p.price:.2f}",
+        "billing_period": p.billing_period,
+        "student_limit": p.student_limit,
+        "features": p.features or [],
+    })
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def billing_plan_activate(request, plan_id: int):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    plan = SubscriptionPlan.objects.filter(id=plan_id).first()
+    if not plan:
+        return Response({"detail": "Plan not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # You may want to pick who pays (parent membership). For org-level activation,
+    # we can keep invoice.organization_membership = None.
+    with transaction.atomic():
+        # expire active subs
+        OrganizationSubscription.objects.filter(
+            organization=org,
+            status=OrganizationSubscription.Status.ACTIVE,
+        ).update(status=OrganizationSubscription.Status.EXPIRED)
+
+        start = timezone.now().date()
+        days = int(plan.billing_period or "30")
+        end = start + timedelta(days=days)
+
+        sub = OrganizationSubscription.objects.create(
+            organization=org,
+            plan=plan,
+            start_date=start,
+            end_date=end,
+            status=OrganizationSubscription.Status.ACTIVE,
+            auto_renew=True,
+        )
+
+        inv = SubscriptionInvoice.objects.create(
+            subscription=sub,
+            amount=plan.price,
+            currency="NGN",
+            status=SubscriptionInvoice.Status.OPEN,
+            due_at=timezone.now() + timedelta(days=3),
+        )
+
+    return Response({
+        "subscription": {
+            "id": sub.id,
+            "status": sub.status,
+            "start_date": str(sub.start_date),
+            "end_date": str(sub.end_date),
+            "plan": {"id": plan.id, "name": plan.name},
+        },
+        "invoice": {"id": inv.id, "number": inv.number, "status": inv.status},
+    }, status=status.HTTP_201_CREATED)
+
+
+
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_complaint_detail(request, complaint_id):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    c = Complaint.objects.filter(id=complaint_id).first()
+    if not c:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "PATCH":
+        data = request.data or {}
+        if "status" in data: c.status = data["status"]
+        if "priority" in data: c.priority = data["priority"]
+        c.save()
+
+    responses = list(c.responses.select_related("author").order_by("created_at"))
+    return Response({
+        "id": str(c.id),
+        "code": c.code,
+        "title": c.title,
+        "description": c.description,
+        "status": c.status,
+        "priority": c.priority,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+        "transaction_id": c.transaction_identifier,
+        "responses": [
+            {
+                "id": str(r.id),
+                "role": r.role,
+                "author_name": r.author_name,
+                "message": r.message,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in responses
+        ]
+    })
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_complaints(request):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    search = (request.query_params.get("search") or "").strip()
+    status_f = (request.query_params.get("status") or "").strip()
+
+    page = max(int(request.query_params.get("page") or 1), 1)
+    page_size = min(max(int(request.query_params.get("page_size") or 10), 1), 50)
+
+    qs = Complaint.objects.all().order_by("-created_at")
+
+    # If your Complaint should be org-scoped, add your org filter here.
+    # Example (if you add organization FK later):
+    # qs = qs.filter(organization=org)
+
+    if status_f:
+        qs = qs.filter(status=status_f)
+
+    if search:
+        qs = qs.filter(
+            Q(code__icontains=search)
+            | Q(title__icontains=search)
+            | Q(description__icontains=search)
+        )
+
+    total = qs.count()
+    start = (page - 1) * page_size
+    rows = list(qs[start:start + page_size])
+
+    payload = [
+        {
+            "id": str(c.id),
+            "code": c.code,
+            "title": c.title,
+            "status": c.status,
+            "priority": c.priority,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "responses_count": c.responses_count,
+            "transaction_id": c.transaction_identifier,
+        }
+        for c in rows
+    ]
+
+    return Response({"results": payload, "pagination": {"page": page, "page_size": page_size, "total": total}})
+
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_complaint_add_response(request, complaint_id):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    c = Complaint.objects.filter(id=complaint_id).first()
+    if not c:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    msg = (request.data.get("message") or "").strip()
+    if not msg:
+        return Response({"detail": "message is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    r = ComplaintResponse.objects.create(
+        complaint=c,
+        author=request.user,
+        author_name=getattr(request.user, "get_full_name", lambda: "")() or request.user.email,
+        role=ComplaintResponse.Role.ADMIN,
+        message=msg,
+    )
+    return Response({
+        "id": str(r.id),
+        "role": r.role,
+        "author_name": r.author_name,
+        "message": r.message,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }, status=status.HTTP_201_CREATED)
+
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -652,7 +1011,7 @@ def invoice_detail(request, invoice_id: int):
 
         if not _is_org_admin_or_teacher(request, org):
             return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
-
+        
         inv = (
             SubscriptionInvoice.objects
             .select_related("subscription__plan", "subscription__organization", "organization_membership__user")
