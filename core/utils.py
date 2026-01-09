@@ -564,3 +564,12 @@ def _parse_positive_int(val, field_name, default=None):
             status=status.HTTP_400_BAD_REQUEST,
         )
     return n, None
+
+
+def _is_course_teacher(request, cert: EnrollmentCertificate) -> bool:
+    # depends on your Course model shape; adjust accordingly
+    # you used c.teacher as TeacherProfile in _course_to_card_dict
+    try:
+        return cert.course.teacher.user_id == request.user.id
+    except Exception:
+        return False

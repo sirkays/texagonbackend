@@ -39,9 +39,9 @@ class LessonAdmin(admin.ModelAdmin):
 
 @admin.register(Enrollment)
 class EnrollmentAdmin(admin.ModelAdmin):
-    list_display = ("student", "course", "status", "progress_pct", "created_at")
+    list_display = ("student", "course", "status","leaderboard_season", "progress_pct", "created_at")
     list_filter = ("status", "course")
-    search_fields = ("student__user__username", "course__name")
+    search_fields = ("student__user__username", "course__name", "leaderboard_season__name")
     autocomplete_fields = ("student", "course")
 
 @admin.register(Material)

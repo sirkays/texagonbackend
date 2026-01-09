@@ -53,12 +53,317 @@ from core.utils import (
     _sum_points,
     _cert_to_dict,
     _gen_cert_number,
-    _org_signatures_to_dict
+    _org_signatures_to_dict,
+    _is_admin,
+    resolve_season,
 )
 
 from texagonbackend.settings import pass_mark as PASS_MARK, LOW_SCORE
 
-from .models import EnrollmentCertificate
+from .models import EnrollmentCertificate, StudentEnrollmentCertificateApproval
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def certificate_approval_status(request, cert_id: int):
+    cert = EnrollmentCertificate.objects.select_related(
+        "course", "student__user", "organization"
+    ).prefetch_related("approvals").filter(id=cert_id).first()
+    if not cert:
+        return Response({"detail": "Certificate not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    org, err = _resolve_org(request)
+    if err:
+        return err
+    if cert.organization_id != org.id:
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    teacher_ok = cert.approvals.filter(user_type="teacher", approval=True).exists()
+    admin_ok = cert.approvals.filter(user_type="admin", approval=True).exists()
+
+    return Response({
+        "certificate_id": cert.id,
+        "teacher_approved": teacher_ok,
+        "admin_approved": admin_ok,
+        "fully_approved": teacher_ok and admin_ok,
+        "status": cert.status,
+        "acquired_at": cert.acquired_at,
+        "downloadable_at": cert.downloadable_at,
+        "download_ready_by_time": timezone.now() >= cert.downloadable_at,
+        "can_download": cert.can_download,
+    })
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def certificate_teacher_approve(request, cert_id: int):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    cert = EnrollmentCertificate.objects.select_related("organization", "course").filter(id=cert_id).first()
+    if not cert:
+        return Response({"detail": "Certificate not found."}, status=status.HTTP_404_NOT_FOUND)
+    if cert.organization_id != org.id:
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    # Must be teacher/admin of org (or stricter course teacher check)
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Only teachers/admins can approve."}, status=status.HTTP_403_FORBIDDEN)
+
+    approval_value = bool(request.data.get("approval", True))
+
+    obj, _ = StudentEnrollmentCertificateApproval.objects.update_or_create(
+        certificate=cert,
+        user_type=StudentEnrollmentCertificateApproval.UserType.TEACHER,
+        defaults={"user": request.user, "approval": approval_value},
+    )
+
+    return Response({
+        "certificate_id": cert.id,
+        "teacher_approved": obj.approval,
+        "admin_approved": cert.approvals.filter(user_type="admin", approval=True).exists(),
+        "fully_approved": cert.fully_approved,
+    })
+
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def certificate_admin_approve(request, cert_id: int):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    cert = EnrollmentCertificate.objects.select_related("organization").filter(id=cert_id).first()
+    if not cert:
+        return Response({"detail": "Certificate not found."}, status=status.HTTP_404_NOT_FOUND)
+    if cert.organization_id != org.id:
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    # Must be admin (staff/superuser/adminaccess)
+    if not _is_admin(request):
+        return Response({"detail": "Only admins can approve."}, status=status.HTTP_403_FORBIDDEN)
+
+    approval_value = bool(request.data.get("approval", True))
+
+    obj, _ = StudentEnrollmentCertificateApproval.objects.update_or_create(
+        certificate=cert,
+        user_type=StudentEnrollmentCertificateApproval.UserType.ADMIN,
+        defaults={"user": request.user, "approval": approval_value},
+    )
+
+    return Response({
+        "certificate_id": cert.id,
+        "admin_approved": obj.approval,
+        "teacher_approved": cert.approvals.filter(user_type="teacher", approval=True).exists(),
+        "fully_approved": cert.fully_approved,
+    })
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def course_completed_students(request, course_id: int):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+
+    course = Course.objects.filter(id=course_id, organization=org, teacher__user__id=request.user.id).first()
+    if not course:
+        return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    leaderboard_season = resolve_season(org, timezone.now())
+    
+    # Completed enrollments only
+    enrollments = (Enrollment.objects
+                   .filter(course_id=course.id, status="completed")  # <-- adjust rule
+                   .select_related("student__user")                  # Enrollment.student is StudentProfile
+                   .order_by("-id"))
+
+    if leaderboard_season:
+        enrollments = enrollments.filter(
+            leaderboard_season=leaderboard_season
+        )
+
+    results = []
+    for e in enrollments:
+        u = e.student.user
+
+        certificate = None
+
+        if  getattr(e, "certificate", None):
+            teacher_approved = e.certificate.is_teacher_approved(request.user)
+            admin_approved = e.certificate.is_admin_approved()
+            certificate = {
+                "number":e.certificate.number,
+                "title":e.certificate.title,
+                "id":e.certificate.id,
+                "teacher_approved":teacher_approved,
+                "admin_approved":admin_approved
+            }
+
+        results.append({
+            "progress_pct":e.progress_pct,
+            "enrollment_id": e.id,
+            "student_id": e.student_id,
+            "student_name": (u.get_full_name() or u.email or "").strip(),
+            "student_email": u.email,
+            "completed_at": e.completed_at,
+            "certificate":certificate
+        })
+
+    return Response({
+        "course": {"id": course.id, "name": course.name},
+        "results": results
+    })
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def courses_completion_dashboard(request):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    # Base queryset in org
+    qs = Course.objects.filter(organization=org, is_active=True).select_related(
+        "subject", "classroom", "teacher__user"
+    )
+
+    # Teacher: only own courses. Admin: all.
+    if not _is_admin(request):
+        tp = TeacherProfile.objects.filter(user=request.user, organization=org).first()
+        if not tp:
+            return Response({"detail": "Teacher profile not found in this organization."},
+                            status=status.HTTP_403_FORBIDDEN)
+        qs = qs.filter(teacher=tp)
+
+    # Annotate counts
+    qs = qs.annotate(
+        total_enrolled=Count("enrollments", distinct=True),
+        completed_count=Count(
+            "enrollments",
+            filter=Q(enrollments__status=Enrollment.Status.COMPLETED),
+            distinct=True,
+        ),
+    ).order_by("-id")
+
+    results = []
+    for c in qs:
+        results.append({
+            "id": c.id,
+            "name": c.name,
+            "subject": c.subject.name,
+            "classroom": c.classroom.name,
+            "teacher_name": c.teacher.user.get_full_name() or c.teacher.user.email,
+            "total_enrolled": c.total_enrolled or 0,
+            "completed_count": c.completed_count or 0,
+        })
+
+    return Response({"results": results})
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def course_completed_enrollments(request, course_id: int):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    course = Course.objects.select_related("teacher__user", "subject", "classroom").filter(
+        id=course_id, organization=org
+    ).first()
+    if not course:
+        return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Teacher can only view their own course; admin can view all.
+    if not _is_admin(request):
+        tp = TeacherProfile.objects.filter(user=request.user, organization=org).first()
+        if not tp or course.teacher_id != tp.id:
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    enrollments = (Enrollment.objects
+        .filter(
+            course_id=course.id,
+            status=Enrollment.Status.COMPLETED,
+            student__organization=org,   # StudentProfile has organization nullable, but your students likely set it.
+        )
+        .select_related("student__user")
+        .select_related("course")
+        # If you want certificate + approval status in same call:
+        .select_related("certificate")  # works because EnrollmentCertificate.enrollment is OneToOne with related_name="certificate"
+        .prefetch_related("certificate__approvals")
+        .order_by("-id")
+    )
+
+    results = []
+    for e in enrollments:
+        u = e.student.user
+        cert = getattr(e, "certificate", None)
+
+        teacher_ok = False
+        admin_ok = False
+        cert_status = None
+        cert_can_download = False
+        cert_downloadable_at = None
+        cert_id = None
+        cert_number = None
+
+        if cert:
+            cert_id = cert.id
+            cert_number = cert.number
+            cert_status = cert.status
+            cert_can_download = cert.can_download
+            cert_downloadable_at = cert.downloadable_at
+            teacher_ok = cert.approvals.filter(user_type="teacher", approval=True).exists()
+            admin_ok = cert.approvals.filter(user_type="admin", approval=True).exists()
+
+        results.append({
+            "enrollment_id": e.id,
+            "student_id": e.student_id,
+            "student_name": (u.get_full_name() or u.email or "").strip(),
+            "student_email": u.email,
+            "progress_pct": str(e.progress_pct),
+            "enrollment_status": e.status,
+
+            # certificate snapshot (optional but very useful for the UI)
+            "certificate": {
+                "id": cert_id,
+                "number": cert_number,
+                "status": cert_status,
+                "teacher_approved": teacher_ok,
+                "admin_approved": admin_ok,
+                "fully_approved": teacher_ok and admin_ok,
+                "downloadable_at": cert_downloadable_at,
+                "can_download": cert_can_download,
+            } if cert else None,
+        })
+
+    return Response({
+        "course": {
+            "id": course.id,
+            "name": course.name,
+            "subject": course.subject.name,
+            "classroom": course.classroom.name,
+            "teacher_name": course.teacher.user.get_full_name() or course.teacher.user.email,
+        },
+        "results": results,
+    })
+
+
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])

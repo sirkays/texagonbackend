@@ -1,6 +1,8 @@
 from django.contrib import admin
 from .models import (Language, Classroom, Subject, StudentProfile, 
-    TeacherProfile, ParentProfile, ParentChildLink,OrganizationCertificateSignatures,EnrollmentCertificate)
+    TeacherProfile, ParentProfile, ParentChildLink,OrganizationCertificateSignatures,EnrollmentCertificate,
+    StudentEnrollmentCertificateApproval
+    )
 from django.utils import timezone
 from django.utils.html import format_html
 
@@ -279,3 +281,72 @@ class OrganizationCertificateSignaturesAdmin(admin.ModelAdmin):
         if not obj.director_2_signature:
             return "-"
         return format_html('<img src="{}" style="height:48px;border:1px solid #ddd;" />', obj.director_2_signature.url)
+
+
+
+
+@admin.register(StudentEnrollmentCertificateApproval)
+class StudentEnrollmentCertificateApprovalAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "certificate",
+        "user",
+        "user_type",
+        "approval",
+        "created_at",
+        "updated_at",
+    )
+
+    list_filter = (
+        "approval",
+        "user_type",
+        "created_at",
+    )
+
+    search_fields = (
+        "certificate__number",
+        "certificate__student__user__email",
+        "user__email",
+    )
+
+    autocomplete_fields = (
+        "certificate",
+        "user",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
+
+    fieldsets = (
+        (
+            "Approval Details",
+            {
+                "fields": (
+                    "certificate",
+                    "user",
+                    "user_type",
+                    "approval",
+                )
+            },
+        ),
+        (
+            "Timestamps",
+            {
+                "fields": (
+                    "created_at",
+                    "updated_at",
+                )
+            },
+        ),
+    )
+
+    ordering = ("-created_at",)
+
+    def has_delete_permission(self, request, obj=None):
+        """
+        Optional: prevent deletion of approvals to keep audit history.
+        Remove this if deletions are acceptable.
+        """
+        return request.user.is_superuser

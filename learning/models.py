@@ -44,10 +44,17 @@ class Enrollment(TimeStampedModel):
         COMPLETED = "completed", "Completed"
         DROPPED = "dropped", "Dropped"
 
+    leaderboard_season = models.ForeignKey(
+        "gamification.LeaderboardSeason",
+        on_delete=models.CASCADE,
+        related_name="season_enrollments",
+        blank=True, null=True
+    )
     student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="enrollments")
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="enrollments")
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
     progress_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    completed_at = models.DateTimeField(blank=True, null=True)
     
 
     class Meta:

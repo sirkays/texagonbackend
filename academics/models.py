@@ -11,7 +11,7 @@ from django.db import models, transaction
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from orgs.models import OrganizationMembership, Organization
-
+from accounts.models import User
 
 
 class Classroom(NamedModel):
@@ -219,6 +219,14 @@ class EnrollmentCertificate(models.Model):
         db_index=True,
     )
 
+
+    leaderboard_season = models.ForeignKey(
+        "gamification.LeaderboardSeason",
+        on_delete=models.CASCADE,
+        related_name="season_certificates",
+        blank=True, null=True
+    )
+
     # Display fields
     title = models.CharField(max_length=255, default="Certificate of Completion")
     description = models.TextField(blank=True)
@@ -255,6 +263,32 @@ class EnrollmentCertificate(models.Model):
 
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+    # academics/models.py (inside EnrollmentCertificate)
+
+    def is_teacher_approved(self, user=None) -> bool:
+        if user:
+            return self.approvals.filter(user_type="teacher", approval=True, user=user).exists()
+        return self.approvals.filter(user_type="teacher", approval=True).exists()
+
+    def is_admin_approved(self, user=None) -> bool:
+        if user:
+            return self.approvals.filter(user_type="admin", approval=True, user=user).exists()
+        return self.approvals.filter(user_type="admin", approval=True).exists()
+
+    @property
+    def fully_approved(self) -> bool:
+        return self.is_teacher_approved() and self.is_admin_approved()
+
+    @property
+    def can_download(self) -> bool:
+        if self.status != self.Status.ISSUED:
+            return False
+        if timezone.now() < self.downloadable_at:
+            return False
+        return self.fully_approved
+
 
     class Meta:
         ordering = ["-acquired_at"]
@@ -378,13 +412,32 @@ class EnrollmentCertificate(models.Model):
         self.save(update_fields=["status", "revoked_at", "revoked_reason", "issued_by_user", "updated_at"])
 
 
+# academics/models.py
 
+class StudentEnrollmentCertificateApproval(TimeStampedModel):
+    class UserType(models.TextChoices):
+        TEACHER = "teacher", "teacher"
+        ADMIN = "admin", "admin"
+
+    certificate = models.ForeignKey(EnrollmentCertificate, on_delete=models.CASCADE, related_name="approvals")
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    approval = models.BooleanField(default=False)
+    user_type = models.CharField(max_length=25, choices=UserType.choices, default=UserType.TEACHER)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["certificate", "user_type"],
+                name="unique_approval_per_cert_per_role",
+            )
+        ]
 
 
 def org_cert_signature_upload_to(instance, filename):
     # e.g. org_cert_signatures/org_12/director_1.png
     org_id = getattr(instance.organization, "id", "unknown")
     return f"org_cert_signatures/org_{org_id}/{filename}"
+
 
 
 class OrganizationCertificateSignatures(models.Model):
