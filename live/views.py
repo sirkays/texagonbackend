@@ -16,6 +16,8 @@ from .models import LiveSession  # adjust app label if different
 from academics.models import TeacherProfile  # adjust if needed
 from learning.models import Course,Enrollment
 from core.utils import _get_teacher_for_user, _get_student_for_user
+from api.permissions import RequiresActiveStudentSubscription
+
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
@@ -152,7 +154,7 @@ def create_live_session(request):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
 @authentication_classes([SessionTokenAuthentication])
 def user_live_sessions(request):
     """

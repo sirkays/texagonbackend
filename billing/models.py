@@ -210,6 +210,7 @@ class UserAccountSubscription(TimeStampedModel):
         indexes = [
             models.Index(fields=["organization", "user", "-start_at"]),
             models.Index(fields=["organization", "user", "status", "-start_at"]),
+            models.Index(fields=["organization", "user", "status", "end_at"]),
         ]
         constraints = [
             # One active subscription per user per org (prevents duplicates)

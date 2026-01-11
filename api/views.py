@@ -58,6 +58,28 @@ from django.db.models import Subquery
 from rest_framework.permissions import IsAuthenticated
 from billing.services.subscription_checks import student_subscription_status
 
+from rest_framework.permissions import AllowAny
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def verify_session(request):
+    token = request.headers.get("X-Session-Token")
+    if not token:
+        return Response({"detail": "Missing token"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        st = SessionToken.objects.get(key=token, is_active=True)
+    except SessionToken.DoesNotExist:
+        return Response({"detail": "Invalid token"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if st.expires_at <= timezone.now():
+        st.is_active = False
+        st.save(update_fields=["is_active"])
+        return Response({"detail": "Expired"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    return Response({"detail": "OK"}, status=status.HTTP_200_OK)
+
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])

@@ -40,7 +40,7 @@ from notifications.models import Notification
 import traceback
 from .models import AdminAccess, User,EmailOTP
 from core.utils import _month_bounds, _resolve_org, get_object_or_404_ajax
-
+from api.permissions import RequiresActiveStudentSubscription
 
 def create_admin(request):
     try:
@@ -1159,7 +1159,7 @@ def teacher_dashboard_overview(request):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
 @authentication_classes([SessionTokenAuthentication])
 def dashboard_overview(request):
     """

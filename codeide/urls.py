@@ -3,7 +3,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    # snippets
+    # snippets STUDENTS ENDPOINTS
     path("api/ide/snippets/", views.snippet_list, name="ide_snippet_list"),          # GET (student)
     path("api/ide/snippets/create/", views.snippet_create, name="ide_snippet_create"),  # POST (student)
     path("snippets/<int:snippet_id>/delete/", views.snippet_delete, name="snippet_delete"),
@@ -24,6 +24,7 @@ urlpatterns = [
     path("api/ide/files/<int:file_id>/", views.codefile_detail, name="ide_codefile_detail"),
     path("api/ide/files/<int:file_id>/delete/", views.codefile_delete, name="ide_codefile_delete"),
     
+    # TEACHER ENDPOINTS
     path("api/teacher/submissions/", views.teacher_submissions_list, name="teacher_submissions_list"),
     path("api/teacher/submissions/<int:pk>/", views.teacher_submission_detail, name="teacher_submission_detail"),
     path("api/teacher/submissions/<int:pk>/comments/", views.teacher_submission_comments, name="teacher_submission_comments"),

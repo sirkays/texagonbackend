@@ -21,7 +21,8 @@ from .views import (
     password_reset_request_view,
     password_reset_confirm_view,
     teacher_tutoring_bookings,
-    CancelTutoringBookingView
+    CancelTutoringBookingView,
+    verify_session,
 )
 
 router = DefaultRouter()
@@ -89,6 +90,8 @@ urlpatterns = [
         CancelTutoringBookingView.as_view({"patch": "cancel"}),
         name="cancel-tutoring-booking",
     ),
+
+    path("auth/session/verify/", verify_session),
 ]
 
 

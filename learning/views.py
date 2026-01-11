@@ -20,6 +20,7 @@ import json
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.decorators import parser_classes
 import logging
+from api.permissions import RequiresActiveStudentSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def _fmt_size(file_obj) -> Optional[str]:
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
 @authentication_classes([SessionTokenAuthentication])
 def my_materials(request):
     """
@@ -257,7 +258,7 @@ def _read_json_body_for_get(request) -> Dict[str, Any]:
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
 @authentication_classes([SessionTokenAuthentication])
 def learning_modules(request):
     """
@@ -505,7 +506,7 @@ def _material_to_dict(request, m: Material, lesson: Lesson) -> Dict[str, Any]:
 
 
 @api_view(["POST"])
-@permission_classes([HasAPIKey])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
 @authentication_classes([SessionTokenAuthentication])
 def save_lesson_to_my_materials(request, lesson_id: int):
     """
@@ -675,7 +676,7 @@ def _int(v, default=None, cap=None) -> Optional[int]:
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
 @authentication_classes([SessionTokenAuthentication])
 def resource_materials(request):
     """
@@ -1792,7 +1793,7 @@ def get_module_categories(request):
 
 
 @api_view(["DELETE"])
-@permission_classes([HasAPIKey])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
 def delete_saved_material(request):

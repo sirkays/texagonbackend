@@ -1,6 +1,7 @@
 from django.urls import path
 from . import views
 urlpatterns = [
+    ##### STUDENT ENDPOINTS ##########
     path("api/materials/mine/", views.my_materials, name="my-materials"),
     path('api/materials/delete/', views.delete_saved_material, name='delete_saved_material'),
 
@@ -9,6 +10,7 @@ urlpatterns = [
     path("api/academics/resources/", views.resource_materials, name="resource-materials"),
 
 
+    ##### TEACHER ENDPOINTS ##########
     path('api/teacher/modules/', views.list_modules, name='teacher_list_modules'),
     path('api/teacher/modules/<int:module_id>/', views.get_module, name='teacher_get_module'),
     path('api/teacher/modules/create/', views.create_module, name='teacher_create_module'),

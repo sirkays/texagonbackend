@@ -32,7 +32,7 @@ from core.utils import (
     _avatar_url_for,
     resolve_season,
 )
-
+from api.permissions import RequiresActiveStudentSubscription
 # ---------- helpers ----------
 def _get_student_for_user(user) -> Optional[StudentProfile]:
     mem = (OrganizationMembership.objects
@@ -147,7 +147,7 @@ def _rank_for_student(all_qs, student_id: int, student_points: int) -> Optional[
 
 # ---------- endpoint ----------
 @api_view(["GET"])
-@permission_classes([HasAPIKey])
+@permission_classes([HasAPIKey, RequiresActiveStudentSubscription])
 @authentication_classes([SessionTokenAuthentication])
 def leaderboard_overview(request):
     """

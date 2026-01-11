@@ -28,6 +28,7 @@ urlpatterns = [
     path('api/student/cbt-quit/', views.cbt_test_quit, name='cbt_test_quit'),
 
 
+    #### TEACHER ENDPOINTS ########    
     path('api/student/performance-summary/', views.student_performance_summary, name='student_performance_summary'),
 
     path('api/student-list/performance/', views.student_performance_list, name='student_performance_list'),

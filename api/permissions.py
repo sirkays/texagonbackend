@@ -1,5 +1,11 @@
 # permissions.py
 from rest_framework.permissions import BasePermission, SAFE_METHODS
+from django.utils import timezone
+from django.db.models import Q
+
+from billing.models import UserAccountSubscription
+from academics.models import StudentProfile
+from api.services.session_tokens import revoke_all_user_sessions
 
 class IsStudent(BasePermission):
     """
@@ -13,4 +19,100 @@ class IsStudent(BasePermission):
         if not (user and user.is_authenticated and hasattr(user, "student_profile")):
             return False
         # e.g., require their org and/or classroom to exist, or custom flag
+        return True
+
+
+
+
+class RequiresActiveStudentSubscription(BasePermission):
+    """
+    Enforce: student subscription must be ACTIVE and not expired.
+
+    - If the logged-in user is a student -> checks their own subscription.
+    - If the logged-in user is a parent -> requires a student_id context.
+    - Automatically revokes ALL session tokens if subscription is invalid.
+    """
+
+    message = "Subscription expired or inactive. Please subscribe again."
+
+    def _get_student_id(self, request, view):
+        return (
+            getattr(view, "kwargs", {}).get("student_id")
+            or getattr(view, "kwargs", {}).get("id")
+            or (request.data.get("student_id") if hasattr(request, "data") else None)
+            or request.query_params.get("student_id")
+        )
+
+    def _is_subscription_active(self, *, org_id, user_id) -> bool:
+        now = timezone.now()
+        return UserAccountSubscription.objects.filter(
+            organization_id=org_id,
+            user_id=user_id,
+            status=UserAccountSubscription.Status.ACTIVE,
+        ).filter(
+            Q(end_at__isnull=True) | Q(end_at__gt=now)
+        ).exists()
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+
+        # =========================
+        # STUDENT CONTEXT
+        # =========================
+        student_profile = getattr(user, "student_profile", None)
+        if student_profile:
+            active = self._is_subscription_active(
+                org_id=student_profile.organization_id,
+                user_id=user.id,
+            )
+
+            if not active:
+                # 🔥 REVOKE ALL TOKENS IMMEDIATELY
+                revoke_all_user_sessions(user, reason="student_subscription_expired")
+                return False
+
+            return True
+
+        # =========================
+        # PARENT CONTEXT
+        # =========================
+        parent_profile = getattr(user, "parent_profile", None)
+        if parent_profile:
+            student_id = self._get_student_id(request, view)
+            if not student_id:
+                return False
+
+            student = (
+                StudentProfile.objects
+                .only("id", "user_id", "organization_id")
+                .filter(
+                    id=student_id,
+                    organization_id=parent_profile.organization_id,
+                    parent_links__parent=parent_profile,
+                )
+                .first()
+            )
+            if not student:
+                return False
+
+            active = self._is_subscription_active(
+                org_id=student.organization_id,
+                user_id=student.user_id,
+            )
+
+            if not active:
+                # 🔥 Revoke ONLY the student’s sessions, not the parent’s
+                revoke_all_user_sessions(
+                    student.user,
+                    reason="student_subscription_expired",
+                )
+                return False
+
+            return True
+
+        # =========================
+        # OTHER ROLES (admin, staff)
+        # =========================
         return True

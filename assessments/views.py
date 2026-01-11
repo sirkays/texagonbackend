@@ -69,7 +69,7 @@ from orgs.models import Organization, OrganizationMembership
 from api.authentication import SessionTokenAuthentication
 from rest_framework_api_key.permissions import HasAPIKey
 from .serializers import TestAttemptSerializer, TestMiniSerializer
-
+from api.permissions import RequiresActiveStudentSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ def _map_qtype(q: Question, choice_count: int, choice_texts: List[str]) -> str:
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey])  # requires: Authorization: Api-Key <your_api_key>
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])  # requires: Authorization: Api-Key <your_api_key>
 @authentication_classes([SessionTokenAuthentication])  # requires: Authorization: SessionToken <session_token>
 def my_test_attempts(request):
     """
@@ -262,7 +262,7 @@ def my_test_attempts(request):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
 @authentication_classes([SessionTokenAuthentication])
 def available_tests_old(request):
     """
@@ -365,7 +365,7 @@ def available_tests_old(request):
 
 
 @api_view(["POST"])
-@permission_classes([HasAPIKey])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
 @authentication_classes([SessionTokenAuthentication])
 def cbt_test_quit(request):
     if not getattr(request.user, "is_authenticated", False):
@@ -598,7 +598,7 @@ def _test_has_field(model, field_name: str) -> bool:
 
 @api_view(["POST"])
 @authentication_classes([SessionTokenAuthentication])
-@permission_classes([HasAPIKey, IsAuthenticated])  # << add IsAuthenticated
+@permission_classes([HasAPIKey, IsAuthenticated, RequiresActiveStudentSubscription])  # << add IsAuthenticated
 @transaction.atomic
 def submit_test(request, test_id: int):
     """

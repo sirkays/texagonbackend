@@ -2,8 +2,11 @@ from django.urls import path
 from .views import create_live_session,user_live_sessions,update_live_session_status,delete_live_session
 
 urlpatterns = [
-    path("api/create-live-session/", create_live_session, name="create-live-session"),
+    ##### STUDENT AND TEACHER ENDPOINT ###############
     path("api/get-live-session/", user_live_sessions, name="get-live-session"),
+
+    ########## TEACHER ENDPOINT ##########
+    path("api/create-live-session/", create_live_session, name="create-live-session"),
 
     path("api/update-live-session/<str:session_id>/status/", update_live_session_status, name="update_live_session_status"),
     
