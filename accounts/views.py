@@ -41,6 +41,7 @@ import traceback
 from .models import AdminAccess, User,EmailOTP
 from core.utils import _month_bounds, _resolve_org, get_object_or_404_ajax
 from api.permissions import RequiresActiveStudentSubscription
+from .utils import available_certificates_qs
 
 def create_admin(request):
     try:
@@ -1211,14 +1212,7 @@ def dashboard_overview(request):
     # ---- Stats: courses, hours, certificates, streak ----
     courses_enrolled = enrollments.count()
 
-    hours_learned = 0.0
-    completed_count = 0
-    for e in enrollments:
-        seconds = course_durations.get(e.course_id, 0)
-        hours = (seconds / 3600.0) * (float(e.progress_pct or 0) / 100.0)
-        hours_learned += hours
-        if (e.progress_pct or 0) >= 100:
-            completed_count += 1
+    completed_count = available_certificates_qs().filter(student=student).count()
 
     # streak
     streak_days = 0
@@ -1363,7 +1357,7 @@ def dashboard_overview(request):
         "stats": {
             "courses_enrolled": courses_enrolled,
             "badges_earned": badges,
-            "certificates": completed_count,   # treating completed courses as certificates
+            "certificates": completed_count,  
             "streak_days": streak_days,
         },
         "gamification": {
@@ -1436,6 +1430,7 @@ def parent_overview(request):
             .values("student_id")
             .annotate(c=Count("id"))
         )
+
         active_map = {r["student_id"]: r["c"] for r in active_counts}
         completed_map = {r["student_id"]: r["c"] for r in completed_counts}
 

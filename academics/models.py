@@ -414,7 +414,6 @@ class EnrollmentCertificate(models.Model):
         self.save(update_fields=["status", "revoked_at", "revoked_reason", "issued_by_user", "updated_at"])
 
 
-# academics/models.py
 
 class StudentEnrollmentCertificateApproval(TimeStampedModel):
     class UserType(models.TextChoices):

@@ -241,6 +241,7 @@ def user_live_sessions(request):
         return Response({"live_sessions": sessions_data}, status=status.HTTP_200_OK)
 
     except Exception as e:
+        print(e)
         payload = {
             "detail": "Error fetching live sessions.",
             "error": f"{type(e).__name__}: {e}",
