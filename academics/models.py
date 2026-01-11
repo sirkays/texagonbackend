@@ -67,6 +67,8 @@ class ParentProfile(TimeStampedModel):
         blank=True,
         null=True,
     )
+    user_subscription = models.ForeignKey("billing.UserAccountSubscription", on_delete=models.CASCADE, related_name="parent_subs",
+    blank=True, null=True)
     address = models.TextField(blank=True)
 
     # use TimeStampedModel.created_at (no new field needed)

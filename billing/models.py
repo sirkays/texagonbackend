@@ -74,6 +74,8 @@ class SubscriptionInvoice(TimeStampedModel):
     related_name="my_invoices", blank=True, null=True)
     subscription = models.ForeignKey(OrganizationSubscription, on_delete=models.CASCADE, related_name="invoices",
     blank=True, null=True)
+    user_subscription = models.ForeignKey("UserAccountSubscription", on_delete=models.CASCADE, related_name="sub_invoices",
+    blank=True, null=True)
     number = models.CharField(
         max_length=20,
         unique=True,
@@ -153,7 +155,6 @@ class InvoiceType(models.Model):
 
 
 
-
 class UserAccountSubscription(TimeStampedModel):
     """
     Tracks subscription at the USER level (student/parent/etc), scoped to an organization.
@@ -207,8 +208,8 @@ class UserAccountSubscription(TimeStampedModel):
 
     class Meta:
         indexes = [
-            models.Index(fields=["organization", "user", "status"]),
-            models.Index(fields=["organization", "status", "end_at"]),
+            models.Index(fields=["organization", "user", "-start_at"]),
+            models.Index(fields=["organization", "user", "status", "-start_at"]),
         ]
         constraints = [
             # One active subscription per user per org (prevents duplicates)
@@ -218,6 +219,7 @@ class UserAccountSubscription(TimeStampedModel):
                 name="uniq_active_user_subscription_per_org",
             )
         ]
+
 
     def __str__(self):
         return f"{self.user_id} @ org {self.organization_id} ({self.status})"
@@ -229,6 +231,19 @@ class UserAccountSubscription(TimeStampedModel):
         if self.end_at and timezone.now() >= self.end_at:
             return True
         return False
+
+    @classmethod
+    def student_subscription_is_expired(cls, student) -> bool:
+        org = student.organization
+        sub = (
+            cls.objects
+            .filter(organization=org, user=student.user)
+            .order_by("-start_at")
+            .first()
+        )
+        if not sub:
+            return True  # no subscription => treat as expired/not subscribed
+        return sub.is_expired
 
     def refresh_status(self, save=True) -> str:
         """

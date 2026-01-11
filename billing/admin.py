@@ -77,6 +77,7 @@ class SubscriptionInvoiceAdmin(admin.ModelAdmin):
         "status",
         "transaction_id",
         "created_at",
+        "user_subscription",
     )
     list_filter = ("currency", "status", "issued_at", "due_at")
     search_fields = (

@@ -19,7 +19,7 @@ from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
-from academics.models import ParentProfile
+from academics.models import ParentProfile,StudentProfile
 from billing.models import SubscriptionInvoice, SubscriptionPayment, InvoiceType
 from core.utils import _is_org_admin_or_teacher, _resolve_org, get_object_or_404_ajax
 from orgs.models import OrganizationMembership
@@ -30,6 +30,8 @@ from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
 from django.core.files.uploadedfile import UploadedFile
 from live.models import TutoringBooking
 from learning.models import Enrollment
+from billing.services.activate_user_subscriptions import activate_or_extend_student_subscription_from_invoice
+from billing.services.user_subscriptions import activate_user_subscription_from_paid_invoice
 
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25MB per file
 ALLOWED_CONTENT_TYPES = None  # e.g. {"image/png","image/jpeg","application/pdf"}
@@ -460,185 +462,267 @@ def fetch_parent_invoices(request):
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
 def confirm_payment(request):
-    user = getattr(request, "user", None)
-    if not user or not user.is_authenticated:
-        return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
-
-    parent_profile = getattr(user, "parent_profile", None)
-    if parent_profile is None:
-        return Response({"detail": "Parent profile not found for this user."}, status=status.HTTP_404_NOT_FOUND)
-
-    # Try to find the parent membership (prefer any membership record regardless of is_active,
-    # because invoices are historical and we may still want to show them).
-    membership = (
-        OrganizationMembership.objects
-        .filter(user=user, organization=parent_profile.organization, role=OrganizationMembership.Role.PARENT)
-        .order_by("-id")
-        .first()
-    )
-
-    transaction_id = request.data.get("transaction_id")
-    tx_ref = request.data.get("tx_ref")
-    invoice_id = request.data.get("invoice_id")
-    
-    subscription_payment = get_object_or_404_ajax(
-        SubscriptionPayment, reference=tx_ref, 
-        invoice__organization_membership__user=request.user,
-    )
-
-    if subscription_payment.invoice.number != invoice_id and str(subscription_payment.invoice.id) != invoice_id:
-        return Response({"detail": "Could not update payment, wrong invoice"}, status=status.HTTP_400_BAD_REQUEST)
-        
-    if subscription_payment is False:
-        return Response({"detail": "We could not confirm payment at this moment. Contact support if it not confirmed in 30min"}, 
-        status=status.HTTP_404_NOT_FOUND)
-
-    subscription_payment.transaction_id = transaction_id
-    subscription_payment.save()
-    res = confirm_transaction(transaction_id)
-    
-    if res[1] != "success":
-        messages.warning(request, 
-        f'Something went wrong, Contact support at info@texagon.epichouse.online with transaction no. {transaction_id}')
-        subscription_payment.change_current_trans("failed")
-        return Response({"detail": "Could not update payment, because we could not confirm payment"}, status=status.HTTP_400_BAD_REQUEST)
-
-    subscription_payment.change_current_trans("success")
-
-    subscription_payment.invoice.status = "paid"
-    subscription_payment.invoice.transaction_id = transaction_id
-    subscription_payment.invoice.save()
-
     try:
-        invoice_type = InvoiceType.objects.get(invoice=subscription_payment.invoice)
-        if invoice_type.invoice_type == "tutor":
-            if invoice_type.object_type == "booking":
-                booking = TutoringBooking.objects.get(pk=invoice_type.object_id)
-                if booking:
-                    booking.status = "confirmed"
-                    booking.save()
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
 
-                    course = booking.private_tutoring.course
+        parent_profile = getattr(user, "parent_profile", None)
+        if parent_profile is None:
+            return Response({"detail": "Parent profile not found for this user."}, status=status.HTTP_404_NOT_FOUND)
 
-                    Enrollment.objects.get_or_create(
-                        student=booking.student,
-                        course=course,
-                        status="active"
-                    )
-        elif invoice_type.invoice_type == "store":
-            if invoice_type.object_type == "order":
-                order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=request.user)
-                if order is False:
-                    return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
-                order.status = "paid"
-                order.save()
-                order.reduce_stock()
+        # Try to find the parent membership (prefer any membership record regardless of is_active,
+        # because invoices are historical and we may still want to show them).
+        membership = (
+            OrganizationMembership.objects
+            .filter(user=user, organization=parent_profile.organization, role=OrganizationMembership.Role.PARENT)
+            .order_by("-id")
+            .first()
+        )
 
-                products = OrderItem.objects.filter(order=order).values_list("product")
+        transaction_id = request.data.get("transaction_id")
+        tx_ref = request.data.get("tx_ref")
+        invoice_id = request.data.get("invoice_id")
+        
+        subscription_payment = get_object_or_404_ajax(
+            SubscriptionPayment, reference=tx_ref, 
+            invoice__organization_membership__user=request.user,
+        )
+        if subscription_payment.status == "success":
+            return Response({"status": "success", "detail": "Already confirmed."}, status=200)
 
-                carts = CartItem.objects.filter(product__pk__in=products, cart__user=request.user)
-                if carts:
-                    carts.delete()
+        #print(subscription_payment.invoice.number, "=- ", invoice_id ,"... ", str(subscription_payment.invoice.id), " center.. ", invoice_id)
+        if subscription_payment.invoice.number != invoice_id and str(subscription_payment.invoice.id) != invoice_id:
+            return Response({"detail": "Could not update payment, wrong invoice"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if subscription_payment is False:
+            return Response({"detail": "We could not confirm payment at this moment. Contact support if it not confirmed in 30min"}, 
+            status=status.HTTP_404_NOT_FOUND)
 
+        subscription_payment.transaction_id = transaction_id
+        subscription_payment.save()
+        res = confirm_transaction(transaction_id)
+        
+        if res[1] != "success":
+            messages.warning(request, 
+            f'Something went wrong, Contact support at info@texagon.epichouse.online with transaction no. {transaction_id}')
+            subscription_payment.change_current_trans("failed")
+            return Response({"detail": "Could not update payment, because we could not confirm payment"}, status=status.HTTP_400_BAD_REQUEST)
+
+        subscription_payment.change_current_trans("success")
+
+        subscription_payment.invoice.status = "paid"
+        subscription_payment.invoice.transaction_id = transaction_id
+        subscription_payment.invoice.save()
+
+        
+
+        try:
+            invoice_type = InvoiceType.objects.get(invoice=subscription_payment.invoice)
+            if invoice_type.invoice_type == "tutor":
+                if invoice_type.object_type == "booking":
+                    booking = TutoringBooking.objects.get(pk=invoice_type.object_id)
+                    if booking:
+                        booking.status = "confirmed"
+                        booking.save()
+
+                        course = booking.private_tutoring.course
+
+                        Enrollment.objects.get_or_create(
+                            student=booking.student,
+                            course=course,
+                            status="active"
+                        )
+            elif invoice_type.invoice_type == "store":
+                if invoice_type.object_type == "order":
+                    order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=request.user)
+                    if order is False:
+                        return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
+                    order.status = "paid"
+                    order.save()
+                    order.reduce_stock()
+
+                    products = OrderItem.objects.filter(order=order).values_list("product")
+
+                    carts = CartItem.objects.filter(product__pk__in=products, cart__user=request.user)
+                    if carts:
+                        carts.delete()
+
+                        Cart.objects.filter(user=request.user).update(coupon=None)
+
+                        if order.coupon_code:
+                            coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
+                            if coupon:
+                                coupon.used_count = coupon.used_count + 1
+
+                                coupon.save()
+
+                elif invoice_type.object_type == "bnpl":
+                    order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=request.user)
+                    if not order or order is False:
+                        return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+                    # 1) Mark order as paid OR keep pending + bnpl flag (your call)
+                    order.status = "paid"
+                    order.save(update_fields=["status"])
+                    order.reduce_stock()
+                    # 2) Create / ensure BNPLAgreement exists
+                    agreement = getattr(order, "bnpl_agreement", None)
+                    if agreement is None:
+                        # You MUST know what plan was chosen.
+                        # Ideally you stored plan on the order at create-order time.
+                        # Example: store chosen plan id in order.notes or a dedicated field.
+                        plan_id = invoice_type.meta.get('bnpl_plan_id')
+                        plan = BNPLPlanTemplate.objects.filter(id=plan_id, active=True).first()
+                        if not plan:
+                            return Response({"detail": "BNPL plan missing for this order."}, status=400)
+
+                        agreement = BNPLAgreement.objects.create(
+                            order=order,
+                            plan=plan,
+                            provider=plan.provider,
+                            status=BNPLAgreement.Status.PENDING,
+
+                            num_installments=plan.num_installments,
+                            interval_days=plan.interval_days,
+                            take_downpayment_now=plan.take_downpayment_now,
+
+                            currency=plan.currency or "NGN",
+                            principal_amount=order.grand_total,
+                            customer_fee_flat=plan.customer_fee_flat,
+                            customer_fee_rate=plan.customer_fee_rate,
+                            total_amount=order.grand_total,  # or principal + fee if that’s your design
+
+                            provider_checkout_id=subscription_payment.reference,  # optional mapping
+                        )
+
+                    # 3) Initialize schedule if not already created
+                    if not agreement.installments.exists():
+                        agreement.initialize_schedule()
+
+                    # 4) Mark installment #1 as captured using the paid amount
+                    # The payment amount is subscription_payment.amount (invoice.amount)
+                    meta = invoice_type.meta or {}
+                    installment_id = meta.get("installment_id")
+
+                    inst_qs = agreement.installments.order_by("index")
+
+                    if installment_id:
+                        inst = inst_qs.filter(id=installment_id).first()
+                        if not inst:
+                            return Response({"detail": "Installment not found for this agreement."}, status=400)
+                    else:
+                        # fallback (initial downpayment)
+                        inst = inst_qs.first()
+
+                    if not inst:
+                        return Response({"detail": "BNPL schedule missing."}, status=500)
+
+                    # ✅ prevent double pay
+                    if inst.is_settled:
+                        return Response({"detail": "Installment already settled."}, status=400)
+
+                    # ✅ optional: block paying before due date (your policy)
+                    if inst.due_at and inst.due_at > timezone.now():
+                        return Response({"detail": "Installment is not due yet."}, status=400)
+
+                    inst.mark_captured(subscription_payment.amount)
+
+                    # 5) Clear cart items (same as your normal order flow)
+                    products = OrderItem.objects.filter(order=order).values_list("product", flat=True)
+                    CartItem.objects.filter(product__pk__in=list(products), cart__user=request.user).delete()
                     Cart.objects.filter(user=request.user).update(coupon=None)
 
+                    # 6) Coupon used_count handling (optional — but keep consistent with normal checkout)
                     if order.coupon_code:
                         coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
                         if coupon:
                             coupon.used_count = coupon.used_count + 1
-
                             coupon.save()
+            elif invoice_type.invoice_type == "subscription":
+                inv = subscription_payment.invoice
 
-            elif invoice_type.object_type == "bnpl":
-                order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=request.user)
-                if not order or order is False:
-                    return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
+                # 1) Resolve student_id (single student invoice)
+                student_id = None
+                if invoice_type.object_type == "student" and invoice_type.object_id:
+                    try:
+                        student_id = int(invoice_type.object_id)
+                    except (TypeError, ValueError):
+                        student_id = None
 
-                # 1) Mark order as paid OR keep pending + bnpl flag (your call)
-                order.status = "paid"
-                order.save(update_fields=["status"])
-                order.reduce_stock()
-                # 2) Create / ensure BNPLAgreement exists
-                agreement = getattr(order, "bnpl_agreement", None)
-                if agreement is None:
-                    # You MUST know what plan was chosen.
-                    # Ideally you stored plan on the order at create-order time.
-                    # Example: store chosen plan id in order.notes or a dedicated field.
-                    plan_id = invoice_type.meta.get('bnpl_plan_id')
-                    plan = BNPLPlanTemplate.objects.filter(id=plan_id, active=True).first()
-                    if not plan:
-                        return Response({"detail": "BNPL plan missing for this order."}, status=400)
+                if not student_id:
+                    student_id = (inv.meta or {}).get("student_id")
 
-                    agreement = BNPLAgreement.objects.create(
-                        order=order,
-                        plan=plan,
-                        provider=plan.provider,
-                        status=BNPLAgreement.Status.PENDING,
+                if not student_id:
+                    return Response({"detail": "student_id missing for this subscription invoice."}, status=400)
 
-                        num_installments=plan.num_installments,
-                        interval_days=plan.interval_days,
-                        take_downpayment_now=plan.take_downpayment_now,
+                student = (
+                    StudentProfile.objects
+                    .select_related("user", "organization")
+                    .filter(id=student_id, organization=parent_profile.organization)
+                    .first()
+                )
+                if not student:
+                    return Response({"detail": "Student not found or not in your organization."}, status=404)
 
-                        currency=plan.currency or "NGN",
-                        principal_amount=order.grand_total,
-                        customer_fee_flat=plan.customer_fee_flat,
-                        customer_fee_rate=plan.customer_fee_rate,
-                        total_amount=order.grand_total,  # or principal + fee if that’s your design
+                # 2) Resolve plan
+                plan = None
+                if inv.user_subscription_id:
+                    plan = inv.user_subscription.plan
+                elif (inv.meta or {}).get("plan_id"):
+                    plan = SubscriptionPlan.objects.filter(id=inv.meta["plan_id"]).first()
+                elif inv.subscription and getattr(inv.subscription, "plan", None):
+                    plan = inv.subscription.plan
 
-                        provider_checkout_id=subscription_payment.reference,  # optional mapping
+                if not plan:
+                    return Response({"detail": "Subscription plan not found for this invoice."}, status=400)
+
+                # 3) Ensure a user subscription exists and is linked to invoice
+                user_sub = inv.user_subscription
+                if not user_sub:
+                    user_sub = (
+                        UserAccountSubscription.objects
+                        .filter(organization=student.organization, user=student.user)
+                        .order_by("-start_at")
+                        .first()
                     )
+                    if not user_sub:
+                        user_sub = UserAccountSubscription.objects.create(
+                            organization=student.organization,
+                            user=student.user,
+                            plan=plan,
+                            status=UserAccountSubscription.Status.PAST_DUE,
+                            billed_to_parent=parent_profile,
+                            amount=Decimal(getattr(plan, "price", 0) or 0),
+                            currency=inv.currency or "NGN",
+                            meta={"created_by": "confirm_payment_fallback", "invoice_id": inv.id},
+                        )
 
-                # 3) Initialize schedule if not already created
-                if not agreement.installments.exists():
-                    agreement.initialize_schedule()
+                    inv.user_subscription = user_sub
+                    inv.save(update_fields=["user_subscription"])
 
-                # 4) Mark installment #1 as captured using the paid amount
-                # The payment amount is subscription_payment.amount (invoice.amount)
-                meta = invoice_type.meta or {}
-                installment_id = meta.get("installment_id")
+                # Optional: enforce billing ownership (nice safety)
+                if user_sub.billed_to_parent_id is None:
+                    user_sub.billed_to_parent = parent_profile
+                    user_sub.save(update_fields=["billed_to_parent", "updated_at"])
 
-                inst_qs = agreement.installments.order_by("index")
+                # 4) Activate/extend subscription NOW THAT PAYMENT SUCCEEDED
+                activate_user_subscription_from_paid_invoice(
+                    user_sub,
+                    plan=plan,
+                    paid_at=subscription_payment.paid_at or timezone.now(),
+                    currency=inv.currency or "NGN",
+                )
 
-                if installment_id:
-                    inst = inst_qs.filter(id=installment_id).first()
-                    if not inst:
-                        return Response({"detail": "Installment not found for this agreement."}, status=400)
-                else:
-                    # fallback (initial downpayment)
-                    inst = inst_qs.first()
-
-                if not inst:
-                    return Response({"detail": "BNPL schedule missing."}, status=500)
-
-                # ✅ prevent double pay
-                if inst.is_settled:
-                    return Response({"detail": "Installment already settled."}, status=400)
-
-                # ✅ optional: block paying before due date (your policy)
-                if inst.due_at and inst.due_at > timezone.now():
-                    return Response({"detail": "Installment is not due yet."}, status=400)
-
-                inst.mark_captured(subscription_payment.amount)
-
-                # 5) Clear cart items (same as your normal order flow)
-                products = OrderItem.objects.filter(order=order).values_list("product", flat=True)
-                CartItem.objects.filter(product__pk__in=list(products), cart__user=request.user).delete()
-                Cart.objects.filter(user=request.user).update(coupon=None)
-
-                # 6) Coupon used_count handling (optional — but keep consistent with normal checkout)
-                if order.coupon_code:
-                    coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
-                    if coupon:
-                        coupon.used_count = coupon.used_count + 1
-                        coupon.save()
+        except Exception as e:
+            print(e)
+            return Response({"status":"failed", "message":f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        return Response({"status":"success"}, status=status.HTTP_200_OK)
 
     except Exception as e:
         print(e)
-        return Response({"status":"failed", "message":f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    return Response({"status":"success"}, status=status.HTTP_200_OK)
-
-
+    return Response({"detail": f"Error {e}."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])

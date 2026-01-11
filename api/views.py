@@ -56,13 +56,14 @@ from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.db.models import Subquery
 from rest_framework.permissions import IsAuthenticated
+from billing.services.subscription_checks import student_subscription_status
 
 
-# ...your other imports
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([])
 def login_view(request):
+    
     email = request.data.get("email") or request.data.get("username")  # accept either key during rollout
     password = request.data.get("password")
     hours_valid = int(request.data.get("hours_valid") or 24)
@@ -71,8 +72,23 @@ def login_view(request):
         return Response({"detail": "email and password are required."}, status=status.HTTP_400_BAD_REQUEST)
 
     user = authenticate(request, email=email, password=password)  # <— key change
+
     if not user:
-        return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response({"detail": "invalid_credentials", "code":"invalid_credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if getattr(user, "student_profile", None):
+        res = student_subscription_status(user.student_profile)
+        if res["ok"] is False:
+            # stable machine-readable code + human message
+            return Response(
+                {
+                    "code": str(res.get("reason", "access_denied")).upper(),  # e.g. PAST_DUE
+                    "detail": res.get("message", "Access denied."),
+                    "subscription_id": res.get("subscription_id"),
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
 
     st = SessionToken.create_for_user(user, hours_valid=hours_valid, ip=request.META.get("REMOTE_ADDR"))
     return Response({"sessionToken": st.key, "expiresAt": st.expires_at.isoformat(), "userId": user.id})
