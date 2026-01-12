@@ -24,6 +24,7 @@ from django.db.models import (
     Value,
     FloatField,
     Exists,
+    Max
 )
 from django.db.models.functions import Coalesce, Extract
 from django.db.utils import DataError
@@ -1631,60 +1632,49 @@ def duplicate_test(request, test_id: int):
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
 def add_question(request, test_id: int):
-    """
-    Add a new question to a test.
-    
-    Expected JSON body:
-    {
-        "type": "single-choice",
-        "question": "What is 2+2?",
-        "options": ["3", "4", "5", "6"],
-        "correctAnswer": 1,
-        "points": 2,
-        "explanation": "Basic math",
-        "difficulty": "Easy"
-    }
-    """
     try:
         user = request.user
         teacher = _get_teacher_for_user(user)
         if not teacher:
             return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
 
+        # ✅ lock the test row to avoid concurrent inserts choosing same order
         try:
-            test = Test.objects.get(id=test_id, course__teacher=teacher)
+            test = (
+                Test.objects
+                .select_for_update()
+                .get(id=test_id, course__teacher=teacher)
+            )
         except Test.DoesNotExist:
             return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
-        
+
         data = request.data or {}
-        
-        # Validate required fields
-        question_text = data.get('question', '').strip()
+
+        question_text = data.get("question", "").strip()
         if not question_text:
             return Response({"detail": "Question text is required."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        question_type = data.get('type', 'single-choice')
-        points = max(1, int(data.get('points', 1)))
-        
-        # Map frontend types to backend types
+
+        question_type = data.get("type", "single-choice")
+        points = max(1, int(data.get("points", 1)))
+
         type_mapping = {
-            'single-choice': 'scq',
-            'true-false': 'tf',
-            'short-answer': 'short',
-            'essay': 'essay'
+            "single-choice": "scq",
+            "true-false": "tf",
+            "short-answer": "short",
+            "essay": "essay"
         }
-        qtype = type_mapping.get(question_type, 'scq')
-        
-        # Get next order
-        max_order = test.questions.aggregate(max_order=Count('order'))['max_order'] or 0
+        qtype = type_mapping.get(question_type, "scq")
+
+        # ✅ correct way
+        max_order = test.questions.aggregate(m=Max("order"))["m"] or 0
         order = max_order + 1
-        
-        # Create question
+
         question = Question.objects.create(
             test=test,
             order=order,
@@ -1692,53 +1682,48 @@ def add_question(request, test_id: int):
             body=question_text,
             points=points,
             meta={
-                'explanation': data.get('explanation', ''),
-                'difficulty': data.get('difficulty', 'Medium')
-            }
+                "explanation": data.get("explanation", ""),
+                "difficulty": data.get("difficulty", "Medium"),
+            },
         )
 
         question.test.update_total_marks()
-        
-        # Create choices if provided
-        options = data.get('options', [])
-        correct_answer = data.get('correctAnswer')
-        
-        if options and question_type in ['single-choice', 'true-false']:
+
+        options = data.get("options", [])
+        correct_answer = data.get("correctAnswer")
+
+        if options and question_type in ["single-choice", "true-false"]:
             for i, option_text in enumerate(options):
                 is_correct = False
-                if question_type == 'true-false':
-                    is_correct = (option_text.lower() == 'true' and correct_answer is True) or \
-                                (option_text.lower() == 'false' and correct_answer is False)
-                elif question_type == 'single-choice' and isinstance(correct_answer, int):
+                if question_type == "true-false":
+                    is_correct = (option_text.lower() == "true" and correct_answer is True) or \
+                                 (option_text.lower() == "false" and correct_answer is False)
+                elif question_type == "single-choice" and isinstance(correct_answer, int):
                     is_correct = (i == correct_answer)
-                
+
                 Choice.objects.create(
                     question=question,
                     order=i + 1,
                     text=option_text,
                     is_correct=is_correct
                 )
-        elif question_type in ['short-answer', 'essay'] and correct_answer:
-            # Store correct answer in meta for text questions
-            question.meta['correct_answer'] = correct_answer
+
+        elif question_type in ["short-answer", "essay"] and correct_answer:
+            question.meta["correct_answer"] = correct_answer
             question.save()
-        
+
         serialized_question = _serialize_question(question)
-        
-        return Response({
-            "question": serialized_question,
-            "message": "Question added successfully."
-        }, status=status.HTTP_201_CREATED)
-        
+
+        return Response(
+            {"question": serialized_question, "message": "Question added successfully."},
+            status=status.HTTP_201_CREATED
+        )
+
     except Exception as e:
-        payload = {
-            "detail": "Error adding question.",
-            "error": f"{type(e).__name__}: {e}",
-        }
+        payload = {"detail": "Error adding question.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @api_view(["PUT", "PATCH"])
 @permission_classes([HasAPIKey])
@@ -1841,7 +1826,7 @@ def delete_question(request, test_id: int, question_id: int):
                 test_id=test_id,
                 test__course__teacher=teacher
             )
-            test = question
+            test = question.test
         except Question.DoesNotExist:
             return Response({"detail": "Question not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
         
