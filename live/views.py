@@ -17,7 +17,7 @@ from academics.models import TeacherProfile  # adjust if needed
 from learning.models import Course,Enrollment
 from core.utils import _get_teacher_for_user, _get_student_for_user
 from api.permissions import RequiresActiveStudentSubscription
-
+from texagonbackend.settings import FRONTEND_ORIGIN
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
@@ -109,6 +109,7 @@ def create_live_session(request):
             # allow null -> {}
             meta = {}
 
+        join_url = f"{FRONTEND_ORIGIN}/{join_url}"
         # create the LiveSession; host should be the authenticated teacher
         live_session = LiveSession.objects.create(
             course=course,

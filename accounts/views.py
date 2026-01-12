@@ -1421,12 +1421,16 @@ def parent_overview(request):
         # Enrollment counts per student
         enrollments_qs = Enrollment.objects.filter(student__in=students)
         active_counts = (
-            enrollments_qs.filter(status=Enrollment.Status.ACTIVE)
+            enrollments_qs.filter(status=Enrollment.Status.ACTIVE,
+            course__course_type="public"
+            )
             .values("student_id")
             .annotate(c=Count("id"))
         )
         completed_counts = (
-            enrollments_qs.filter(status=Enrollment.Status.COMPLETED)
+            enrollments_qs.filter(status=Enrollment.Status.COMPLETED,
+            course__course_type="public"
+            )
             .values("student_id")
             .annotate(c=Count("id"))
         )
@@ -1436,7 +1440,7 @@ def parent_overview(request):
 
         # Average test score per student (graded)
         avg_scores = (
-            TestAttempt.objects.filter(student__in=students, status="graded")
+            TestAttempt.objects.filter(student__in=students, status="submitted")
             .values("student_id")
             .annotate(avg=Avg("score"))
         )
@@ -1594,7 +1598,6 @@ def parent_overview(request):
                 # "totalRewards" now means badges + achievements (not “weekly hours” related).
                 "totalRewards": int(badge_count + achievement_count),
             }
-
             children_data.append(child_data)
 
         # --- Family stats (no study-hours) ---
@@ -2229,7 +2232,7 @@ def get_children_progress(request):
             # Completed courses (keep as-is, or also restrict; this is your original meaning)
             courses_completed = Enrollment.objects.filter(
                 student=student,
-                status=Enrollment.Status.COMPLETED,
+                status=Enrollment.Status.COMPLETED
             ).count()
 
             try:
