@@ -43,6 +43,9 @@ from core.utils import _month_bounds, _resolve_org, get_object_or_404_ajax
 from api.permissions import RequiresActiveStudentSubscription
 from .utils import available_certificates_qs
 
+from billing.services.subscription_invoicing import generate_parent_children_subscription_invoices
+
+
 def create_admin(request):
     try:
         email = "sirkays"
@@ -354,6 +357,113 @@ def verify_email_view(request):
         if not user.is_active:
             user.is_active = True
             user.save(update_fields=["is_active"])
+        try:
+            if request.user != user:
+                student_profile = get_object_or_404_ajax(StudentProfile, user=user)
+                if student_profile and getattr(request.user, "parent_profile"):
+                    parent_profile = request.user.parent_profile
+                    if getattr(parent_profile, "organization") and request.user.primary_org:
+                        student_profile.organization =  request.user.primary_org
+                        student_profile.save()
+
+                        generate_parent_children_subscription_invoices(
+                            org_id=request.user.primary_org.id,
+                            now=timezone.now(),
+                            dry_run=False,
+                            user=request.user,
+                        )
+        except Exception as e:
+            print(e)
+
+    return Response(
+        {
+            "userId": user.id,
+            "email": user.email,
+            "emailVerified": True,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])  # API key only
+def verify_email_view_authenticated(request):
+    """
+    Verify a user's email address using an OTP.
+
+    Request body:
+    {
+        "email": "teacher@example.com",
+        "code": "123456"   # or "otp"
+    }
+    """
+    email = request.data.get("email")
+    code = request.data.get("code") or request.data.get("otp")
+
+    if not email or not code:
+        return Response(
+            {"detail": "email and code are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        # Avoid leaking which emails exist
+        return Response(
+            {"detail": "Invalid email or code."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Get latest matching OTP that is not used yet
+    otp = (
+        EmailOTP.objects
+        .filter(user=user, code=code, used=False)
+        .order_by("-created_at")
+        .first()
+    )
+
+    if not otp:
+        return Response(
+            {"detail": "Invalid email or code."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Check expiry
+    if otp.expires_at < timezone.now():
+        return Response(
+            {"detail": "This code has expired."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Mark OTP as used and activate the user
+    with transaction.atomic():
+        otp.used = True
+        otp.save(update_fields=["used"])
+
+        if not user.is_active:
+            user.is_active = True
+            user.save(update_fields=["is_active"])
+        try:
+            print(request.user, " user accounts ",request.user.parent_profile, " student ", user)
+            if request.user != user:
+                student_profile = get_object_or_404_ajax(StudentProfile, user=user)
+                print(student_profile, " student_profile ")
+                if student_profile and getattr(request.user, "parent_profile"):
+                    parent_profile = request.user.parent_profile
+                    if getattr(parent_profile, "organization") and request.user.primary_org:
+                        student_profile.organization =  request.user.primary_org
+                        student_profile.save()
+
+                        generate_parent_children_subscription_invoices(
+                            org_id=request.user.primary_org.id,
+                            now=timezone.now(),
+                            dry_run=False,
+                            user=request.user,
+                        )
+        except Exception as e:
+            print(e)
 
     return Response(
         {
@@ -2351,9 +2461,10 @@ def get_children_progress(request):
                 and parent_profile.organization_subscription.status == "active"
             ):
                 subscription_status = "Premium"
-
+            parent_profile_id = parent_profile.id
             child_data = {
                 "id": student.id,
+                "parent_profile_id":parent_profile_id,
                 "name": student_user.get_full_name() or student_user.email,
                 "age": age,
                 "grade": student.current_classroom.name if student.current_classroom else "Not Assigned",

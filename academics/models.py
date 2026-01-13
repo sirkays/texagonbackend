@@ -136,7 +136,6 @@ class ParentProfile(TimeStampedModel):
             defaults={"is_active": True}
         )
         # Note: get_or_create honors the unique_together ("user","organization","role")
-        print(iterations, " iterations ",max_iterations)
         while iterations < max_iterations and next_due <= now:
             #if sub_end_datetime and next_due > sub_end_datetime:
                 #break

@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.db.models import Q, Count
-from .models import AdminAccess, User
+from .models import AdminAccess, User,EmailOTP
 from django import forms
 from orgs.models import Organization
 
@@ -29,4 +29,6 @@ class UserAdmin(BaseUserAdmin):
     )
 
 admin.site.register(AdminAccess)
+
+admin.site.register(EmailOTP)
 

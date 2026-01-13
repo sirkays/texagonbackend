@@ -193,6 +193,7 @@ def generate_parent_children_subscription_invoices(
     due_in_days: int = 3,
     dry_run: bool = False,
     batch_size: int = 1000,
+    user=None
 ) -> GenerateResult:
     """
     Creates subscription invoices for each parent's children, based on ParentProfile.organization_subscription.plan.
@@ -213,14 +214,25 @@ def generate_parent_children_subscription_invoices(
     now = now or timezone.now()
 
     # --- parents with active org subscription ---
-    parents_qs = (
-        ParentProfile.objects
-        .select_related("organization", "organization_subscription__plan", "user")
-        .filter(
-            organization_subscription__isnull=False,
-            organization_subscription__status=OrganizationSubscription.Status.ACTIVE,
+    if user:
+        parents_qs = (
+            ParentProfile.objects
+            .select_related("organization", "organization_subscription__plan", "user")
+            .filter(
+                user=user,
+                organization_subscription__isnull=False,
+                organization_subscription__status=OrganizationSubscription.Status.ACTIVE,
+            )
         )
-    )
+    else:
+        parents_qs = (
+            ParentProfile.objects
+            .select_related("organization", "organization_subscription__plan", "user")
+            .filter(
+                organization_subscription__isnull=False,
+                organization_subscription__status=OrganizationSubscription.Status.ACTIVE,
+            )
+        )
     if org_id:
         parents_qs = parents_qs.filter(organization_id=org_id)
 

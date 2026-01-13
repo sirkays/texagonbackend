@@ -434,7 +434,6 @@ def fetch_parent_invoices(request):
             else InvoiceType.Paytype.SUBSCRIPTION
         )
         full_name = inv.user_subscription.user.get_full_name() or "Student Name"
-        print(inv.number, " access")
         return {
             "student_name":full_name,
             "id": inv.pk,
