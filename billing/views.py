@@ -433,8 +433,10 @@ def fetch_parent_invoices(request):
             if inv_type_obj and inv_type_obj.invoice_type
             else InvoiceType.Paytype.SUBSCRIPTION
         )
-
+        full_name = inv.user_subscription.user.get_full_name() or "Student Name"
+        print(inv.number, " access")
         return {
+            "student_name":full_name,
             "id": inv.pk,
             "number": inv.number,
             "subscription_id": inv.subscription_id,

@@ -82,15 +82,6 @@ def _has_field(model, field: str) -> bool:
         return False
 
 
-def _difficulty_from_test(t: Test, q_count: int) -> str:
-    if _has_field(Test, "difficulty") and getattr(t, "difficulty", None):
-        return str(t.difficulty).title()
-    dur = int(getattr(t, "duration_minutes", 0) or 0)
-    if q_count >= 40 or dur >= 90:
-        return "Advanced"
-    if q_count <= 15 and dur <= 30:
-        return "Beginner"
-    return "Intermediate"
 
 
 def _type_from_test(t: Test, q_count: int) -> str:
@@ -262,107 +253,6 @@ def my_test_attempts(request):
         )
 
 
-@api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
-@authentication_classes([SessionTokenAuthentication])
-def available_tests_old(request):
-    """
-    List tests available to the current student (based on their enrollments).
-
-    Query params:
-      - include_past: '1' to include tests whose start_at is in the past (default excludes past-start)
-      - course: course id to filter
-      - debug: '1' to include traceback in error responses (dev only)
-    """
-    try:
-        user = request.user
-        student = _get_student_for_user(user)
-        if not student:
-            return Response({"tests": [], "detail": "No student profile found."}, status=status.HTTP_200_OK)
-
-        enrollments = (Enrollment.objects
-                       .filter(student=student)
-                       .select_related("course")
-                       .only("id", "course_id"))
-        course_ids = list(enrollments.values_list("course_id", flat=True))
-        if not course_ids:
-            return Response({"tests": []}, status=status.HTTP_200_OK)
-
-        qs = Test.objects.filter(course_id__in=course_ids)
-
-        # Optional: filter by course
-        course_filter = request.query_params.get("course")
-        if course_filter:
-            try:
-                qs = qs.filter(course_id=int(course_filter))
-            except ValueError:
-                pass
-
-        # Optional: exclude past-start tests if scheduled
-        include_past = request.query_params.get("include_past") in {"1", "true", "True"}
-        if _has_field(Test, "start_at") and not include_past:
-            now = timezone.now()
-            qs = qs.filter(Q(start_at__isnull=True) | Q(start_at__gte=now))
-
-        # ---- SAFE question counts (no fragile reverse name) ----
-        test_ids = list(qs.values_list("id", flat=True))
-        q_counts = (
-            Question.objects
-            .filter(test_id__in=test_ids)
-            .values("test_id")
-            .annotate(c=Count("id"))
-        )
-        count_map = {row["test_id"]: int(row["c"] or 0) for row in q_counts}
-
-        # Sorting
-        if _has_field(Test, "start_at"):
-            qs = qs.order_by("start_at", "-id")
-        else:
-            qs = qs.order_by("-id")
-
-        items: List[Dict[str, Any]] = []
-        for t in qs.select_related("course"):
-            q_count = count_map.get(t.id, 0)
-
-            # Human id for the UI
-            if _has_field(Test, "slug") and getattr(t, "slug", None):
-                id_str = t.slug
-            else:
-                id_str = f"test-{t.pk}"
-
-            description = None
-            if _has_field(Test, "description"):
-                description = getattr(t, "description", None)
-            if not description:
-                cname = getattr(getattr(t, "course", None), "name", None)
-                description = f"Assessment for {cname}" if cname else "Assessment"
-
-            items.append({
-                "id": id_str,
-                "pk": t.pk,  # raw pk for later submit
-                "title": getattr(t, "title", f"Test #{t.pk}"),
-                "questions": q_count,
-                "duration": _label_duration(t),
-                "difficulty": _difficulty_from_test(t, q_count),
-                "description": description,
-                "type": _type_from_test(t, q_count),                 # "quiz" | "exam"
-                "requiresSubscription": _requires_subscription(t),   # boolean
-                "course": getattr(getattr(t, "course", None), "name", None),
-                "startsAt": getattr(t, "start_at", None).isoformat() if _has_field(Test, "start_at") and getattr(t, "start_at", None) else None,
-                "endsAt": getattr(t, "end_at", None).isoformat() if _has_field(Test, "end_at") and getattr(t, "end_at", None) else None,
-            })
-
-        return Response({"tests": items}, status=status.HTTP_200_OK)
-
-    except Exception as e:
-        # Return a helpful error payload; include traceback if debug flag or DEBUG=True
-        payload = {
-            "detail": "Error while fetching available tests.",
-            "error": f"{type(e).__name__}: {e}",
-        }
-        if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
-            payload["traceback"] = traceback.format_exc()
-        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["POST"])
@@ -523,8 +413,8 @@ def available_tests(request):
                 id_str = f"test-{t.pk}"
 
             description = None
-            if _has_field(Test, "description"):
-                description = getattr(t, "description", None)
+            if _has_field(Test, "instructions"):
+                description = getattr(t, "instructions", None)
             if not description:
                 cname = getattr(getattr(t, "course", None), "name", None)
                 description = f"Assessment for {cname}" if cname else "Assessment"
@@ -555,14 +445,14 @@ def available_tests(request):
                         except Exception:
                             pass
                 questions_out.append(q_out)
-
+            difficulty = t.settings.get('difficulty', 'Medium')
             items.append({
                 "id": id_str,
                 "pk": t.pk,
                 "title": getattr(t, "title", f"Test #{t.pk}"),
                 "questions": q_count,
                 "duration": _label_duration(t),
-                "difficulty": _difficulty_from_test(t, q_count),
+                "difficulty": difficulty,
                 "description": description,
                 "type": _type_from_test(t, q_count),
                 "requiresSubscription": _requires_subscription(t),
