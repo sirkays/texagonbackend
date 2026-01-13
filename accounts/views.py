@@ -194,10 +194,13 @@ def create_account_view(request):
                 except ParentProfile.DoesNotExist:
                     raise ValidationError({"detail": "Invalid parent_profile_id"})
 
+                dob = request.data.get("dob")
                 student_profile = StudentProfile.objects.create(
                     user=user,
                     admission_no=request.data.get("admission_no", ""),
+                    dob=dob,  # ✅ add this (ensure StudentProfile has dob field)
                 )
+
 
                 ParentChildLink.objects.create(
                     parent=parent_profile,
@@ -437,7 +440,7 @@ def verify_email_view_authenticated(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Mark OTP as used and activate the user
+    # # Mark OTP as used and activate the user
     with transaction.atomic():
         otp.used = True
         otp.save(update_fields=["used"])
@@ -445,25 +448,32 @@ def verify_email_view_authenticated(request):
         if not user.is_active:
             user.is_active = True
             user.save(update_fields=["is_active"])
-        try:
-            print(request.user, " user accounts ",request.user.parent_profile, " student ", user)
-            if request.user != user:
-                student_profile = get_object_or_404_ajax(StudentProfile, user=user)
-                print(student_profile, " student_profile ")
-                if student_profile and getattr(request.user, "parent_profile"):
-                    parent_profile = request.user.parent_profile
-                    if getattr(parent_profile, "organization") and request.user.primary_org:
-                        student_profile.organization =  request.user.primary_org
-                        student_profile.save()
+    try:
+        if request.user != user:
+            student_profile = get_object_or_404_ajax(StudentProfile, user=user)
+            if student_profile and getattr(request.user, "parent_profile"):
+                parent_profile = request.user.parent_profile
+                if getattr(parent_profile, "organization") and request.user.primary_org:
+                    student_profile.organization =  request.user.primary_org
+                    student_profile.save()
 
-                        generate_parent_children_subscription_invoices(
-                            org_id=request.user.primary_org.id,
-                            now=timezone.now(),
-                            dry_run=False,
-                            user=request.user,
-                        )
-        except Exception as e:
-            print(e)
+                    user.primary_org = request.user.primary_org
+                    user.save()
+
+                    OrganizationMembership.objects.get_or_create(
+                        user=user,
+                        organization= request.user.primary_org,
+                        role="student",
+
+                    )
+                    generate_parent_children_subscription_invoices(
+                        org_id=request.user.primary_org.id,
+                        now=timezone.now(),
+                        dry_run=False,
+                        user=request.user,
+                    )
+    except Exception as e:
+        print(e)
 
     return Response(
         {
@@ -2270,7 +2280,6 @@ def get_children_progress(request):
                 "student__organization",
             )
             .filter(parent=parent_profile)
-            .filter(student__enrollments__status__in=allowed_statuses)
             .distinct()
         )
 
