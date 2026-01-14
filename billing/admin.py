@@ -170,14 +170,6 @@ class SubscriptionInvoiceAdmin(admin.ModelAdmin):
     list_select_related = ("subscription", "subscription__organization", "subscription__plan", "organization_membership")
 
 
-@admin.register(SubscriptionPayment)
-class SubscriptionPaymentAdmin(admin.ModelAdmin):
-    list_display = ("invoice", "provider", "reference", "amount", "currency", "method", "status", "paid_at", "transaction_id", "created_at")
-    list_filter = ("provider", "currency", "status", "method", "paid_at")
-    search_fields = ("reference", "invoice__number", "transaction_id")
-    autocomplete_fields = ("invoice",)
-    list_select_related = ("invoice",)
-
 
 # ---------- Complaints ----------
 
