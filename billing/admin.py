@@ -50,9 +50,88 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
 class SubscriptionPaymentInline(admin.TabularInline):
     model = SubscriptionPayment
     extra = 0
-    fields = ("provider", "reference", "amount", "currency", "method", "status", "paid_at")
+    fields = (
+        "provider",
+        "reference",
+        "amount",
+        "currency",
+        "method",
+        "status",
+        "paid_at",
+    )
     readonly_fields = ("paid_at",)
     autocomplete_fields = ("invoice",)
+    show_change_link = True
+
+
+@admin.register(SubscriptionPayment)
+class SubscriptionPaymentAdmin(admin.ModelAdmin):
+    list_display = (
+        "reference",
+        "provider",
+        "amount",
+        "currency",
+        "status",
+        "invoice",
+        "paid_at",
+    )
+    list_filter = (
+        "provider",
+        "status",
+        "currency",
+        "paid_at",
+    )
+    search_fields = (
+        "reference",
+        "transaction_id",
+        "provider_status",
+        "invoice__id",
+    )
+    readonly_fields = (
+        "paid_at",
+        "last_verified_at",
+    )
+    autocomplete_fields = ("invoice",)
+    ordering = ("-paid_at",)
+
+    fieldsets = (
+        (
+            "Payment Info",
+            {
+                "fields": (
+                    "invoice",
+                    "provider",
+                    "status",
+                    "amount",
+                    "currency",
+                    "method",
+                )
+            },
+        ),
+        (
+            "Provider Details",
+            {
+                "fields": (
+                    "reference",
+                    "transaction_id",
+                    "provider_status",
+                    "provider_event",
+                    "redirect_url",
+                )
+            },
+        ),
+        (
+            "Metadata & Timestamps",
+            {
+                "fields": (
+                    "meta",
+                    "paid_at",
+                    "last_verified_at",
+                )
+            },
+        ),
+    )
+
 
 
 @admin.register(OrganizationSubscription)

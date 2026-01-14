@@ -156,8 +156,60 @@ def create_account_view(request):
         return Response({"detail": "Invalid account_type"}, status=400)
 
     # ✅ clean "already exists" check
-    if User.objects.filter(email=email).exists():
-        return Response({"detail": "A user with this email already exists."}, status=400)
+    existing_user = User.objects.filter(email=email).first()
+    if existing_user:
+        # 1) active => always in use
+        if existing_user.is_active:
+            return Response({"detail": "Email already in use."}, status=400)
+
+        # 2) inactive: allow ONLY if student is linked to same parent
+        if account_type == "student":
+            parent_profile_id = request.data.get("parent_profile_id")
+            if not parent_profile_id:
+                return Response({"detail": "parent_profile_id is required"}, status=400)
+
+            # must be a student profile
+            student_profile = StudentProfile.objects.filter(user=existing_user).first()
+            if not student_profile:
+                return Response({"detail": "Email already in use."}, status=400)
+
+            linked = ParentChildLink.objects.filter(
+                parent_id=parent_profile_id,
+                student=student_profile,
+            ).exists()
+
+            if not linked:
+                return Response({"detail": "Email already in use."}, status=400)
+
+            # ✅ same parent + inactive student => resend OTP and return "proceed to verification"
+            otp = EmailOTP.create_for_user(existing_user, minutes_valid=10)
+            try:
+                send_mail(
+                    subject="Verify your email",
+                    message=f"Your OTP is {otp.code}",
+                    from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+                    recipient_list=[existing_user.email],
+                    fail_silently=False,
+                )
+            except Exception as e:
+                return Response({"detail": "Failed to send email", "error": str(e)}, status=500)
+
+            return Response(
+                {
+                    "detail": "Account already created. Please verify email with OTP.",
+                    "userId": existing_user.id,
+                    "email": existing_user.email,
+                    "accountType": "student",
+                    "studentProfileId": student_profile.id,
+                    "existing_inactive": True,     # ✅ frontend can use this
+                    "otp_sent": True,
+                },
+                status=200,
+            )
+
+        # for parent/teacher inactive accounts => still block
+        return Response({"detail": "Email already in use."}, status=400)
+
 
     user = None
     parent_profile = None
@@ -243,11 +295,11 @@ def create_account_view(request):
         return Response({"detail": "A user with this email already exists."}, status=400)
 
     except ValidationError as e:
-        # e can be dict-like or string; normalize
-        return Response(
-            e.message_dict if hasattr(e, "message_dict") else {"detail": str(e)},
-            status=400,
-        )
+        if hasattr(e, "message_dict"):
+            # flatten common shapes
+            detail = e.message_dict.get("detail") or e.message_dict
+            return Response({"detail": detail}, status=400)
+        return Response({"detail": str(e)}, status=400)
 
     except Exception as e:
         return Response({"detail": "Server error", "error": str(e)}, status=500)
@@ -2279,7 +2331,7 @@ def get_children_progress(request):
                 "student__current_classroom",
                 "student__organization",
             )
-            .filter(parent=parent_profile)
+            .filter(parent=parent_profile, student__user__is_active=True)
             .distinct()
         )
 
@@ -2471,6 +2523,9 @@ def get_children_progress(request):
             ):
                 subscription_status = "Premium"
             parent_profile_id = parent_profile.id
+            last_login = "Not Known"
+            if student.user.last_login:
+                last_login = student.user.last_login.strftime("%Y-%m-%d")
             child_data = {
                 "id": student.id,
                 "parent_profile_id":parent_profile_id,
@@ -2482,7 +2537,7 @@ def get_children_progress(request):
                 "email": student_user.email,
                 "status": "Active" if is_active else "Suspended",
                 "subscription": subscription_status,
-                "lastActive": "Never",
+                "lastActive": last_login,
                 "joinDate": student.created_at.strftime("%Y-%m-%d"),
                 "totalCourses": Enrollment.objects.filter(student=student).count(),
                 "completedCourses": Enrollment.objects.filter(

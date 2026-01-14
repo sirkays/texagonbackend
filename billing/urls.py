@@ -7,7 +7,8 @@ from .views import (update_subscription_payment,create_subscription_payment,fetc
     add_complaint_response,
     update_complaint,
     delete_complaint_attachment,
-    add_complaint_attachments
+    add_complaint_attachments,
+    flutterwave_webhook
 )
 
 urlpatterns = [
@@ -31,6 +32,8 @@ urlpatterns = [
 
     path("api/complaints/<uuid:complaint_id>/attachments/<uuid:attachment_id>/", delete_complaint_attachment, 
     name="delete-complaint-attachment"),
+
+    path("api/payment/webhook/", flutterwave_webhook, name="flutterwave_webhook"),
     
     # urls.py
 

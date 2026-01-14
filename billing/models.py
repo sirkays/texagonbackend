@@ -117,9 +117,11 @@ class SubscriptionPayment(TimeStampedModel):
     class Status(models.TextChoices):
         SUCCESS = "success", "success"
         FAILED = "failed", "failed"
-        CANCELLED = "cancelled", "Cancelled"
+        CANCELLED = "cancelled", "cancelled"
         INPROGRESS = "inprogress", "inprogress"
         CREATED = "created", "created"
+        ERROR = "error", "error"              # ✅ network/verify errors
+        UNKNOWN = "unknown", "unknown"        # ✅ any unrecognized provider status
 
     invoice = models.ForeignKey(
         SubscriptionInvoice, on_delete=models.CASCADE, related_name="payments",
@@ -134,10 +136,19 @@ class SubscriptionPayment(TimeStampedModel):
     meta = models.JSONField(default=dict, blank=True)
     transaction_id = models.CharField(max_length=450, blank=True, null=True)
     redirect_url =  models.URLField(max_length=1250, blank=True, null=True)
+    provider_status = models.CharField(max_length=32, blank=True, null=True, db_index=True)
+    provider_event = models.CharField(max_length=64, blank=True, null=True)
+    last_verified_at = models.DateTimeField(blank=True, null=True)
 
-    def change_current_trans(self, status):
+    def change_current_trans(self, status, *, provider_status=None, meta_patch=None):
         self.status = status
         self.paid_at = timezone.now()
+        if provider_status is not None:
+            self.provider_status = provider_status
+        if meta_patch:
+            m = self.meta or {}
+            m.update(meta_patch)
+            self.meta = m
         self.save()
 
 

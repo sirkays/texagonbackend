@@ -177,6 +177,8 @@ MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 STATIC_ROOT = BASE_DIR / "static"
 
+FLW_SECRET_HASH = os.environ.get("FLW_SECRET_HASH", "")
+
 # Production
 if os.environ.get("LOCAL") == "0":
     STATIC_URL = "/static/"
