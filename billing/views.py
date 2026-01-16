@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal,Decimal, ROUND_HALF_UP, InvalidOperation
 from itertools import islice
 from django.db import models
-
+from rest_framework import status as drf_status
 from django.db import transaction
 from django.db.models import F, Q, Case, When, DateTimeField
 from django.shortcuts import get_object_or_404
@@ -393,133 +393,140 @@ def update_subscription_payment(request, reference):
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def fetch_parent_invoices(request):
-    """
-    GET /api/parent/invoices/?status=paid&invoice_type=subscription&search=Y0Y
+    try:
+        """
+        GET /api/parent/invoices/?status=paid&invoice_type=subscription&search=Y0Y
 
-    Filters:
-      - organization_membership == the parent's membership
-      - optional: ?status=<open,paid,void,uncollectible,active>
-      - optional: ?invoice_type=<tutor,subscription>
-      - optional: ?search=<string>  (searches invoice number + invoice type info)
-    """
-    user = getattr(request, "user", None)
-    if not user or not user.is_authenticated:
-        return Response(
-            {"detail": "Invalid or missing session token."},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-
-    parent_profile = getattr(user, "parent_profile", None)
-    if parent_profile is None:
-        return Response(
-            {"detail": "Parent profile not found for this user."},
-            status=status.HTTP_404_NOT_FOUND
-        )
-
-    membership = (
-        OrganizationMembership.objects
-        .filter(
-            user=user,
-            organization=parent_profile.organization,
-            role=OrganizationMembership.Role.PARENT,
-        )
-        .order_by("-id")
-        .first()
-    )
-    if not membership:
-        return Response(
-            {"detail": "Membership profile not found for this user."},
-            status=status.HTTP_404_NOT_FOUND
-        )
-
-    # -----------------------
-    # Optional filters
-    # -----------------------
-    status_param = (request.query_params.get("status") or "").strip()
-    if status_param:
-        valid_statuses = {choice[0] for choice in SubscriptionInvoice.Status.choices}
-        if status_param not in valid_statuses:
+        Filters:
+        - organization_membership == the parent's membership
+        - optional: ?status=<open,paid,void,uncollectible,active>
+        - optional: ?invoice_type=<tutor,subscription>
+        - optional: ?search=<string>  (searches invoice number + invoice type info)
+        """
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
             return Response(
-                {"detail": f"Invalid status '{status_param}'. Valid: {', '.join(sorted(valid_statuses))}"},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"detail": "Invalid or missing session token."},
+                status=status.HTTP_401_UNAUTHORIZED
             )
 
-    invoice_type_param = (request.query_params.get("invoice_type") or "").strip()
-    if invoice_type_param:
-        valid_types = {choice[0] for choice in InvoiceType.Paytype.choices}
-        if invoice_type_param not in valid_types:
+        parent_profile = getattr(user, "parent_profile", None)
+        if parent_profile is None:
             return Response(
-                {"detail": f"Invalid invoice_type '{invoice_type_param}'. Valid: {', '.join(sorted(valid_types))}"},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"detail": "Parent profile not found for this user."},
+                status=status.HTTP_404_NOT_FOUND
             )
 
-    search_param = (request.query_params.get("search") or "").strip()
-
-    # -----------------------
-    # Query
-    # -----------------------
-    qs = (
-        SubscriptionInvoice.objects
-        .select_related(
-            "subscription__organization",
-            "organization_membership",
-            "invoicetype",
+        membership = (
+            OrganizationMembership.objects
+            .filter(
+                user=user,
+                organization=parent_profile.organization,
+                role=OrganizationMembership.Role.PARENT,
+            )
+            .order_by("-id")
+            .first()
         )
-        .filter(organization_membership=membership)
-        .order_by("-issued_at")
-    )
+        if not membership:
+            return Response(
+                {"detail": "Membership profile not found for this user."},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-    if status_param:
-        qs = qs.filter(status=status_param)
+        # -----------------------
+        # Optional filters
+        # -----------------------
+        status_param = (request.query_params.get("status") or "").strip()
+        if status_param:
+            valid_statuses = {choice[0] for choice in SubscriptionInvoice.Status.choices}
+            if status_param not in valid_statuses:
+                return Response(
+                    {"detail": f"Invalid status '{status_param}'. Valid: {', '.join(sorted(valid_statuses))}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-    if invoice_type_param:
-        qs = qs.filter(invoicetype__invoice_type=invoice_type_param)
+        invoice_type_param = (request.query_params.get("invoice_type") or "").strip()
+        if invoice_type_param:
+            valid_types = {choice[0] for choice in InvoiceType.Paytype.choices}
+            if invoice_type_param not in valid_types:
+                return Response(
+                    {"detail": f"Invalid invoice_type '{invoice_type_param}'. Valid: {', '.join(sorted(valid_types))}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-    # ✅ Add search
-    if search_param:
-        # Keep search strict to avoid false matches
-        qs = qs.filter(
-            Q(number__icontains=search_param) |
-            Q(status__icontains=search_param) |
-            Q(invoicetype__invoice_type__icontains=search_param) |
-            Q(invoicetype__object_type__icontains=search_param) |
-            Q(invoicetype__object_id__isnull=False, invoicetype__object_id__icontains=search_param)
+        search_param = (request.query_params.get("search") or "").strip()
+
+        # -----------------------
+        # Query
+        # -----------------------
+        qs = (
+            SubscriptionInvoice.objects
+            .select_related(
+                "subscription__organization",
+                "organization_membership",
+                "invoicetype",
+            )
+            .filter(organization_membership=membership)
+            .order_by("-issued_at")
         )
 
-    # -----------------------
-    # Serializer
-    # -----------------------
-    def _serialize(inv: SubscriptionInvoice):
-        inv_type_obj = getattr(inv, "invoicetype", None)
+        if status_param:
+            qs = qs.filter(status=status_param)
 
-        invoice_type_value = (
-            inv_type_obj.invoice_type
-            if inv_type_obj and inv_type_obj.invoice_type
-            else InvoiceType.Paytype.SUBSCRIPTION
-        )
-        full_name = inv.user_subscription.user.get_full_name() or "Student Name"
-        return {
-            "student_name":full_name,
-            "id": inv.pk,
-            "number": inv.number,
-            "subscription_id": inv.subscription_id,
-            "organization_id": inv.subscription.organization_id if inv.subscription_id else None,
-            "organization_membership_id": inv.organization_membership_id,
-            "amount": str(inv.amount),
-            "currency": inv.currency,
-            "issued_at": inv.issued_at.isoformat() if inv.issued_at else None,
-            "due_at": inv.due_at.isoformat() if inv.due_at else None,
-            "status": inv.status,
-            "invoice_type": invoice_type_value,
-            "invoice_type_object_id": getattr(inv_type_obj, "object_id", None),
-            "invoice_type_object_type": getattr(inv_type_obj, "object_type", None),
-            "meta": inv.meta or {},
-            "created_at": getattr(inv, "created_at", None).isoformat() if getattr(inv, "created_at", None) else None,
-            "updated_at": getattr(inv, "updated_at", None).isoformat() if getattr(inv, "updated_at", None) else None,
-        }
+        if invoice_type_param:
+            qs = qs.filter(invoicetype__invoice_type=invoice_type_param)
 
-    data = [_serialize(inv) for inv in qs]
-    return Response({"count": len(data), "results": data}, status=status.HTTP_200_OK)
+        # ✅ Add search
+        if search_param:
+            # Keep search strict to avoid false matches
+            qs = qs.filter(
+                Q(number__icontains=search_param) |
+                Q(status__icontains=search_param) |
+                Q(invoicetype__invoice_type__icontains=search_param) |
+                Q(invoicetype__object_type__icontains=search_param) |
+                Q(invoicetype__object_id__isnull=False, invoicetype__object_id__icontains=search_param)
+            )
+
+        # -----------------------
+        # Serializer
+        # -----------------------
+        def _serialize(inv: SubscriptionInvoice):
+            inv_type_obj = getattr(inv, "invoicetype", None)
+
+            invoice_type_value = (
+                inv_type_obj.invoice_type
+                if inv_type_obj and inv_type_obj.invoice_type
+                else InvoiceType.Paytype.SUBSCRIPTION
+            )
+            if inv.user_subscription:
+                full_name = inv.user_subscription.user.get_full_name()
+            else:
+                full_name =  "Student Name"
+            return {
+                "student_name":full_name,
+                "id": inv.pk,
+                "number": inv.number,
+                "subscription_id": inv.subscription_id,
+                "organization_id": inv.subscription.organization_id if inv.subscription_id else None,
+                "organization_membership_id": inv.organization_membership_id,
+                "amount": str(inv.amount),
+                "currency": inv.currency,
+                "issued_at": inv.issued_at.isoformat() if inv.issued_at else None,
+                "due_at": inv.due_at.isoformat() if inv.due_at else None,
+                "status": inv.status,
+                "invoice_type": invoice_type_value,
+                "invoice_type_object_id": getattr(inv_type_obj, "object_id", None),
+                "invoice_type_object_type": getattr(inv_type_obj, "object_type", None),
+                "meta": inv.meta or {},
+                "created_at": getattr(inv, "created_at", None).isoformat() if getattr(inv, "created_at", None) else None,
+                "updated_at": getattr(inv, "updated_at", None).isoformat() if getattr(inv, "updated_at", None) else None,
+            }
+
+        data = [_serialize(inv) for inv in qs]
+        return Response({"count": len(data), "results": data}, status=status.HTTP_200_OK)
+    except Exception as e:
+        print(e)
+
 
 
 
@@ -528,288 +535,290 @@ def fetch_parent_invoices(request):
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
 def confirm_payment(request):
-    """
-    Confirms Flutterwave payment outcome and persists ALL statuses:
-    - redirect status (cancelled/successful/failed/...)
-    - verified status from Flutterwave verify endpoint (source of truth)
-    - stores raw payload in meta
-    - marks invoice paid only after business logic succeeds
-    """
-    user = getattr(request, "user", None)
-    if not user or not user.is_authenticated:
-        return Response({"detail": "Invalid or missing session token."}, status=drf_status.HTTP_401_UNAUTHORIZED)
-
-    parent_profile = getattr(user, "parent_profile", None)
-    if parent_profile is None:
-        return Response({"detail": "Parent profile not found for this user."}, status=drf_status.HTTP_404_NOT_FOUND)
-
-    tx_ref = (request.data.get("tx_ref") or "").strip()
-    transaction_id = (request.data.get("transaction_id") or "").strip()
-    invoice_id = (request.data.get("invoice_id") or "").strip()
-    redirect_status = (request.data.get("status") or "").strip().lower()
-
-    if not tx_ref or not invoice_id:
-        return Response({"detail": "tx_ref and invoice_id are required."}, status=drf_status.HTTP_400_BAD_REQUEST)
-
-    # Must belong to this user
-    subscription_payment = get_object_or_404_ajax(
-        SubscriptionPayment,
-        reference=tx_ref,
-        invoice__organization_membership__user=user,
-    )
-    inv = subscription_payment.invoice
-
-    # Persist redirect status (best-effort; even cancelled)
-    if redirect_status:
-        if hasattr(subscription_payment, "provider_status"):
-            subscription_payment.provider_status = redirect_status
-        _safe_meta_patch(subscription_payment, {
-            "redirect_status": redirect_status,
-            "redirect_received_at": timezone.now().isoformat(),
-        })
-        subscription_payment.save(update_fields=["meta"] + (["provider_status"] if hasattr(subscription_payment, "provider_status") else []))
-
-    # Invoice guard
-    if inv.number != invoice_id and str(inv.id) != invoice_id:
-        return Response({"detail": "Could not update payment, wrong invoice"}, status=drf_status.HTTP_400_BAD_REQUEST)
-
-    # Idempotent success
-    if subscription_payment.status == SubscriptionPayment.Status.SUCCESS:
-        return Response({"status": "success", "detail": "Already confirmed."}, status=drf_status.HTTP_200_OK)
-
-    # Cancelled without transaction_id -> finalize cancelled
-    if redirect_status in {"cancelled", "canceled"} and not transaction_id:
-        _mark_payment_status(
-            subscription_payment,
-            status=SubscriptionPayment.Status.CANCELLED,
-            provider_status=redirect_status,
-            meta_patch={"finalized_from": "redirect_cancelled"},
-        )
-        return Response({"status": "cancelled"}, status=drf_status.HTTP_200_OK)
-
-    # Missing transaction_id -> cannot verify
-    if not transaction_id:
-        _mark_payment_status(
-            subscription_payment,
-            status=SubscriptionPayment.Status.ERROR,
-            provider_status=redirect_status or None,
-            meta_patch={"error": "transaction_id missing"},
-        )
-        return Response({"detail": "transaction_id missing"}, status=drf_status.HTTP_400_BAD_REQUEST)
-
-    # Save transaction_id
-    subscription_payment.transaction_id = transaction_id
-    subscription_payment.save(update_fields=["transaction_id", "updated_at"] if hasattr(subscription_payment, "updated_at") else ["transaction_id"])
-
-    # --- Verify with Flutterwave ---
     try:
-        flw = confirm_transaction(transaction_id)  # use improved version: returns dict with ok/data/raw/error
-        flw_ok = bool(flw.get("ok"))
-        flw_data = flw.get("data") or {}
-        flw_top_status = (flw.get("status") or "").lower()
-        flw_status = (flw_data.get("status") or "").strip().lower()  # transaction outcome: successful/failed/pending/...
+        """
+        Confirms Flutterwave payment outcome and persists ALL statuses:
+        - redirect status (cancelled/successful/failed/...)
+        - verified status from Flutterwave verify endpoint (source of truth)
+        - stores raw payload in meta
+        - marks invoice paid only after business logic succeeds
+        """
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return Response({"detail": "Invalid or missing session token."}, status=drf_status.HTTP_401_UNAUTHORIZED)
 
-        _safe_meta_patch(subscription_payment, {
-            "verified_at": timezone.now().isoformat(),
-            "verify_ok": flw_ok,
-            "verify_top_status": flw_top_status,
-            "verify_message": flw.get("message"),
-            "verify_error": flw.get("error"),
-            "verify_payload": flw.get("raw") if "raw" in flw else flw,
-        })
+        parent_profile = getattr(user, "parent_profile", None)
+        if parent_profile is None:
+            return Response({"detail": "Parent profile not found for this user."}, status=drf_status.HTTP_404_NOT_FOUND)
 
-        if not flw_ok:
+        tx_ref = (request.data.get("tx_ref") or "").strip()
+        transaction_id = (request.data.get("transaction_id") or "").strip()
+        invoice_id = (request.data.get("invoice_id") or "").strip()
+        redirect_status = (request.data.get("status") or "").strip().lower()
+
+        if not tx_ref or not invoice_id:
+            return Response({"detail": "tx_ref and invoice_id are required."}, status=drf_status.HTTP_400_BAD_REQUEST)
+
+        # Must belong to this user
+        subscription_payment = get_object_or_404_ajax(
+            SubscriptionPayment,
+            reference=tx_ref,
+            invoice__organization_membership__user=user,
+        )
+        inv = subscription_payment.invoice
+
+        # Persist redirect status (best-effort; even cancelled)
+        if redirect_status:
+            if hasattr(subscription_payment, "provider_status"):
+                subscription_payment.provider_status = redirect_status
+            _safe_meta_patch(subscription_payment, {
+                "redirect_status": redirect_status,
+                "redirect_received_at": timezone.now().isoformat(),
+            })
+            subscription_payment.save(update_fields=["meta"] + (["provider_status"] if hasattr(subscription_payment, "provider_status") else []))
+
+        # Invoice guard
+        if inv.number != invoice_id and str(inv.id) != invoice_id:
+            return Response({"detail": "Could not update payment, wrong invoice"}, status=drf_status.HTTP_400_BAD_REQUEST)
+
+        # Idempotent success
+        if subscription_payment.status == SubscriptionPayment.Status.SUCCESS:
+            return Response({"status": "success", "detail": "Already confirmed."}, status=drf_status.HTTP_200_OK)
+
+        # Cancelled without transaction_id -> finalize cancelled
+        if redirect_status in {"cancelled", "canceled"} and not transaction_id:
+            _mark_payment_status(
+                subscription_payment,
+                status=SubscriptionPayment.Status.CANCELLED,
+                provider_status=redirect_status,
+                meta_patch={"finalized_from": "redirect_cancelled"},
+            )
+            return Response({"status": "cancelled"}, status=drf_status.HTTP_200_OK)
+
+        # Missing transaction_id -> cannot verify
+        if not transaction_id:
+            _mark_payment_status(
+                subscription_payment,
+                status=SubscriptionPayment.Status.ERROR,
+                provider_status=redirect_status or None,
+                meta_patch={"error": "transaction_id missing"},
+            )
+            return Response({"detail": "transaction_id missing"}, status=drf_status.HTTP_400_BAD_REQUEST)
+
+        # Save transaction_id
+        subscription_payment.transaction_id = transaction_id
+        subscription_payment.save(update_fields=["transaction_id", "updated_at"] if hasattr(subscription_payment, "updated_at") else ["transaction_id"])
+
+        # --- Verify with Flutterwave ---
+        try:
+            flw = confirm_transaction(transaction_id)  # use improved version: returns dict with ok/data/raw/error
+            flw_ok = bool(flw.get("ok"))
+            flw_data = flw.get("data") or {}
+            flw_top_status = (flw.get("status") or "").lower()
+            flw_status = (flw_data.get("status") or "").strip().lower()  # transaction outcome: successful/failed/pending/...
+
+            _safe_meta_patch(subscription_payment, {
+                "verified_at": timezone.now().isoformat(),
+                "verify_ok": flw_ok,
+                "verify_top_status": flw_top_status,
+                "verify_message": flw.get("message"),
+                "verify_error": flw.get("error"),
+                "verify_payload": flw.get("raw") if "raw" in flw else flw,
+            })
+
+            if not flw_ok:
+                _mark_payment_status(
+                    subscription_payment,
+                    status=SubscriptionPayment.Status.ERROR,
+                    provider_status=redirect_status or getattr(subscription_payment, "provider_status", None),
+                    meta_patch={"verified": False},
+                )
+                transaction.set_rollback(True)
+                return Response({"detail": "Could not verify payment right now. Please retry shortly."}, status=drf_status.HTTP_502_BAD_GATEWAY)
+
+            normalized = normalize_flutterwave_status(flw_status)
+
+            # Validate tx_ref/currency/amount (prevents mismatches)
+            errs = _validate_verified_transaction(
+                flw_data,
+                expected_tx_ref=tx_ref,
+                expected_currency=inv.currency,
+                expected_amount=Decimal(str(inv.amount)),
+            )
+            if errs:
+                _mark_payment_status(
+                    subscription_payment,
+                    status=SubscriptionPayment.Status.FAILED,
+                    provider_status=flw_status or redirect_status,
+                    meta_patch={"verify_validation_errors": errs, "verified": True},
+                )
+                transaction.set_rollback(True)
+                return Response({"detail": "Verification mismatch", "errors": errs}, status=drf_status.HTTP_400_BAD_REQUEST)
+
+            # Store final normalized status
+            if hasattr(subscription_payment, "last_verified_at"):
+                subscription_payment.last_verified_at = timezone.now()
+
+            _mark_payment_status(
+                subscription_payment,
+                status=normalized,
+                provider_status=flw_status or redirect_status,
+                meta_patch={
+                    "verified": True,
+                    "flw_ref": flw_data.get("flw_ref"),
+                    "processor_response": flw_data.get("processor_response"),
+                    "charged_amount": flw_data.get("charged_amount"),
+                    "payment_type": flw_data.get("payment_type"),
+                },
+            )
+
+            # Not success => stop (status already saved)
+            if normalized != SubscriptionPayment.Status.SUCCESS:
+                return Response(
+                    {"status": normalized, "detail": f"Payment not successful ({flw_status or 'unknown'})"},
+                    status=drf_status.HTTP_400_BAD_REQUEST,
+                )
+
+            # --- SUCCESS: apply your business logic BEFORE marking invoice paid ---
+            invoice_type = InvoiceType.objects.filter(invoice=inv).first()
+
+            if invoice_type and invoice_type.invoice_type == "tutor" and invoice_type.object_type == "booking":
+                booking = TutoringBooking.objects.filter(pk=invoice_type.object_id).first()
+                if not booking:
+                    raise ValueError("Booking not found")
+
+                booking.status = "confirmed"
+                booking.save(update_fields=["status"])
+
+                course = booking.private_tutoring.course
+                Enrollment.objects.get_or_create(
+                    student=booking.student,
+                    course=course,
+                    defaults={"status": "active"},
+                )
+
+            elif invoice_type and invoice_type.invoice_type == "store":
+                # Keep your existing store logic here (order/bnpl) — unchanged
+                # Make sure any exception here rolls back invoice paid update below.
+                if invoice_type.object_type == "order":
+                    order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=user)
+                    if not order or order is False:
+                        raise ValueError("Order not found")
+
+                    order.status = "paid"
+                    order.save(update_fields=["status"])
+                    order.reduce_stock()
+
+                    products = OrderItem.objects.filter(order=order).values_list("product", flat=True)
+                    CartItem.objects.filter(product__pk__in=list(products), cart__user=user).delete()
+                    Cart.objects.filter(user=user).update(coupon=None)
+
+                    if order.coupon_code:
+                        coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
+                        if coupon:
+                            coupon.used_count = (coupon.used_count or 0) + 1
+                            coupon.save(update_fields=["used_count"])
+
+                elif invoice_type.object_type == "bnpl":
+                    # keep your BNPL code here if you want it in this endpoint
+                    pass
+
+            elif invoice_type and invoice_type.invoice_type == "subscription":
+                # Your subscription activation logic (as you already wrote)
+                # Ensure all models referenced are imported.
+                inv = subscription_payment.invoice
+
+                student_id = None
+                if invoice_type.object_type == "student" and invoice_type.object_id:
+                    try:
+                        student_id = int(invoice_type.object_id)
+                    except (TypeError, ValueError):
+                        student_id = None
+
+                if not student_id:
+                    student_id = (inv.meta or {}).get("student_id")
+
+                if not student_id:
+                    raise ValueError("student_id missing for this subscription invoice.")
+
+                student = (
+                    StudentProfile.objects
+                    .select_related("user", "organization")
+                    .filter(id=student_id, organization=parent_profile.organization)
+                    .first()
+                )
+                if not student:
+                    raise ValueError("Student not found or not in your organization.")
+
+                # resolve plan
+                plan = None
+                if inv.user_subscription_id:
+                    plan = inv.user_subscription.plan
+                elif (inv.meta or {}).get("plan_id"):
+                    plan = SubscriptionPlan.objects.filter(id=inv.meta["plan_id"]).first()
+                elif inv.subscription and getattr(inv.subscription, "plan", None):
+                    plan = inv.subscription.plan
+                if not plan:
+                    raise ValueError("Subscription plan not found for this invoice.")
+
+                # ensure user_sub exists
+                user_sub = inv.user_subscription
+                if not user_sub:
+                    user_sub = (
+                        UserAccountSubscription.objects
+                        .filter(organization=student.organization, user=student.user)
+                        .order_by("-start_at")
+                        .first()
+                    )
+                    if not user_sub:
+                        user_sub = UserAccountSubscription.objects.create(
+                            organization=student.organization,
+                            user=student.user,
+                            plan=plan,
+                            status=UserAccountSubscription.Status.PAST_DUE,
+                            billed_to_parent=parent_profile,
+                            amount=Decimal(getattr(plan, "price", 0) or 0),
+                            currency=inv.currency or "NGN",
+                            meta={"created_by": "confirm_payment_fallback", "invoice_id": inv.id},
+                        )
+                    inv.user_subscription = user_sub
+                    inv.save(update_fields=["user_subscription"])
+
+                # enforce billing ownership
+                if user_sub.billed_to_parent_id is None:
+                    user_sub.billed_to_parent = parent_profile
+                    user_sub.save(update_fields=["billed_to_parent", "updated_at"])
+
+                # activate/extend
+                activate_user_subscription_from_paid_invoice(
+                    user_sub,
+                    plan=plan,
+                    paid_at=subscription_payment.paid_at or timezone.now(),
+                    currency=inv.currency or "NGN",
+                )
+
+            # ✅ Now finally mark invoice as paid (after business logic succeeds)
+            inv.status = "paid"
+            inv.transaction_id = transaction_id
+            inv.save(update_fields=["status", "transaction_id", "updated_at"] if hasattr(inv, "updated_at") else ["status", "transaction_id"])
+
+            return Response({"status": "success"}, status=drf_status.HTTP_200_OK)
+
+        except Exception as e:
+            # Persist ERROR state and roll back any partial side effects
             _mark_payment_status(
                 subscription_payment,
                 status=SubscriptionPayment.Status.ERROR,
                 provider_status=redirect_status or getattr(subscription_payment, "provider_status", None),
-                meta_patch={"verified": False},
+                meta_patch={"exception": str(e)},
             )
             transaction.set_rollback(True)
-            return Response({"detail": "Could not verify payment right now. Please retry shortly."}, status=drf_status.HTTP_502_BAD_GATEWAY)
-
-        normalized = normalize_flutterwave_status(flw_status)
-
-        # Validate tx_ref/currency/amount (prevents mismatches)
-        errs = _validate_verified_transaction(
-            flw_data,
-            expected_tx_ref=tx_ref,
-            expected_currency=inv.currency,
-            expected_amount=Decimal(str(inv.amount)),
-        )
-        if errs:
-            _mark_payment_status(
-                subscription_payment,
-                status=SubscriptionPayment.Status.FAILED,
-                provider_status=flw_status or redirect_status,
-                meta_patch={"verify_validation_errors": errs, "verified": True},
-            )
-            transaction.set_rollback(True)
-            return Response({"detail": "Verification mismatch", "errors": errs}, status=drf_status.HTTP_400_BAD_REQUEST)
-
-        # Store final normalized status
-        if hasattr(subscription_payment, "last_verified_at"):
-            subscription_payment.last_verified_at = timezone.now()
-
-        _mark_payment_status(
-            subscription_payment,
-            status=normalized,
-            provider_status=flw_status or redirect_status,
-            meta_patch={
-                "verified": True,
-                "flw_ref": flw_data.get("flw_ref"),
-                "processor_response": flw_data.get("processor_response"),
-                "charged_amount": flw_data.get("charged_amount"),
-                "payment_type": flw_data.get("payment_type"),
-            },
-        )
-
-        # Not success => stop (status already saved)
-        if normalized != SubscriptionPayment.Status.SUCCESS:
             return Response(
-                {"status": normalized, "detail": f"Payment not successful ({flw_status or 'unknown'})"},
-                status=drf_status.HTTP_400_BAD_REQUEST,
+                {"detail": "Could not confirm payment right now. Please retry shortly."},
+                status=drf_status.HTTP_502_BAD_GATEWAY,
             )
-
-        # --- SUCCESS: apply your business logic BEFORE marking invoice paid ---
-        invoice_type = InvoiceType.objects.filter(invoice=inv).first()
-
-        if invoice_type and invoice_type.invoice_type == "tutor" and invoice_type.object_type == "booking":
-            booking = TutoringBooking.objects.filter(pk=invoice_type.object_id).first()
-            if not booking:
-                raise ValueError("Booking not found")
-
-            booking.status = "confirmed"
-            booking.save(update_fields=["status"])
-
-            course = booking.private_tutoring.course
-            Enrollment.objects.get_or_create(
-                student=booking.student,
-                course=course,
-                defaults={"status": "active"},
-            )
-
-        elif invoice_type and invoice_type.invoice_type == "store":
-            # Keep your existing store logic here (order/bnpl) — unchanged
-            # Make sure any exception here rolls back invoice paid update below.
-            if invoice_type.object_type == "order":
-                order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=user)
-                if not order or order is False:
-                    raise ValueError("Order not found")
-
-                order.status = "paid"
-                order.save(update_fields=["status"])
-                order.reduce_stock()
-
-                products = OrderItem.objects.filter(order=order).values_list("product", flat=True)
-                CartItem.objects.filter(product__pk__in=list(products), cart__user=user).delete()
-                Cart.objects.filter(user=user).update(coupon=None)
-
-                if order.coupon_code:
-                    coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
-                    if coupon:
-                        coupon.used_count = (coupon.used_count or 0) + 1
-                        coupon.save(update_fields=["used_count"])
-
-            elif invoice_type.object_type == "bnpl":
-                # keep your BNPL code here if you want it in this endpoint
-                pass
-
-        elif invoice_type and invoice_type.invoice_type == "subscription":
-            # Your subscription activation logic (as you already wrote)
-            # Ensure all models referenced are imported.
-            inv = subscription_payment.invoice
-
-            student_id = None
-            if invoice_type.object_type == "student" and invoice_type.object_id:
-                try:
-                    student_id = int(invoice_type.object_id)
-                except (TypeError, ValueError):
-                    student_id = None
-
-            if not student_id:
-                student_id = (inv.meta or {}).get("student_id")
-
-            if not student_id:
-                raise ValueError("student_id missing for this subscription invoice.")
-
-            student = (
-                StudentProfile.objects
-                .select_related("user", "organization")
-                .filter(id=student_id, organization=parent_profile.organization)
-                .first()
-            )
-            if not student:
-                raise ValueError("Student not found or not in your organization.")
-
-            # resolve plan
-            plan = None
-            if inv.user_subscription_id:
-                plan = inv.user_subscription.plan
-            elif (inv.meta or {}).get("plan_id"):
-                plan = SubscriptionPlan.objects.filter(id=inv.meta["plan_id"]).first()
-            elif inv.subscription and getattr(inv.subscription, "plan", None):
-                plan = inv.subscription.plan
-            if not plan:
-                raise ValueError("Subscription plan not found for this invoice.")
-
-            # ensure user_sub exists
-            user_sub = inv.user_subscription
-            if not user_sub:
-                user_sub = (
-                    UserAccountSubscription.objects
-                    .filter(organization=student.organization, user=student.user)
-                    .order_by("-start_at")
-                    .first()
-                )
-                if not user_sub:
-                    user_sub = UserAccountSubscription.objects.create(
-                        organization=student.organization,
-                        user=student.user,
-                        plan=plan,
-                        status=UserAccountSubscription.Status.PAST_DUE,
-                        billed_to_parent=parent_profile,
-                        amount=Decimal(getattr(plan, "price", 0) or 0),
-                        currency=inv.currency or "NGN",
-                        meta={"created_by": "confirm_payment_fallback", "invoice_id": inv.id},
-                    )
-                inv.user_subscription = user_sub
-                inv.save(update_fields=["user_subscription"])
-
-            # enforce billing ownership
-            if user_sub.billed_to_parent_id is None:
-                user_sub.billed_to_parent = parent_profile
-                user_sub.save(update_fields=["billed_to_parent", "updated_at"])
-
-            # activate/extend
-            activate_user_subscription_from_paid_invoice(
-                user_sub,
-                plan=plan,
-                paid_at=subscription_payment.paid_at or timezone.now(),
-                currency=inv.currency or "NGN",
-            )
-
-        # ✅ Now finally mark invoice as paid (after business logic succeeds)
-        inv.status = "paid"
-        inv.transaction_id = transaction_id
-        inv.save(update_fields=["status", "transaction_id", "updated_at"] if hasattr(inv, "updated_at") else ["status", "transaction_id"])
-
-        return Response({"status": "success"}, status=drf_status.HTTP_200_OK)
-
     except Exception as e:
-        # Persist ERROR state and roll back any partial side effects
-        _mark_payment_status(
-            subscription_payment,
-            status=SubscriptionPayment.Status.ERROR,
-            provider_status=redirect_status or getattr(subscription_payment, "provider_status", None),
-            meta_patch={"exception": str(e)},
-        )
-        transaction.set_rollback(True)
-        return Response(
-            {"detail": "Could not confirm payment right now. Please retry shortly."},
-            status=drf_status.HTTP_502_BAD_GATEWAY,
-        )
-
+        print(e)
 
 
 @api_view(["GET"])
@@ -924,6 +933,7 @@ def transactions_list(request):
         data = []
         for pay in paginated:
             if isinstance(pay, SubscriptionPayment):
+                print(pay.provider_status, " pppp ", pay.status, " paya ", pay)
                 date = pay.paid_at if pay.status == "success" else pay.created_at
                 customer_email = (
                     pay.invoice.organization_membership.user.email
@@ -936,7 +946,7 @@ def transactions_list(request):
                     "reference": pay.reference,
                     "amount": str(pay.amount),
                     "currency": pay.currency,
-                    "status": pay.status,
+                    "status": pay.provider_status or pay.status,
                     "date": (date or pay.created_at).isoformat(),
                     "customer": customer_email,
                     "invoice_number": pay.invoice.number,
@@ -950,13 +960,13 @@ def transactions_list(request):
                     "reference": pay.provider_ref,
                     "amount": str(pay.amount),
                     "currency": pay.currency,
-                    "status": pay.status,
+                    "status": pay.provider_status or pay.status,
                     "date": (date or pay.effective_date).isoformat(),
                     "customer": customer_email,
                     "order_id": str(pay.order.id) if pay.order else "",
                 }
             data.append(d)
-
+        print(len(data), " data...")
         if type_param == "subscription":
             count = sub_qs.count()
         elif type_param == "store":

@@ -581,18 +581,22 @@ class NoteViewSet(APIKeySessionViewSet):
         return qs
 
     def perform_create(self, serializer):
-        request = self.request
-        org, _ = _resolve_org(request)
+        try:
+            print(" newskcmdklcldkclm")
+            request = self.request
+            org, _ = _resolve_org(request)
 
-        sp = _get_student_for_user(request.user)
-        if not sp or sp.organization_id != org.id:
-            raise PermissionDenied("You are not a student in this organization.")
+            sp = _get_student_for_user(request.user)
+            if not sp or sp.organization_id != org.id:
+                raise PermissionDenied("You are not a student in this organization.")
 
-        lesson = serializer.validated_data.get("lesson")
-        if not lesson or not _lesson_belongs_to_org(lesson, org):
-            raise ValidationError({"lesson": "Lesson does not belong to this organization."})
+            lesson = serializer.validated_data.get("lesson")
+            if not lesson or not _lesson_belongs_to_org(lesson, org):
+                raise ValidationError({"lesson": "Lesson does not belong to this organization."})
 
-        serializer.save(student=sp)
+            serializer.save(student=sp)
+        except Exception as e:
+            print(e)
 
     def perform_update(self, serializer):
         request = self.request

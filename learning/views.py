@@ -21,6 +21,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.decorators import parser_classes
 import logging
 from api.permissions import RequiresActiveStudentSubscription
+from api.serializers import LessonSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -1883,8 +1884,25 @@ def delete_saved_material(request):
 
 
 
+@api_view(["GET"])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@authentication_classes([SessionTokenAuthentication])
+def my_lessons(request):
+    student = _get_student_for_user(request.user)
 
+    lessons = (
+        Lesson.objects.filter(
+            module__course__enrollments__student=student,
+            module__course__enrollments__status=Enrollment.Status.ACTIVE,  # or remove if you want all statuses
+            active=True,
+            module__active=True,
+        )
+        .distinct()
+        .select_related("module", "module__course")
+        .order_by("module__course_id", "module__order", "order")
+    )
 
-
+    data = LessonSerializer(lessons, many=True).data
+    return Response(data)
 
 

@@ -9,6 +9,8 @@ urlpatterns = [
     path("api/save/lesson/<int:lesson_id>/", views.save_lesson_to_my_materials, name="save-lesson"),
     path("api/academics/resources/", views.resource_materials, name="resource-materials"),
 
+    path("api/student/lesson/", views.my_lessons, name="my-lessons"),
+
 
     ##### TEACHER ENDPOINTS ##########
     path('api/teacher/modules/', views.list_modules, name='teacher_list_modules'),
