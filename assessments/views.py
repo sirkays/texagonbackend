@@ -1086,6 +1086,7 @@ def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
         "instructions": getattr(test, "instructions", "") or "",
         "duration": duration,
         "total_marks": total_marks,
+        "mode": test.mode,  # ✅ NEW
         "totalPoints": total_points,
         "difficulty": difficulty,
         "category": category,
@@ -1321,6 +1322,11 @@ def create_test(request):
 
         data = request.data or {}
 
+        mode = (data.get("mode") or "online").strip().lower()
+        if mode not in ("online", "offline"):
+            return Response({"detail": "mode must be 'online' or 'offline'."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
         # Validate required fields
         title = data.get('title', '').strip()
         if not title:
@@ -1343,6 +1349,7 @@ def create_test(request):
 
         # Create test
         test_data = {
+            "mode": mode,  # ✅ NEW
             'course': course,
             'title': title,
             'start_at':start_at,
@@ -1429,6 +1436,14 @@ def publish_test(request, test_id: int):
             return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
         
         data = request.data or {}
+
+        if "mode" in data:
+            mode = (data.get("mode") or "").strip().lower()
+            if mode not in ("online", "offline"):
+                return Response({"detail": "mode must be 'online' or 'offline'."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            test.mode = mode
+
         is_published = data.get('published', True)
         
         # Validate test has questions before publishing

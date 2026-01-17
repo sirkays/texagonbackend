@@ -12,11 +12,20 @@ class Test(TimeStampedModel):
         PUBLISHED = "published", "Published"
         CLOSED = "closed", "Closed"
 
+    # ✅ NEW
+    class Mode(models.TextChoices):
+        ONLINE = "online", "Online"
+        OFFLINE = "offline", "Offline"
+
     course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="tests")
     title = models.CharField(max_length=255)
     duration_minutes = models.PositiveIntegerField(default=30)
     total_marks = models.DecimalField(max_digits=7, decimal_places=2, default=0)
     visibility = models.CharField(max_length=16, choices=Visibility.choices, default=Visibility.DRAFT)
+
+    # ✅ NEW (teacher sets this)
+    mode = models.CharField(max_length=16, choices=Mode.choices, default=Mode.ONLINE, db_index=True)
+
     instructions = models.TextField(blank=True)
     start_at = models.DateTimeField(null=True, blank=True)
     end_at = models.DateTimeField(null=True, blank=True)
@@ -24,6 +33,7 @@ class Test(TimeStampedModel):
 
     def __str__(self):
         return self.title
+
 
     def update_total_marks(self):
         total = self.questions.aggregate(
