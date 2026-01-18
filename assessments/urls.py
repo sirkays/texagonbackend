@@ -4,6 +4,9 @@ urlpatterns = [
     path("api/tests/available/", views.available_tests, name="available-tests"),
     path("api/tests/<int:test_id>/submit/", views.submit_test, name="submit-test"),
 
+    path("api/tests/<int:test_id>/start/", views.start_test, name="start-test"),
+
+
 
     path('api/teacher/tests/', views.teacher_tests_list, name='teacher_tests_list'),
     path('api/teacher/tests/create/', views.create_test, name='create_test'),

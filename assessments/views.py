@@ -11,6 +11,7 @@ from gamification.models import Streak
 # ===== Django Imports =====
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from datetime import timedelta
 from django.db.models import (
     Avg,
     Count,
@@ -289,6 +290,120 @@ def cbt_test_quit(request):
 
     
 
+@api_view(["POST"])
+@authentication_classes([SessionTokenAuthentication])
+@permission_classes([HasAPIKey, IsAuthenticated, RequiresActiveStudentSubscription])
+@transaction.atomic
+def start_test(request, test_id: int):
+    try:
+        user = request.user
+        student = _get_student_for_user(user)
+        if not student:
+            return Response({"detail": "Student profile not found."}, status=400)
+
+        # Optional: enforce device gate here too (same logic you used in available_tests)
+        # If you want it strict, reuse your device gate code.
+
+        try:
+            test = Test.objects.select_related("course").get(pk=test_id)
+        except Test.DoesNotExist:
+            return Response({"detail": "Test not found."}, status=404)
+
+        mode = getattr(test, "mode", "online") or "online"
+        if mode != "online":
+            return Response({"detail": "This endpoint is for online tests only."}, status=400)
+
+        now = timezone.now()
+
+        # Optional: verify within availability window
+        if test.start_at and now < test.start_at:
+            return Response({"detail": "Test has not started yet."}, status=400)
+        if test.end_at and now > test.end_at:
+            return Response({"detail": "Test has ended."}, status=400)
+
+        # duration in seconds
+        duration_seconds = int(getattr(test, "duration_minutes", 30) or 30) * 60
+        expires_at = now + timedelta(seconds=duration_seconds)
+
+        # If already started and still in progress, return same started_at
+        # ✅ Prevent double-start (two tabs / double-click) by locking rows
+        with transaction.atomic():
+            # lock any existing in_progress row for this student+test
+            attempt = (
+                TestAttempt.objects.select_for_update()
+                .filter(test=test, student=student, status="in_progress")
+                .order_by("-started_at")
+                .first()
+            )
+
+            if attempt:
+                # If expired, block restarting
+                if attempt.started_at and attempt.started_at + timedelta(seconds=duration_seconds) < now:
+                    return Response(
+                        {"detail": "Time elapsed. You can no longer start this test."},
+                        status=400,
+                    )
+                # else: reuse existing attempt (idempotent start)
+            else:
+                # Ensure they haven’t already submitted/graded this test
+                already = TestAttempt.objects.filter(
+                    test=test, student=student, status__in=["submitted", "graded"]
+                ).exists()
+                if already:
+                    return Response({"detail": "User already performed this test."}, status=400)
+
+                # ✅ Create exactly one in_progress attempt
+                attempt = TestAttempt.objects.create(
+                    test=test,
+                    student=student,
+                    started_at=now,
+                    status="in_progress",
+                )
+
+
+        # Build questions payload (same mapping style you already do)
+        qs = list(Question.objects.filter(test=test))
+        qs.sort(key=lambda q: (_question_order(q), q.id))
+
+        qids = [q.id for q in qs]
+        choices_map = defaultdict(list)
+        if qids:
+            for c in Choice.objects.filter(question_id__in=qids):
+                choices_map[c.question_id].append(c)
+        for qid in choices_map:
+            choices_map[qid].sort(key=lambda c: (_choice_order(c), c.id))
+
+        questions_out = []
+        for q in qs:
+            q_choices = choices_map.get(q.id, [])
+            choice_objs = [{"id": c.id, "text": getattr(c, "text", str(c))} for c in q_choices]
+            choice_texts = [co["text"] for co in choice_objs]
+            qtype_norm = _map_qtype(q, len(q_choices), choice_texts)
+
+            questions_out.append({
+                "id": q.id,
+                "type": qtype_norm,
+                "question": _question_text(q),
+                "points": int(getattr(q, "points", 0) or 0),
+                "choices": choice_objs,
+                "options": choice_texts,
+            })
+
+        started_at = attempt.started_at or now
+        expires_at = started_at + timedelta(seconds=duration_seconds)
+
+        return Response({
+            "attempt_id": attempt.id,
+            "test_id": test.id,
+            "started_at": started_at.isoformat(),
+            "duration_seconds": duration_seconds,
+            "expires_at": expires_at.isoformat(),
+            "questions": questions_out,
+        }, status=200)
+
+    except Exception as e:
+        print(e)
+
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -316,7 +431,7 @@ def available_tests(request):
         dev_id = get_or_make_device_id(request)
         ua = user_agent(request)
         ip_h = hash_ip(client_ip(request))
-
+        
         # Has the student registered a primary device yet?
         existing = StudentDevice.objects.filter(student=student).order_by("first_seen")
         if existing.exists():
@@ -404,6 +519,9 @@ def available_tests(request):
 
         items = []
         for t in tests:
+
+            mode = getattr(t, "mode", "online") or "online"
+
             test_qs = questions_by_test.get(t.id, [])
             q_count = len(test_qs)
 
@@ -448,6 +566,7 @@ def available_tests(request):
             difficulty = t.settings.get('difficulty', 'Medium')
             items.append({
                 "id": id_str,
+                "mode": mode,
                 "pk": t.pk,
                 "title": getattr(t, "title", f"Test #{t.pk}"),
                 "questions": q_count,
@@ -459,7 +578,8 @@ def available_tests(request):
                 "course": getattr(getattr(t, "course", None), "name", None),
                 "startsAt": getattr(t, "start_at", None).isoformat() if _has_field(Test, "start_at") and getattr(t, "start_at", None) else None,
                 "endsAt": getattr(t, "end_at", None).isoformat() if _has_field(Test, "end_at") and getattr(t, "end_at", None) else None,
-                "items": questions_out,
+                "items": questions_out if mode == "offline" else [],
+
             })
         resp = Response({"tests": items}, status=status.HTTP_200_OK)
         # Ensure browser retains the same device id
@@ -475,15 +595,6 @@ def available_tests(request):
             import traceback
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-def _test_has_field(model, field_name: str) -> bool:
-    try:
-        model._meta.get_field(field_name)
-        return True
-    except Exception:
-        return False
 
 
 
@@ -526,7 +637,7 @@ def submit_test(request, test_id: int):
                 {"detail": "Student profile not found for user."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
+        
         try:
             test = Test.objects.get(pk=test_id)
         except Test.DoesNotExist:
@@ -536,6 +647,9 @@ def submit_test(request, test_id: int):
             )
 
         payload: Dict[str, Any] = request.data or {}
+
+        mode = getattr(test, "mode", "online") or "online"
+
 
         raw_answers = payload.get("answers", [])
         # Allow no answers, but enforce that if provided, it must be a list
@@ -564,6 +678,34 @@ def submit_test(request, test_id: int):
                     started_at = dt
         else:
             started_at = now
+            
+        if mode == "online":
+            allowed_duration_seconds = int(getattr(test, "duration_minutes", 30) or 30) * 60
+
+            attempt_id = payload.get("attempt_id")
+
+            attempt = None
+
+            # ✅ 1) If frontend sent attempt_id, trust it (most accurate)
+            if attempt_id:
+                attempt = TestAttempt.objects.filter(
+                    id=attempt_id, test=test, student=student
+                ).first()
+
+            # ✅ 2) Fallback: latest in_progress attempt
+            if not attempt:
+                attempt = TestAttempt.objects.filter(
+                    test=test, student=student, status="in_progress"
+                ).order_by("-started_at").first()
+
+            if not attempt or not attempt.started_at:
+                return Response({"detail": "No active online attempt found."}, status=400)
+
+
+            started_at = attempt.started_at
+
+            if started_at + timedelta(seconds=allowed_duration_seconds) < now:
+                return Response({"detail": "Time elapsed. Submission rejected."}, status=400)
 
         # Membership check: accept only questions that belong to this test
         test_question_ids = set(
@@ -1125,7 +1267,17 @@ def update_test(request, test_id: int):
         except Test.DoesNotExist:
             return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
 
-        data = request.data or {} 
+        data = request.data or {}
+        
+        if "mode" in data:
+            mode = (data.get("mode") or "").strip().lower()
+            if mode not in ("online", "offline"):
+                return Response({"detail": "mode must be 'online' or 'offline'."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            print("mode: ", mode)
+            test.mode = mode
+            print(mode, " test ", test.mode)
+
         # Core fields
         if "title" in data:
             test.title = (data["title"] or "").strip()
@@ -1171,12 +1323,14 @@ def update_test(request, test_id: int):
         )
 
     except (ValueError, TypeError) as e:
+        print(e)
         # Likely bad datetime or type issues
         payload = {"detail": "Invalid input.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
+        print(e)
         payload = {"detail": "Error updating test.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
@@ -1437,12 +1591,6 @@ def publish_test(request, test_id: int):
         
         data = request.data or {}
 
-        if "mode" in data:
-            mode = (data.get("mode") or "").strip().lower()
-            if mode not in ("online", "offline"):
-                return Response({"detail": "mode must be 'online' or 'offline'."},
-                                status=status.HTTP_400_BAD_REQUEST)
-            test.mode = mode
 
         is_published = data.get('published', True)
         
@@ -1561,6 +1709,7 @@ def add_question(request, test_id: int):
 
         data = request.data or {}
 
+
         question_text = data.get("question", "").strip()
         if not question_text:
             return Response({"detail": "Question text is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1651,6 +1800,7 @@ def update_question(request, test_id: int, question_id: int):
             return Response({"detail": "Question not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
         
         data = request.data or {}
+
         # Update question fields
         if 'question' in data:
             question.body = data['question'].strip()
