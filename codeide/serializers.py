@@ -53,45 +53,25 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
     title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     comments = CodeCommentSerializer(many=True, read_only=True)
 
+    graded_by_name = serializers.SerializerMethodField()
+
     class Meta:
         model = CodeSubmission
         fields = [
-            "id",
-            "title",  # ✅ add
-            "lesson",
-            "student",
-            "language",
-            "code_text",
-            "status",
-            "score",
-            "feedback",
-            "correction_code",
-            "graded_by",
-            "graded_at",
-            "created_at",
-            "updated_at",
-            "comments",
-        ]
-        read_only_fields = [
-            "id",
-            "student",
-            "status",
-            "score",
-            "feedback",
-            "correction_code",
-            "graded_by",
-            "graded_at",
-            "created_at",
-            "updated_at",
-            "comments",
+            "id", "title", "lesson", "student", "language", "code_text",
+            "status", "score", "feedback", "correction_code",
+            "graded_by", "graded_by_name", "graded_at",
+            "created_at", "updated_at", "comments",
         ]
 
-    def validate_title(self, value):
-        # Normalize whitespace/empty titles to None
-        if value is None:
+    def get_graded_by_name(self, obj):
+        if not obj.graded_by:
             return None
-        value = value.strip()
-        return value or None
+        # adjust these fields based on your TeacherProfile model
+        user = getattr(obj.graded_by, "user", None)
+        if user:
+            return user.get_full_name() or user.username or user.email
+        return str(obj.graded_by)
 
 
 
