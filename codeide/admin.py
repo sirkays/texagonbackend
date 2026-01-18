@@ -84,6 +84,7 @@ class CodeSubmissionAdmin(MonospaceTextMixin, admin.ModelAdmin):
     date_hierarchy = "created_at"
     list_display = (
         "id",
+        "title",
         "lesson_title",
         "student_name",
         "language",
