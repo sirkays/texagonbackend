@@ -22,11 +22,13 @@ def award_points(student, points: int, reason: str) -> None:
         return
     before = get_points_balance(student)
     after = before + int(points)
+    leaderboard_season = resolve_season(student.organization, timezone.now())
     PointTransaction.objects.create(
         student=student,
         points=int(points),
         reason=reason,
         balance_after=after,
+        season=leaderboard_season
     )
 
 
