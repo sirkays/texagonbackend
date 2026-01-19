@@ -12,7 +12,7 @@ from django.utils import timezone
 from django.core.exceptions import ValidationError
 from orgs.models import OrganizationMembership, Organization
 from accounts.models import User
-
+from django.db.models import Max
 
 class Classroom(NamedModel):
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="classrooms")
@@ -38,6 +38,73 @@ class StudentProfile(TimeStampedModel):
 
     def __str__(self):
         return f"Student: {self.user.get_full_name() or self.user.username}"
+
+
+    def get_course_allowed(self, request,**kwargs ):
+        from core.utils import resolve_season
+
+        from billing.models import UserAccountSubscription
+
+        is_session = kwargs.get("is_session", False)
+        is_general_activation = kwargs.get("is_general_activation", False)
+
+        now = timezone.now()
+        session_key = "allowed_courses_cache"
+
+        # 1️⃣ Check session cache
+        cached_data = request.session.get(session_key)
+
+        course_ids = [] 
+        cached_date = None
+        returned_count = 0
+
+        if UserAccountSubscription.has_subscription(self.user, self.organization):
+            returned_count = 1
+            return True, returned_count
+
+        if cached_data:
+            cached_date = cached_data.get("general_activation_date")
+            course_ids = cached_data.get("course_ids")
+
+            if cached_date and cached_date > now:
+                if is_session:
+                    returned_count = 2
+                    return (course_ids, cached_date), returned_count
+                return self.enrollments.filter(course_id__in=course_ids)
+
+        # 2️⃣ Compute fresh queryset
+        leaderboard_season = resolve_season(self.organization, now)
+
+        queryset = self.enrollments.filter(
+            leaderboard_season=leaderboard_season,
+            course__course_type="public",
+            completed_at__isnull=True,
+            status="active",
+            general_activation = is_general_activation,
+            course__general_activation_date__isnull=False,
+        )
+
+        # 3️⃣ Get course_ids + highest activation date
+        course_ids = list(queryset.values_list("course_id", flat=True))
+
+        max_activation_date = queryset.aggregate(
+            Max("course__general_activation_date")
+        )["course__general_activation_date__max"]
+
+        # 4️⃣ Save to session if valid
+        if max_activation_date:
+            request.session[session_key] = {
+                "course_ids": course_ids,
+                "general_activation_date": max_activation_date,
+            }
+
+        # 5️⃣ Return based on is_session
+        if is_session:
+            returned_count = 2
+            return (course_ids, max_activation_date), returned_count
+
+        return queryset
+
 
 class Language(models.Model):
     language_name = models.CharField(max_length=225)

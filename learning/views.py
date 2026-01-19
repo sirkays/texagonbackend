@@ -259,7 +259,7 @@ def _read_json_body_for_get(request) -> Dict[str, Any]:
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription(allow_page=True)])
 @authentication_classes([SessionTokenAuthentication])
 def learning_modules(request):
     """
@@ -273,11 +273,18 @@ def learning_modules(request):
       - videos/audio/pdfs/docs/links: Lesson (active=True, module.active=True, enrolled courses)
       - tutorials: LiveSession (active=True, in user's enrolled courses; filtered by modules' courses if provided)
     """
+
     import traceback
+    
 
     try:
         user = request.user
         student = _get_student_for_user(user)
+
+        data, returned_count = student.get_course_allowed(True)
+
+        if returned_count == 2:
+            enrolled_course_ids = data[0]
 
         # -------- parse limits/search --------
         def _i(v, d):
@@ -316,21 +323,15 @@ def learning_modules(request):
             return Response({"videos": [], "audio": [], "pdfs": [], "docs": [], "links": [], "tutorials": []},
                             status=status.HTTP_200_OK)
 
-        enrolled_course_ids = list(
-            Enrollment.objects.filter(student=student, status=Enrollment.Status.ACTIVE).values_list("course_id", flat=True)
-        )
+        if enrolled_course_ids is None:
+            enrolled_course_ids = list(
+                Enrollment.objects.filter(student=student, status=Enrollment.Status.ACTIVE).values_list("course_id", flat=True)
+            )
+          
         if not enrolled_course_ids:
             return Response({"videos": [], "audio": [], "pdfs": [], "docs": [], "links": [], "tutorials": []},
                             status=status.HTTP_200_OK)
 
-        # If module filter given, further constrain by those modules (and derive their courses)
-        course_ids_from_modules = []
-        if module_ids:
-            course_ids_from_modules = list(
-                Module.objects.filter(id__in=module_ids, active=True).values_list("course_id", flat=True)
-            )
-            # Only keep courses the user is enrolled in
-            course_ids_from_modules = [c for c in course_ids_from_modules if c in enrolled_course_ids]
 
         # -------- base Lesson queryset --------
         base = (
@@ -373,13 +374,20 @@ def learning_modules(request):
                 Material.objects.filter(owner=user, active=True, lesson__isnull=False)
                 .values_list("lesson_id", flat=True)
             )
+
+            blur =  returned_count == 2 and  timezone.now() > c.general_activation_date
+            if blur:
+                file = ""
+            else:
+                file = ls.file.url if ls.file else None,
+                
             return {
                 "id": ls.id,
                 "title": ls.name,
                 "content_type": ls.content_type,
                 "duration": _fmt_duration(ls.duration_seconds),
-                "url": _lesson_url(ls),
-                "file": ls.file.url if ls.file else None,
+                "url": file if blur else _lesson_url(ls),
+                "file": file,
                 "cover_image": ls.cover_image.url if ls.cover_image else None,
                 "course": getattr(c, "name", None),
                 "subject": subject_name,
@@ -391,6 +399,7 @@ def learning_modules(request):
                 "popularity": size_map.get(getattr(c, "id", None), 0),
                 "updated_at": ls.updated_at.isoformat(),
                 "is_saved": ls.id in saved_lesson_ids,
+                "blur":blur
             }
 
         # -------- per content-type lists --------
@@ -409,10 +418,10 @@ def learning_modules(request):
         # -------- tutorials (LiveSession) --------
         tutorials: List[Dict[str, Any]] = []
         now = timezone.now()
-        session_course_ids = course_ids_from_modules if module_ids else enrolled_course_ids
+        
         lsessions = (
             LiveSession.objects
-            .filter(active=True, course_id__in=session_course_ids)
+            .filter(active=True, course_id__in=enrolled_course_ids)
             .select_related("course", "host__user", "course__subject")
             .order_by("scheduled_at")
         )

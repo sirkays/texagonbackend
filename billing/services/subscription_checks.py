@@ -113,6 +113,12 @@ def student_subscription_status(student) -> dict:
         .only("id", "status", "end_at")
         .first()
     )
+    
+    if sub.status == UserAccountSubscription.Status.ACTIVE:
+        return {"ok": True, "reason": "active", "subscription_id": sub.id}
+
+    if student.get_course_allowed(is_general_activation=True).exists():
+        return {"ok": True, "reason": "active", "subscription_id": sub.id} 
 
     if not sub:
         return {"ok": False, "reason": "missing", "subscription_id": None, "message":"Subscription not found."}
@@ -126,10 +132,8 @@ def student_subscription_status(student) -> dict:
     if sub.status == UserAccountSubscription.Status.ACTIVE and sub.end_at and now >= sub.end_at:
         return {"ok": False, "reason": "expired_by_date", "subscription_id": sub.id, "message":"Subscription has expired."}
 
-    if sub.status != UserAccountSubscription.Status.ACTIVE:
-        return {"ok": False, "reason": "not_active", "subscription_id": sub.id, "message":"Subscription not active."}
+    return {"ok": False, "reason": "not_active", "subscription_id": sub.id, "message":"Subscription not active."}
 
-    return {"ok": True, "reason": "active", "subscription_id": sub.id}
 
 
 def parent_needs_to_subscribe_again(

@@ -244,6 +244,18 @@ class UserAccountSubscription(TimeStampedModel):
             return True
         return False
 
+
+    @classmethod
+    def has_subscription(cls, user, organization):
+        now = timezone.now()
+        return cls.objects.filter(
+            organization=organization,
+            user=user,
+            status=cls.Status.ACTIVE,
+        ).filter(
+            Q(end_at__isnull=True) | Q(end_at__gt=now)
+        ).exists()
+
     @classmethod
     def student_subscription_is_expired(cls, student) -> bool:
         org = student.organization
