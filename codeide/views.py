@@ -148,9 +148,7 @@ def submission_create(request):
 
     if not lesson_id or not language or not code_text:
         return Response({"detail": "lesson, language and code_text are required."}, status=400)
-
     lesson = get_object_or_404(Lesson, id=lesson_id)
-
     submission = CodeSubmission.objects.create(
         title=title,  # ✅ saved
         student=student,

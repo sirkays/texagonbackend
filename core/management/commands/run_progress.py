@@ -4,13 +4,15 @@ from __future__ import annotations
 from contextlib import contextmanager
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable, Tuple
-from django.utils import timezone
+
 from django.apps import apps
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Q
-from gamification.services.engine import log_event
+from django.utils import timezone
+
 from core.utils import resolve_season
+from gamification.services.engine import log_event
 
 
 def _get_model_any(candidates: Iterable[Tuple[str, str]]):
@@ -80,7 +82,6 @@ class Command(BaseCommand):
         Enrollment = apps.get_model("learning", "Enrollment")
         CoursePassCriteria = apps.get_model("learning", "CoursePassCriteria")
 
-        # Your TestAttempt is in the code you shared (same file), but app label might differ in your project.
         TestAttempt = _get_model_any(
             [
                 ("learning", "TestAttempt"),
@@ -90,14 +91,12 @@ class Command(BaseCommand):
             ]
         )
 
-        # Your CodeSubmission is in ide/models.py
         CodeSubmission = _get_model_any(
             [
                 ("codeide", "CodeSubmission"),
             ]
         )
 
-        # ✅ Only non-completed enrollments
         qs = (
             Enrollment.objects.select_related("course", "student")
             .exclude(status=Enrollment.Status.COMPLETED)
@@ -131,54 +130,62 @@ class Command(BaseCommand):
                         continue
 
                     season_obj = resolve_season(enr.student.organization, timezone.now())
-                    season_start = None
-                    season_end = None
-                    if season_obj:
-                        season_start = season_obj.start_at
-                        season_end = season_obj.end_at
+                    season_start = season_obj.start_at if season_obj else None
+                    season_end = season_obj.end_at if season_obj else None
 
-                    # ---------- CBT side ----------
+                    # ---------- CBT side (score + count) ----------
                     cbt_needed = int(criteria.no_of_cbt or 0)
                     cbt_total = Decimal(criteria.total_pass_mark_cbt or 0)
-                    # If your "submitted" logic differs, adjust this filter:
+
                     cbt_attempts_qs = (
                         TestAttempt.objects.filter(
                             test__course_id=enr.course_id,
                             student_id=enr.student_id,
                         )
                         .filter(Q(status="submitted") | Q(submitted_at__isnull=False))
+                        .exclude(score__isnull=True)
                         .order_by("-score")
                     )
 
                     if season_start and season_end:
-                        # choose a consistent timestamp field; created_at comes from TimeStampedModel
-                        cbt_attempts_qs = cbt_attempts_qs.filter(created_at__gte=season_start, created_at__lt=season_end)
-
+                        cbt_attempts_qs = cbt_attempts_qs.filter(
+                            created_at__gte=season_start,
+                            created_at__lt=season_end
+                        )
 
                     if cbt_needed > 0:
+                        # best N CBT attempts
                         cbt_scores = list(
-                            cbt_attempts_qs.values_list("score", flat=True)[:cbt_needed]
+                            cbt_attempts_qs.values_list("score", flat=True)
                         )
+                        cbt_done = len(cbt_scores)
+                        cbt_count_ratio = Decimal(cbt_done) / Decimal(cbt_needed)
                     else:
                         cbt_scores = []
+                        cbt_done = 0
+                        cbt_count_ratio = Decimal("1")
+
+                    cbt_count_ratio = max(Decimal("0"), min(Decimal("1"), cbt_count_ratio))
 
                     cbt_marks = sum((Decimal(s or 0) for s in cbt_scores), Decimal("0"))
 
                     if cbt_total > 0:
                         if cbt_marks > cbt_total:
                             cbt_marks = cbt_total
-                        cbt_ratio = cbt_marks / cbt_total
+                        cbt_score_ratio = cbt_marks / cbt_total
                     else:
-                        # no pass mark requirement => treat as satisfied
-                        cbt_ratio = Decimal("1")
+                        cbt_score_ratio = Decimal("1")
 
+                    cbt_score_ratio = max(Decimal("0"), min(Decimal("1"), cbt_score_ratio))
+
+                    # ✅ combine score + count
+                    cbt_ratio = cbt_score_ratio * cbt_count_ratio
                     cbt_ratio = max(Decimal("0"), min(Decimal("1"), cbt_ratio))
 
-                    # ---------- Code side ----------
+                    # ---------- Code side (score + count) ----------
                     code_needed = int(criteria.no_of_code_submission or 0)
                     code_total = Decimal(criteria.total_pass_mark_code or 0)
 
-                    # If your graded logic differs, adjust this filter:
                     code_qs = (
                         CodeSubmission.objects.filter(
                             lesson__module__course_id=enr.course_id,
@@ -193,19 +200,30 @@ class Command(BaseCommand):
                         code_qs = code_qs.filter(created_at__gte=season_start, created_at__lt=season_end)
 
                     if code_needed > 0:
-                        code_scores = list(code_qs.values_list("score", flat=True)[:code_needed])
+                        # best N graded submissions
+                        code_scores = list(code_qs.values_list("score", flat=True))
+                        code_done = len(code_scores)
+                        code_count_ratio = Decimal(code_done) / Decimal(code_needed)
                     else:
                         code_scores = []
+                        code_done = 0
+                        code_count_ratio = Decimal("1")
+
+                    code_count_ratio = max(Decimal("0"), min(Decimal("1"), code_count_ratio))
 
                     code_marks = sum((Decimal(s or 0) for s in code_scores), Decimal("0"))
 
                     if code_total > 0:
                         if code_marks > code_total:
                             code_marks = code_total
-                        code_ratio = code_marks / code_total
+                        code_score_ratio = code_marks / code_total
                     else:
-                        code_ratio = Decimal("1")
+                        code_score_ratio = Decimal("1")
 
+                    code_score_ratio = max(Decimal("0"), min(Decimal("1"), code_score_ratio))
+
+                    # ✅ combine score + count
+                    code_ratio = code_score_ratio * code_count_ratio
                     code_ratio = max(Decimal("0"), min(Decimal("1"), code_ratio))
 
                     # ---------- Final progress ----------
@@ -220,10 +238,10 @@ class Command(BaseCommand):
                         pct = Decimal("100.00")
                         new_status = Enrollment.Status.COMPLETED
 
-                    # AFTER you compute new_status, but BEFORE save (either is fine):
+                    # Gamification trigger on transition to completed
                     if old_status != Enrollment.Status.COMPLETED and new_status == Enrollment.Status.COMPLETED:
                         student = enr.student
-                        org = enr.course.organization  # Course has organization FK
+                        org = enr.course.organization
 
                         log_event(
                             student=student,
@@ -232,32 +250,37 @@ class Command(BaseCommand):
                             value=1,
                             meta={
                                 "course_id": enr.course_id,
-                                "enrollment_id": enr.id,  # optional but helpful for debugging
+                                "enrollment_id": enr.id,
                             },
                             dedupe_key=f"course_completed:org={org.id}:student={student.id}:course={enr.course_id}",
-                            occurred_at=getattr(enr, "updated_at", None),  # optional; or omit to use now()
+                            occurred_at=getattr(enr, "updated_at", None),
                         )
                         enr.completed_at = timezone.now()
-                        enr.save()
+                        if commit:
+                            enr.save(update_fields=["completed_at", "updated_at"])
 
                     old_pct = Decimal(enr.progress_pct or 0).quantize(Decimal("0.01"))
                     changed = (old_pct != pct) or (enr.status != new_status)
+
                     if changed:
                         updated += 1
-                        old_status = enr.status
+                        prev_status = enr.status
 
                         enr.progress_pct = pct
                         enr.status = new_status
                         if commit:
                             enr.save(update_fields=["progress_pct", "status", "updated_at"])
-
+                        
+                        
                         self.stdout.write(
                             f"[{enr.id}] student={enr.student_id} course={enr.course_id} | "
-                            f"{old_pct}->{pct} | {old_status}->{new_status}"
+                            f"{old_pct}->{pct} | {prev_status}->{new_status} "
+                            f"(cbt_done={cbt_done}/{cbt_needed}, code_done={code_done}/{code_needed}) "
+                            f"(cbt_score={_q2(cbt_marks)}/{_q2(cbt_total)}, code_score={_q2(code_marks)}/{_q2(code_total)})"
                         )
 
+
                 if not commit:
-                    # ensure absolutely no writes in dry-run mode
                     raise _DryRunRollback()
 
         except _DryRunRollback:
