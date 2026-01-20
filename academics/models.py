@@ -53,11 +53,8 @@ class StudentProfile(TimeStampedModel):
             self.get_course_allowed(request)
             cached_data = request.session.get(session_key, None)
 
-        cached_date = cached_data.get("general_activation_date")
-        if isinstance(cached_date, str):
-            cached_date = parse_datetime(cached_date)
-
-        if cached_date and cached_date > timezone.now():
+        cached_date = cached_data.get("general_activation_date", None)
+        if cached_date:
             return True
         return False
 
@@ -109,9 +106,11 @@ class StudentProfile(TimeStampedModel):
             course__course_type="public",
             completed_at__isnull=True,
             status="active",
-            course__general_activation=True,
             course__general_activation_date__isnull=False,
         )
+
+        if is_general_activation:
+            queryset = queryset.filter(course__general_activation=True)
 
         # 5️⃣ Extract course IDs and latest activation date
         course_ids = list(queryset.values_list("course_id", flat=True))
@@ -127,7 +126,7 @@ class StudentProfile(TimeStampedModel):
                 "general_activation_date": max_activation_date.isoformat(),
             }
 
-            print(request.session.get("allowed_courses_cache"))
+            #print(request.session.get("allowed_courses_cache"))
 
         # 7️⃣ Return based on mode
         if is_session:

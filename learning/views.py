@@ -124,7 +124,10 @@ def my_materials(request):
         # Videos
         videos = []
         for m in m_base.filter(kind=Material.Kind.VIDEO)[:v_lim]:
-            blur =  returned_count == 2 and  timezone.now() > m.lesson.module.course.general_activation_date
+            general_activation_date =  m.lesson.module.course.general_activation_date
+            blur = False
+            if general_activation_date:
+                blur =  returned_count == 2 and  timezone.now() > general_activation_date
             if blur:
                 file = ""
             else:
@@ -144,7 +147,10 @@ def my_materials(request):
         # Audio
         audio = []
         for m in m_base.filter(kind=Material.Kind.AUDIO)[:a_lim]:
-            blur =  returned_count == 2 and  timezone.now() > m.lesson.module.course.general_activation_date
+            general_activation_date =  m.lesson.module.course.general_activation_date
+            blur = False
+            if general_activation_date:
+                blur =  returned_count == 2 and  timezone.now() > general_activation_date
             if blur:
                 file = ""
             else:
@@ -163,7 +169,10 @@ def my_materials(request):
         # PDFs
         pdfs = []
         for m in m_base.filter(kind=Material.Kind.PDF)[:p_lim]:
-            blur =  returned_count == 2 and  timezone.now() > m.lesson.module.course.general_activation_date
+            general_activation_date =  m.lesson.module.course.general_activation_date
+            blur = False
+            if general_activation_date:
+                blur =  returned_count == 2 and  timezone.now() > general_activation_date
             if blur:
                 file = ""
             else:
@@ -408,8 +417,10 @@ def learning_modules(request):
                 Material.objects.filter(owner=user, active=True, lesson__isnull=False)
                 .values_list("lesson_id", flat=True)
             )
-
-            blur =  returned_count == 2 and  timezone.now() > c.general_activation_date
+            general_activation_date = c.general_activation_date
+            blur = False
+            if general_activation_date:
+                blur =  returned_count == 2 and  timezone.now() > c.general_activation_date
             if blur:
                 file = ""
             else:
@@ -846,7 +857,11 @@ def resource_materials(request):
         # PDFs
         pdfs: List[Dict[str, Any]] = []
         for ls in pdfs_qs:
-            blur =  returned_count == 2 and  timezone.now() > ls.module.course.general_activation_date
+            general_activation_date = ls.module.course.general_activation_date
+            blur = False
+            if general_activation_date:
+                blur =  returned_count == 2 and  timezone.now() > general_activation_date
+
             if blur:
                 file = ""
             else:
@@ -874,12 +889,15 @@ def resource_materials(request):
                 thumb_nail = ls.cover_image.url if ls.cover_image else None
             except ValueError:
                 thumb_nail = None
-            blur =  returned_count == 2 and  timezone.now() > ls.module.course.general_activation_date
+            general_activation_date = ls.module.course.general_activation_date
+            blur = False
+            if general_activation_date:
+                blur =  returned_count == 2 and  timezone.now() > general_activation_date
+
             if blur:
                 file = ""
             else:
-                file =  _safe_file_or_url(ls) if ls.file else None,
-            print(blur, " kkkk",timezone.now() > ls.module.course.general_activation_date, returned_count)
+                file =  _safe_file_or_url(ls) if ls.file else None
             videos.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -899,7 +917,11 @@ def resource_materials(request):
         # Audio
         audio: List[Dict[str, Any]] = []
         for ls in auds_qs:
-            blur =  returned_count == 2 and  timezone.now() > ls.module.course.general_activation_date
+            general_activation_date = ls.module.course.general_activation_date
+            blur = False
+            if general_activation_date:
+                blur =  returned_count == 2 and  timezone.now() > general_activation_date
+
             if blur:
                 file = ""
             else:

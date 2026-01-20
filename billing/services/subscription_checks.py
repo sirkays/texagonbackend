@@ -116,6 +116,7 @@ def student_subscription_status(request,student) -> dict:
 
     if sub.status == UserAccountSubscription.Status.ACTIVE and sub.end_at and sub.end_at >= now:
         return {"ok": True, "reason": "active", "subscription_id": sub.id}
+        
     if student.get_course_allowed(request, is_general_activation=True).exists() :
         return {"ok": True, "reason": "active", "subscription_id": sub.id} 
 

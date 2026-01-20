@@ -65,12 +65,13 @@ def RequiresActiveStudentSubscription(*, allow_page=False):
                 if returned_count == 2:
                     return len(data) == 2
                 return data
-                
+            
             is_allowed = student_profile.check_session_data(request)
             ##### IF allow_page=True is not passed then RequiresActiveStudentSubscription()
             if is_allowed:
                 return True
 
+            print("pk...")
 
             if student_profile:
                 active = self._is_subscription_active(
