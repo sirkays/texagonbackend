@@ -21,6 +21,8 @@ urlpatterns = [
     path('api/teacher/modules/<int:module_id>/update/', views.update_module, name='teacher_update_module'),
     path('api/teacher/modules/<int:module_id>/delete/', views.delete_module, name='teacher_delete_module'),
     path('api/teacher/modules/<int:module_id>/publish/', views.publish_module, name='teacher_publish_module'),
+
+    path("api/teacher/courses/<int:course_id>/general-activation/", views.update_course_general_activation),
     
     # Lesson management
     path('api/teacher/modules/<int:module_id>/lessons/', views.add_lesson, name='teacher_add_lesson'),

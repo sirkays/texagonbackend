@@ -22,6 +22,7 @@ from rest_framework.decorators import parser_classes
 import logging
 from api.permissions import RequiresActiveStudentSubscription
 from api.serializers import LessonSerializer
+from .serializers import CourseGeneralActivationSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -1834,6 +1835,9 @@ def get_teacher_courses(request):
                 "description": course.description,
                 "isActive": course.is_active,
                 "course_type": course.course_type,
+                "general_activation":course.general_activation,
+                "general_activation_date": course.general_activation_date.isoformat() if course.general_activation_date else None
+
             }
             for course in courses
         ]
@@ -1853,6 +1857,7 @@ def get_teacher_courses(request):
             payload["traceback"] = traceback.format_exc()
 
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 
 @api_view(["GET"])
@@ -2032,3 +2037,41 @@ def my_lessons(request):
     return Response(data)
 
 
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def update_course_general_activation(request, course_id: int):
+    """
+    Teacher can update general_activation + general_activation_date for their own course.
+    """
+    teacher = _get_teacher_for_user(request.user)
+    if not teacher:
+        return Response({"detail": "No teacher profile found."}, status=status.HTTP_403_FORBIDDEN)
+
+    course = (Course.objects
+              .filter(id=course_id, teacher=teacher)
+              .first())
+    if not course:
+        return Response({"detail": "Course not found for this teacher."}, status=status.HTTP_404_NOT_FOUND)
+
+    if course.course_type == "private":
+        return Response(
+            {"detail": "General activation is not allowed for private courses."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+        
+    ser = CourseGeneralActivationSerializer(course, data=request.data, partial=True)
+    if not ser.is_valid():
+        return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    ser.save()
+    return Response(
+        {
+            "id": course.id,
+            "general_activation": course.general_activation,
+            "general_activation_date": course.general_activation_date.isoformat() if course.general_activation_date else None,
+        },
+        status=status.HTTP_200_OK
+    )
