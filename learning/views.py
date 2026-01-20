@@ -50,7 +50,7 @@ def _fmt_size(file_obj) -> Optional[str]:
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription(allow_page=True)])
 @authentication_classes([SessionTokenAuthentication])
 def my_materials(request):
     """
@@ -62,6 +62,11 @@ def my_materials(request):
     try:
         user = request.user
         student = _get_student_for_user(user)
+        data, returned_count = student.get_course_allowed(request, is_session=True)
+
+        enrolled_course_ids = None
+        if returned_count == 2:
+            enrolled_course_ids = data[0]
 
         def _as_int(v, default):
             try:
@@ -81,24 +86,30 @@ def my_materials(request):
         # ---------- Materials ----------
         allowed_statuses = [Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED]
 
+        # 1) Who can we see?
         if my_only or not student:
             m_base = Material.objects.filter(owner=user)
         else:
             m_base = Material.objects.filter(
-                Q(owner=user) |
-                Q(organization=student.organization)
+                Q(owner=user) | Q(organization=student.organization)
             ).filter(
                 lesson__module__course__enrollments__student=student,
                 lesson__module__course__enrollments__status__in=allowed_statuses,
             ).distinct()
+
+        # 2) Limit to enrolled courses list if provided
+        if enrolled_course_ids is not None:
+            m_base = m_base.filter(lesson__module__course__pk__in=enrolled_course_ids)
+
+        # 3) Search (apply independently)
         if q:
-            # title + tags (tags is JSON/list => contains text in DB)
             m_base = m_base.filter(
                 Q(title__icontains=q) |
                 Q(tags__icontains=q)
             )
 
-        m_base = m_base.select_related("owner").order_by("-updated_at", "-created_at")
+        m_base = m_base.select_related("owner", "lesson__module__course").order_by("-updated_at", "-created_at")
+
 
         def _owner_name(m):
             owner = getattr(m, "owner", None)
@@ -113,6 +124,12 @@ def my_materials(request):
         # Videos
         videos = []
         for m in m_base.filter(kind=Material.Kind.VIDEO)[:v_lim]:
+            blur =  returned_count == 2 and  timezone.now() > m.lesson.module.course.general_activation_date
+            if blur:
+                file = ""
+            else:
+                file =  _safe_url(getattr(m, "file", None), getattr(m, "url", None)) if m.file or m.url else None
+            
             videos.append({
                 "id": str(m.id),
                 "title": m.title,
@@ -120,31 +137,46 @@ def my_materials(request):
                 "duration": "—",
                 "progress": 0,
                 "thumbnail": _safe_url(getattr(m, "cover_image", None), None),
-                "videoUrl": _safe_url(getattr(m, "file", None), getattr(m, "url", None)),
+                "videoUrl":file,
+                "blur":blur,
             })
 
         # Audio
         audio = []
         for m in m_base.filter(kind=Material.Kind.AUDIO)[:a_lim]:
+            blur =  returned_count == 2 and  timezone.now() > m.lesson.module.course.general_activation_date
+            if blur:
+                file = ""
+            else:
+                file =  _safe_url(getattr(m, "file", None), getattr(m, "url", None)) if m.file or m.url else None
+            
             audio.append({
                 "id": str(m.id),
                 "title": m.title,
                 "speaker": _owner_name(m),
                 "duration": "—",
                 "progress": 0,
-                "audioUrl": _safe_url(getattr(m, "file", None), getattr(m, "url", None)),
+                "audioUrl": file,
+                "blur":blur
             })
 
         # PDFs
         pdfs = []
         for m in m_base.filter(kind=Material.Kind.PDF)[:p_lim]:
+            blur =  returned_count == 2 and  timezone.now() > m.lesson.module.course.general_activation_date
+            if blur:
+                file = ""
+            else:
+                file =  _safe_url(getattr(m, "file", None), getattr(m, "url", None)) if m.file or m.url else None
+            
             pdfs.append({
                 "id": str(m.id),
                 "title": m.title,
                 "author": _owner_name(m),
                 "pages": None,
                 "size": _fmt_size(m.file),
-                "downloadUrl": _safe_url(getattr(m, "file", None), getattr(m, "url", None)),
+                "downloadUrl": file,
+                "blur":blur
             })
 
         # ---------- Notes ----------
@@ -381,7 +413,7 @@ def learning_modules(request):
             if blur:
                 file = ""
             else:
-                file = ls.file.url if ls.file else None,
+                file = ls.file.url if ls.file else None
             
             return {
                 "id": ls.id,
@@ -818,7 +850,7 @@ def resource_materials(request):
             if blur:
                 file = ""
             else:
-                file =  _safe_file_or_url(ls) if ls.file else None,
+                file =  _safe_file_or_url(ls) if ls.file else None
             pdfs.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -871,7 +903,7 @@ def resource_materials(request):
             if blur:
                 file = ""
             else:
-                file =  _safe_file_or_url(ls) if ls.file else None,
+                file =  _safe_file_or_url(ls) if ls.file else None
             audio.append({
                 "id": str(ls.id),
                 "title": ls.name,
