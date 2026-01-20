@@ -58,6 +58,9 @@ def RequiresActiveStudentSubscription(*, allow_page=False):
             # =========================
             # STUDENT CONTEXT
             # =========================
+            if request.session.get('allowed_courses_cache') and request.session.get('allowed_courses_cache').get('date_cached') is None:
+                del request.session['allowed_courses_cache']
+                
             student_profile = getattr(user, "student_profile", None)
             if allow_page:
                 data,returned_count = student_profile.get_course_allowed(request, is_session=True)
@@ -71,7 +74,6 @@ def RequiresActiveStudentSubscription(*, allow_page=False):
             if is_allowed:
                 return True
 
-            print("pk...")
 
             if student_profile:
                 active = self._is_subscription_active(

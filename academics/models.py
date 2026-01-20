@@ -41,22 +41,58 @@ class StudentProfile(TimeStampedModel):
         return f"Student: {self.user.get_full_name() or self.user.username}"
 
 
-    def check_session_data(self,request):
+
+    def check_session_data(self, request, _retry=False):
         from billing.models import UserAccountSubscription
+
         if UserAccountSubscription.has_subscription(self.user, self.organization):
             return True
 
         session_key = "allowed_courses_cache"
-        # 1️⃣ Check session cache
-        cached_data = request.session.get(session_key, None)
+
+        # Load cache (populate if missing)
+        cached_data = request.session.get(session_key)
         if cached_data is None:
             self.get_course_allowed(request)
-            cached_data = request.session.get(session_key, None)
+            cached_data = request.session.get(session_key)
 
-        cached_date = cached_data.get("general_activation_date", None)
-        if cached_date:
-            return True
-        return False
+        if not cached_data:
+            return False
+
+        cached_date = cached_data.get("general_activation_date")
+        date_cached_str = cached_data.get("date_cached")  # e.g. "2026-01-20T12:34:56Z" or similar
+
+        # If either is missing, treat as invalid
+        if not (cached_date and date_cached_str):
+            return False
+
+        # Parse date_cached (prefer ISO-8601)
+        try:
+            # If you store it as ISO 8601, Django can parse it nicely:
+            # from django.utils.dateparse import parse_datetime
+            from django.utils.dateparse import parse_datetime
+            date_cached_dt = parse_datetime(date_cached_str)
+
+            # If it parsed but is naive, make it aware in current timezone
+            if date_cached_dt is None:
+                raise ValueError("Could not parse date_cached")
+            if timezone.is_naive(date_cached_dt):
+                date_cached_dt = timezone.make_aware(date_cached_dt, timezone.get_current_timezone())
+
+        except Exception:
+            # If parsing fails, invalidate cache
+            request.session.pop(session_key, None)
+            return False
+
+        # Expire after 1 hour
+        if timezone.now() - date_cached_dt > timedelta(hours=1):
+            # delete and re-run ONCE (second call is the last)
+            request.session.pop(session_key, None)
+            if _retry:
+                return False
+            return self.check_session_data(request, _retry=True)
+
+        return True
 
 
 
@@ -124,6 +160,7 @@ class StudentProfile(TimeStampedModel):
             request.session[session_key] = {
                 "course_ids": course_ids,
                 "general_activation_date": max_activation_date.isoformat(),
+                "date_cached":timezone.now().isoformat(),
             }
 
             #print(request.session.get("allowed_courses_cache"))
