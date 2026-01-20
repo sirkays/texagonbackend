@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # ---------- SNIPPETS ----------
 
 @api_view(["DELETE"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def snippet_delete(request, snippet_id: int):
     """
@@ -56,7 +56,7 @@ def snippet_delete(request, snippet_id: int):
 
 
 @api_view(["POST"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def snippet_create(request):
     """
@@ -98,7 +98,7 @@ def snippet_create(request):
     return Response(serializer.errors, status=400)
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def snippet_list(request):
     """
@@ -118,7 +118,7 @@ def snippet_list(request):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def snippet_detail(request, snippet_id: int):
     """
@@ -134,7 +134,7 @@ def snippet_detail(request, snippet_id: int):
 
 # ---------- SUBMISSIONS ----------
 @api_view(["POST"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def submission_create(request):
     student = _get_student_for_user(request.user)
@@ -195,7 +195,7 @@ def submission_create(request):
     return Response(CodeSubmissionSerializer(submission).data, status=201)
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def submission_detail(request, submission_id: int):
     """
@@ -246,7 +246,7 @@ def submission_teacher_update(request, submission_id: int):
 
 # ---------- COMMENTS ----------
 @api_view(["POST"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def submission_comment_create(request, submission_id: int):
     """
@@ -292,7 +292,7 @@ def _ext_ok(name: str) -> bool:
 
 # -------- FILES --------
 @api_view(["POST"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def codefile_upload(request):
     """
@@ -341,7 +341,7 @@ def codefile_upload(request):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def codefile_list(request):
     """
@@ -363,7 +363,7 @@ def codefile_list(request):
 
 # ide/views.py
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def codefile_detail(request, file_id: int):
     """
@@ -385,7 +385,7 @@ def codefile_detail(request, file_id: int):
 
 
 @api_view(["DELETE"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def codefile_delete(request, file_id: int):
     """
@@ -647,7 +647,7 @@ def teacher_submission_grade(request, pk: int):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def student_submission_list(request):
     """
@@ -683,7 +683,7 @@ def student_submission_list(request):
 
 
 @api_view(["PATCH"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def student_update_submission(request, submission_id: int):
     """

@@ -790,8 +790,6 @@ def verify_and_update_user(request):
 
     profile.organization_subscription = org_sub
 
-    print(org_sub, " smkdmvlfvmfklvm ")
-
     if not user.primary_org:
         user.primary_org = organization
         user.save()
@@ -1332,7 +1330,7 @@ def teacher_dashboard_overview(request):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def dashboard_overview(request):
     """

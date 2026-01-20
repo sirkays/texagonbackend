@@ -147,7 +147,7 @@ def _rank_for_student(all_qs, student_id: int, student_points: int) -> Optional[
 
 # ---------- endpoint ----------
 @api_view(["GET"])
-@permission_classes([HasAPIKey, RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey, RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def leaderboard_overview(request):
     """

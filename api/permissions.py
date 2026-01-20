@@ -45,15 +45,8 @@ def RequiresActiveStudentSubscription(*, allow_page=False):
                 or request.query_params.get("student_id")
             )
 
-        def _is_subscription_active(self, *, org_id, user_id) -> bool:
+        def _is_subscription_active(self, *, student_profile, org_id, user_id) -> bool:
             now = timezone.now()
-
-            if allow_page:
-                student_profile = getattr(user, "student_profile", None)
-                data,returned_count = student_profile.get_course_allowed(is_se)
-                if returned_count == 2:
-                    return data[0].count() > 0
-                return data
 
             return UserAccountSubscription.has_subscription(student_profile.user, student_profile.organization)
 
@@ -66,8 +59,20 @@ def RequiresActiveStudentSubscription(*, allow_page=False):
             # STUDENT CONTEXT
             # =========================
             student_profile = getattr(user, "student_profile", None)
+            if allow_page:
+                data,returned_count = student_profile.get_course_allowed(request, is_session=True)
+ 
+                if returned_count == 2:
+                    return len(data) == 2
+                return data
+            is_allowed = student_profile.check_session_data(request)
+
+            if is_allowed:
+                return True
+
             if student_profile:
                 active = self._is_subscription_active(
+                    student_profile=student_profile,
                     org_id=student_profile.organization_id,
                     user_id=user.id,
                 )
@@ -100,8 +105,8 @@ def RequiresActiveStudentSubscription(*, allow_page=False):
                 )
                 if not student:
                     return False
-
                 active = self._is_subscription_active(
+                    student_profile=student,
                     org_id=student.organization_id,
                     user_id=student.user_id,
                 )

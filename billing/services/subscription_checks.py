@@ -103,7 +103,7 @@ def get_parent_children_latest_subscriptions(
 
     return rows
 
-def student_subscription_status(student) -> dict:
+def student_subscription_status(request,student) -> dict:
     now = timezone.now()
 
     sub = (
@@ -113,11 +113,10 @@ def student_subscription_status(student) -> dict:
         .only("id", "status", "end_at")
         .first()
     )
-    
-    if sub.status == UserAccountSubscription.Status.ACTIVE:
-        return {"ok": True, "reason": "active", "subscription_id": sub.id}
 
-    if student.get_course_allowed(is_general_activation=True).exists():
+    if sub.status == UserAccountSubscription.Status.ACTIVE and sub.end_at and sub.end_at >= now:
+        return {"ok": True, "reason": "active", "subscription_id": sub.id}
+    if student.get_course_allowed(request, is_general_activation=True).exists() :
         return {"ok": True, "reason": "active", "subscription_id": sub.id} 
 
     if not sub:

@@ -558,7 +558,7 @@ def student_course_activity_metrics(request, course_id: int, student_id: int):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def achievements_overview(request):
     try:
@@ -1458,7 +1458,7 @@ def generate_subs(request):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def student_certificates_list(request):
     """
@@ -1577,7 +1577,7 @@ def student_certificates_list(request):
 
 
 @api_view(["POST"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def certificate_create(request):
     """

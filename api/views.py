@@ -99,8 +99,9 @@ def login_view(request):
         return Response({"detail": "invalid_credentials", "code":"invalid_credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
     if getattr(user, "student_profile", None):
-        res = student_subscription_status(user.student_profile)
+        res = student_subscription_status(request, user.student_profile)
         if res["ok"] is False:
+            
             # stable machine-readable code + human message
             return Response(
                 {
@@ -110,7 +111,6 @@ def login_view(request):
                 },
                 status=status.HTTP_401_UNAUTHORIZED,
             )
-
 
     st = SessionToken.create_for_user(user, hours_valid=hours_valid, ip=request.META.get("REMOTE_ADDR"))
     return Response({"sessionToken": st.key, "expiresAt": st.expires_at.isoformat(), "userId": user.id})

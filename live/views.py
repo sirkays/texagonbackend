@@ -155,7 +155,7 @@ def create_live_session(request):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def user_live_sessions(request):
     """

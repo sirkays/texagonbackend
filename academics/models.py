@@ -13,6 +13,7 @@ from django.core.exceptions import ValidationError
 from orgs.models import OrganizationMembership, Organization
 from accounts.models import User
 from django.db.models import Max
+from django.utils.dateparse import parse_datetime
 
 class Classroom(NamedModel):
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="classrooms")
@@ -40,9 +41,31 @@ class StudentProfile(TimeStampedModel):
         return f"Student: {self.user.get_full_name() or self.user.username}"
 
 
-    def get_course_allowed(self, request,**kwargs ):
-        from core.utils import resolve_season
+    def check_session_data(self,request):
+        from billing.models import UserAccountSubscription
+        if UserAccountSubscription.has_subscription(self.user, self.organization):
+            return True
 
+        session_key = "allowed_courses_cache"
+        # 1️⃣ Check session cache
+        cached_data = request.session.get(session_key, None)
+
+        if cached_data is None:
+            self.get_course_allowed(request)
+            cached_data = request.session.get(session_key, None)
+
+        cached_date = cached_data.get("general_activation_date")
+        if isinstance(cached_date, str):
+            cached_date = parse_datetime(cached_date)
+
+        if cached_date and cached_date > timezone.now():
+            return True
+        return False
+
+
+
+    def get_course_allowed(self, request, **kwargs):
+        from core.utils import resolve_season
         from billing.models import UserAccountSubscription
 
         is_session = kwargs.get("is_session", False)
@@ -54,17 +77,24 @@ class StudentProfile(TimeStampedModel):
         # 1️⃣ Check session cache
         cached_data = request.session.get(session_key)
 
-        course_ids = [] 
+        course_ids = []
         cached_date = None
         returned_count = 0
 
-        if UserAccountSubscription.has_subscription(self.user, self.organization):
+        # 2️⃣ User has active subscription or unrestricted access
+        if (
+            UserAccountSubscription.has_subscription(self.user, self.organization)
+        ):
             returned_count = 1
             return True, returned_count
 
+        # 3️⃣ Use cached data if still valid
         if cached_data:
             cached_date = cached_data.get("general_activation_date")
-            course_ids = cached_data.get("course_ids")
+            course_ids = cached_data.get("course_ids", [])
+
+            if isinstance(cached_date, str):
+                cached_date = parse_datetime(cached_date)
 
             if cached_date and cached_date > now:
                 if is_session:
@@ -72,7 +102,7 @@ class StudentProfile(TimeStampedModel):
                     return (course_ids, cached_date), returned_count
                 return self.enrollments.filter(course_id__in=course_ids)
 
-        # 2️⃣ Compute fresh queryset
+        # 4️⃣ Compute fresh queryset
         leaderboard_season = resolve_season(self.organization, now)
 
         queryset = self.enrollments.filter(
@@ -80,30 +110,33 @@ class StudentProfile(TimeStampedModel):
             course__course_type="public",
             completed_at__isnull=True,
             status="active",
-            general_activation = is_general_activation,
+            course__general_activation=True,
             course__general_activation_date__isnull=False,
         )
 
-        # 3️⃣ Get course_ids + highest activation date
+        # 5️⃣ Extract course IDs and latest activation date
         course_ids = list(queryset.values_list("course_id", flat=True))
 
         max_activation_date = queryset.aggregate(
             Max("course__general_activation_date")
         )["course__general_activation_date__max"]
 
-        # 4️⃣ Save to session if valid
+        # 6️⃣ Cache safely (serialize datetime)
         if max_activation_date:
             request.session[session_key] = {
                 "course_ids": course_ids,
-                "general_activation_date": max_activation_date,
+                "general_activation_date": max_activation_date.isoformat(),
             }
 
-        # 5️⃣ Return based on is_session
+            print(request.session.get("allowed_courses_cache"))
+
+        # 7️⃣ Return based on mode
         if is_session:
             returned_count = 2
             return (course_ids, max_activation_date), returned_count
 
         return queryset
+
 
 
 class Language(models.Model):

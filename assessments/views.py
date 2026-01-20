@@ -177,7 +177,7 @@ def _map_qtype(q: Question, choice_count: int, choice_texts: List[str]) -> str:
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])  # requires: Authorization: Api-Key <your_api_key>
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription(allow_page=False)])  # requires: Authorization: Api-Key <your_api_key>
 @authentication_classes([SessionTokenAuthentication])  # requires: Authorization: SessionToken <session_token>
 def my_test_attempts(request):
     """
@@ -257,7 +257,7 @@ def my_test_attempts(request):
 
 
 @api_view(["POST"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def cbt_test_quit(request):
     if not getattr(request.user, "is_authenticated", False):
@@ -292,7 +292,7 @@ def cbt_test_quit(request):
 
 @api_view(["POST"])
 @authentication_classes([SessionTokenAuthentication])
-@permission_classes([HasAPIKey, IsAuthenticated, RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey, IsAuthenticated, RequiresActiveStudentSubscription()])
 @transaction.atomic
 def start_test(request, test_id: int):
     try:
@@ -600,7 +600,7 @@ def available_tests(request):
 
 @api_view(["POST"])
 @authentication_classes([SessionTokenAuthentication])
-@permission_classes([HasAPIKey, IsAuthenticated, RequiresActiveStudentSubscription])  # << add IsAuthenticated
+@permission_classes([HasAPIKey, IsAuthenticated, RequiresActiveStudentSubscription()])  # << add IsAuthenticated
 @transaction.atomic
 def submit_test(request, test_id: int):
     """

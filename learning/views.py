@@ -50,7 +50,7 @@ def _fmt_size(file_obj) -> Optional[str]:
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def my_materials(request):
     """
@@ -280,11 +280,12 @@ def learning_modules(request):
     try:
         user = request.user
         student = _get_student_for_user(user)
+        data, returned_count = student.get_course_allowed(request, is_session=True)
 
-        data, returned_count = student.get_course_allowed(True)
-
+        enrolled_course_ids = None
         if returned_count == 2:
             enrolled_course_ids = data[0]
+
 
         # -------- parse limits/search --------
         def _i(v, d):
@@ -327,7 +328,7 @@ def learning_modules(request):
             enrolled_course_ids = list(
                 Enrollment.objects.filter(student=student, status=Enrollment.Status.ACTIVE).values_list("course_id", flat=True)
             )
-          
+        
         if not enrolled_course_ids:
             return Response({"videos": [], "audio": [], "pdfs": [], "docs": [], "links": [], "tutorials": []},
                             status=status.HTTP_200_OK)
@@ -341,6 +342,7 @@ def learning_modules(request):
             )
             .filter(active=True, module__active=True, module__course_id__in=enrolled_course_ids)
         )
+
         if module_ids:
             base = base.filter(module_id__in=module_ids)
         if q:
@@ -380,7 +382,7 @@ def learning_modules(request):
                 file = ""
             else:
                 file = ls.file.url if ls.file else None,
-                
+            
             return {
                 "id": ls.id,
                 "title": ls.name,
@@ -401,7 +403,6 @@ def learning_modules(request):
                 "is_saved": ls.id in saved_lesson_ids,
                 "blur":blur
             }
-
         # -------- per content-type lists --------
         videos_qs = base.filter(content_type=Lesson.ContentType.VIDEO).order_by("-updated_at", "module__order", "order")
         audio_qs  = base.filter(content_type=Lesson.ContentType.AUDIO).order_by("-updated_at", "module__order", "order")
@@ -414,7 +415,6 @@ def learning_modules(request):
         pdfs   = [lesson_item(ls) for ls in pdfs_qs[:p_lim]]
         docs   = [lesson_item(ls) for ls in docs_qs[:d_lim]]
         links  = [lesson_item(ls) for ls in links_qs[:l_lim]]
-
         # -------- tutorials (LiveSession) --------
         tutorials: List[Dict[str, Any]] = []
         now = timezone.now()
@@ -433,6 +433,8 @@ def learning_modules(request):
                 Q(host__user__last_name__icontains=q)
             )
 
+        
+
         for s in lsessions[:t_lim]:
             dur = int(getattr(s, "duration_minutes", 60) or 60)
             tutorials.append({
@@ -446,7 +448,6 @@ def learning_modules(request):
                 "host": (s.host.user.get_full_name() or s.host.user.username) if getattr(s, "host", None) and getattr(s.host, "user", None) else None,
                 "isActiveNow": bool(s.scheduled_at <= now <= s.scheduled_at + timezone.timedelta(minutes=dur)),
             })
-
         return Response({
             "videos": videos,
             "audio": audio,
@@ -458,6 +459,7 @@ def learning_modules(request):
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
+        print(e)
         err = {"detail": "Failed to load learning modules.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
             import traceback
@@ -516,7 +518,7 @@ def _material_to_dict(request, m: Material, lesson: Lesson) -> Dict[str, Any]:
 
 
 @api_view(["POST"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def save_lesson_to_my_materials(request, lesson_id: int):
     """
@@ -686,7 +688,7 @@ def _int(v, default=None, cap=None) -> Optional[int]:
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def resource_materials(request):
     """
@@ -1803,7 +1805,7 @@ def get_module_categories(request):
 
 
 @api_view(["DELETE"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
 def delete_saved_material(request):
@@ -1894,7 +1896,7 @@ def delete_saved_material(request):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def my_lessons(request):
     student = _get_student_for_user(request.user)
