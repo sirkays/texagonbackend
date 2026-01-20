@@ -49,7 +49,6 @@ class StudentProfile(TimeStampedModel):
         session_key = "allowed_courses_cache"
         # 1️⃣ Check session cache
         cached_data = request.session.get(session_key, None)
-
         if cached_data is None:
             self.get_course_allowed(request)
             cached_data = request.session.get(session_key, None)

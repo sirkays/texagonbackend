@@ -11,6 +11,8 @@ urlpatterns = [
 
     path("api/student/lesson/", views.my_lessons, name="my-lessons"),
 
+    path("api/student/courses/", views.my_courses, name="my-courses"),
+
 
     ##### TEACHER ENDPOINTS ##########
     path('api/teacher/modules/', views.list_modules, name='teacher_list_modules'),

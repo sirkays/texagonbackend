@@ -688,7 +688,7 @@ def _int(v, default=None, cap=None) -> Optional[int]:
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription(allow_page=True)])
 @authentication_classes([SessionTokenAuthentication])
 def resource_materials(request):
     """
@@ -710,6 +710,12 @@ def resource_materials(request):
     try:
         user = request.user
         student = _get_student_for_user(user)
+
+        data, returned_count = student.get_course_allowed(request, is_session=True)
+        print(data, "ddd")
+        course_ids = None
+        if returned_count == 2:
+            course_ids = data[0]
 
         q = (request.query_params.get("q") or "").strip()
         course_id = _int(request.query_params.get("course_id"))
@@ -738,11 +744,13 @@ def resource_materials(request):
             }, status=status.HTTP_200_OK)
 
         # --- User's active courses (categories) ---
-        active_enrolls = (Enrollment.objects
-                          .filter(Q(status=Enrollment.Status.ACTIVE)|Q(status=Enrollment.Status.COMPLETED),
-                            student=student, course__is_active=True )
-                          .select_related("course", "course__subject"))
-        course_ids = list(active_enrolls.values_list("course_id", flat=True))
+        if course_ids is None:
+            active_enrolls = (Enrollment.objects
+                            .filter(Q(status=Enrollment.Status.ACTIVE)|Q(status=Enrollment.Status.COMPLETED),
+                                student=student, course__is_active=True )
+                            .select_related("course", "course__subject"))
+            course_ids = list(active_enrolls.values_list("course_id", flat=True))
+            
         if not course_ids:
             # No active enrollments → return empty with categories=[]
             return Response({
@@ -806,6 +814,11 @@ def resource_materials(request):
         # PDFs
         pdfs: List[Dict[str, Any]] = []
         for ls in pdfs_qs:
+            blur =  returned_count == 2 and  timezone.now() > ls.module.course.general_activation_date
+            if blur:
+                file = ""
+            else:
+                file =  _safe_file_or_url(ls) if ls.file else None,
             pdfs.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -816,7 +829,8 @@ def resource_materials(request):
                 "rating": float(ls.meta.get("rating", 4.7)) if isinstance(ls.meta, dict) else 4.7,
                 "downloads": int(ls.meta.get("downloads", 0)) if isinstance(ls.meta, dict) else 0,
                 "category": selected_course.name,
-                "pdfUrl": _safe_file_or_url(ls),
+                "pdfUrl": file,
+                "blur":blur,
             })
         if not pdfs:
             pdfs = []
@@ -828,6 +842,12 @@ def resource_materials(request):
                 thumb_nail = ls.cover_image.url if ls.cover_image else None
             except ValueError:
                 thumb_nail = None
+            blur =  returned_count == 2 and  timezone.now() > ls.module.course.general_activation_date
+            if blur:
+                file = ""
+            else:
+                file =  _safe_file_or_url(ls) if ls.file else None,
+            print(blur, " kkkk",timezone.now() > ls.module.course.general_activation_date, returned_count)
             videos.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -837,8 +857,9 @@ def resource_materials(request):
                 "views": int(ls.meta.get("views", 0)) if isinstance(ls.meta, dict) else 0,
                 "rating": float(ls.meta.get("rating", 4.7)) if isinstance(ls.meta, dict) else 4.7,
                 "category": selected_course.name,
-                "videoUrl": _safe_file_or_url(ls),
+                "videoUrl": file,
                 "thumbnail":thumb_nail,
+                "blur":blur,
             })
         if not videos:
             videos = []
@@ -846,6 +867,11 @@ def resource_materials(request):
         # Audio
         audio: List[Dict[str, Any]] = []
         for ls in auds_qs:
+            blur =  returned_count == 2 and  timezone.now() > ls.module.course.general_activation_date
+            if blur:
+                file = ""
+            else:
+                file =  _safe_file_or_url(ls) if ls.file else None,
             audio.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -855,7 +881,8 @@ def resource_materials(request):
                 "listens": int(ls.meta.get("listens", 0)) if isinstance(ls.meta, dict) else 0,
                 "rating": float(ls.meta.get("rating", 4.5)) if isinstance(ls.meta, dict) else 4.5,
                 "category": selected_course.name,
-                "audioUrl": _safe_file_or_url(ls),
+                "audioUrl":file,
+                "blur":blur
             })
         if not audio:
             audio = []
@@ -1891,6 +1918,40 @@ def delete_saved_material(request):
         if request.query_params.get("debug") in {"1", "true", "True"}:
             err["traceback"] = traceback.format_exc()
         return Response(err, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@authentication_classes([SessionTokenAuthentication])
+def my_courses(request):
+    try:
+        def _course_to_dict(course):
+            # Keep it minimal (matches your frontend: { id, name })
+            return {
+                "id": course.id,
+                "name": course.name,
+            }
+
+        student = _get_student_for_user(request.user)
+        if not student:
+            return Response({"detail": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        enrollments = (
+            Enrollment.objects
+            .select_related("course")
+            .filter(
+                student=student,
+                status=Enrollment.Status.ACTIVE,
+                course__is_active=True,   # optional: hide inactive courses
+            )
+            .order_by("course__name")
+        )
+
+        courses = [_course_to_dict(e.course) for e in enrollments]
+    except Exception as e:
+        return Response({}, status=status.HTTP_404_NOT_FOUND)
+    return Response({"courses": courses}, status=status.HTTP_200_OK)
 
 
 
