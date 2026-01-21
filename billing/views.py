@@ -37,6 +37,10 @@ import base64, hmac, hashlib
 from django.conf import settings
 from rest_framework.permissions import AllowAny
 
+from texagonbackend.settings import FRONTEND_ORIGIN
+from notifications.services import dispatch
+from notifications.events import PAYMENT_CONFIRMED
+
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25MB per file
 ALLOWED_CONTENT_TYPES = None  # e.g. {"image/png","image/jpeg","application/pdf"}
 
@@ -801,6 +805,35 @@ def confirm_payment(request):
             inv.status = "paid"
             inv.transaction_id = transaction_id
             inv.save(update_fields=["status", "transaction_id", "updated_at"] if hasattr(inv, "updated_at") else ["status", "transaction_id"])
+
+            # ✅ Dispatch AFTER commit (prevents “email sent but rollback happened”)
+            def _notify():
+                receipt_url = f"{FRONTEND_ORIGIN}/invoice/invoices"
+
+                dispatch(
+                    users=[user],
+                    message=PAYMENT_CONFIRMED,
+                    ctx={"app_name": "Techxagon Academy"},
+                    data={
+                        "amount": str(inv.amount),
+                        "currency": inv.currency,
+                        "invoice_id": inv.id,
+                        "invoice_number": inv.number,
+                        "transaction_id": transaction_id,
+                        "cta": {
+                            "label": "Login to view receipt",
+                            "url": receipt_url,
+                        },
+                        
+                    },
+                    send_in_app=True,
+                    send_email=True,
+                    fail_silently=True,  # recommended so payment confirm doesn't fail because email failed
+                )
+
+            transaction.on_commit(_notify)
+
+            return Response({"status": "success"}, status=drf_status.HTTP_200_OK)
 
             return Response({"status": "success"}, status=drf_status.HTTP_200_OK)
 

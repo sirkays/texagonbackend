@@ -1,0 +1,17 @@
+Welcome to {{ app_name }} 🎉
+
+Hi {{ user.first_name|default:user.email }},
+
+We’re excited to have you on board.
+Your account has been successfully created and you can start using {{ app_name }} right away.
+
+{% if data.cta %}
+Get started here:
+{{ data.cta.url }}
+{% endif %}
+
+If you need help, our support team is always available.
+
+— The {{ app_name }} Team
+
+Sent on {{ now|date:"F j, Y" }}

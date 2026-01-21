@@ -18,6 +18,7 @@ urlpatterns = [
     path('orgs/', include('orgs.urls')),
     path('code-ide/', include('codeide.urls')),
     path('store/api/', include('store.urls')),
+    path('notifications/', include('notifications.urls')),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

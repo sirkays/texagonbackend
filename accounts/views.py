@@ -44,7 +44,9 @@ from api.permissions import RequiresActiveStudentSubscription
 from .utils import available_certificates_qs
 
 from billing.services.subscription_invoicing import generate_parent_children_subscription_invoices
-
+from texagonbackend.settings import FRONTEND_ORIGIN
+from notifications.services import dispatch
+from notifications.events import SYSTEM_WELCOME
 
 def create_admin(request):
     try:
@@ -412,6 +414,20 @@ def verify_email_view(request):
         if not user.is_active:
             user.is_active = True
             user.save(update_fields=["is_active"])
+            dispatch(
+                users=[user],
+                message=SYSTEM_WELCOME,
+                data={
+                    "cta": {
+                        "label": "Sign In",
+                        "url": f"{FRONTEND_ORIGIN}/login/",
+                    }
+                },
+                ctx={"app_name": "Techxagon Academy"},
+                send_in_app=True,
+                send_email=True,
+                fail_silently=True, 
+            )
         try:
             if request.user != user:
                 student_profile = get_object_or_404_ajax(StudentProfile, user=user)
@@ -426,7 +442,9 @@ def verify_email_view(request):
                             now=timezone.now(),
                             dry_run=False,
                             user=request.user,
+                        
                         )
+
         except Exception as e:
             print(e)
 

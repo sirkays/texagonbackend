@@ -1,0 +1,30 @@
+Order Created
+
+Hi {{ user.first_name|default:user.email }},
+
+Your order has been created successfully.
+
+Order ID: {{ data.order_id }}
+Total: {{ data.currency }} {{ data.grand_total }}
+
+{% if data.is_bnpl %}
+Payment Type: Buy Now Pay Later (BNPL)
+Pay Today: {{ data.currency }} {{ data.bnpl_pay_today }}
+Installments: {{ data.bnpl_num_installments }} every {{ data.bnpl_interval_days }} day(s)
+{% elif data.is_buy_now %}
+Payment Type: Buy Now
+{% else %}
+Payment Type: Cart Checkout
+{% endif %}
+
+Items:
+{% for it in data.items %}
+- {{ it.title }} x{{ it.quantity }} — {{ data.currency }} {{ it.line_total }}
+{% endfor %}
+
+{% if data.cta and data.cta.url %}
+View your order: {{ data.cta.url }}
+{% endif %}
+
+Thanks,
+— The {{ app_name }} Team

@@ -1,0 +1,16 @@
+Payment Received
+
+Hi {{ user.first_name|default:user.email }},
+
+We have successfully received your payment.
+
+Item: {{ data.item_name }}
+Amount: ₦{{ data.amount }}
+{% if data.invoice_id %}
+Invoice ID: {{ data.invoice_id }}
+{% endif %}
+Date: {{ now|date:"F j, Y" }}
+
+Thank you for choosing {{ app_name }}.
+
+— The {{ app_name }} Team

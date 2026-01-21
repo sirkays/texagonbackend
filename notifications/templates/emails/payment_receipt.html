@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Payment Receipt</title>
+</head>
+<body style="font-family: Arial, sans-serif; background:#f7f7f7; padding:20px;">
+  <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff; padding:30px; border-radius:6px;">
+          <tr>
+            <td>
+                          <!-- LOGO -->
+              <p style="margin:0 0 20px 0;">
+                <img
+                  src="{{ logo_url }}"
+                  alt="{{ app_name }} logo"
+                  width="140"
+                  style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:140px;"
+                />
+              </p>
+
+              <h2 style="margin-top:0;">Payment Received ✅</h2>
+
+              <p>
+                Hi {{ user.first_name|default:user.email }},
+              </p>
+
+              <p>
+                We have successfully received your payment.
+              </p>
+
+              <table width="100%" cellpadding="8" cellspacing="0" style="margin:20px 0; border:1px solid #eee;">
+                <tr>
+                  <td><strong>Item</strong></td>
+                  <td>{{ data.item_name }}</td>
+                </tr>
+                <tr>
+                  <td><strong>Amount</strong></td>
+                  <td>₦{{ data.amount }}</td>
+                </tr>
+                {% if data.invoice_number %}
+                <tr>
+                  <td><strong>Invoice Number</strong></td>
+                  <td>{{ data.invoice_number }}</td>
+                </tr>
+                {% endif %}
+                {% if data.transaction_id %}
+                <tr>
+                  <td><strong>Transaction ID</strong></td>
+                  <td>{{ data.transaction_id }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                  <td><strong>Date</strong></td>
+                  <td>{{ now|date:"F j, Y" }}</td>
+                </tr>
+              </table>
+
+              <p>
+                Thank you for your payment and for trusting {{ app_name }}.
+              </p>
+
+              <p style="margin-top:30px;">
+                — The {{ app_name }} Team
+              </p>
+
+              <hr style="margin:30px 0; border:none; border-top:1px solid #eee;" />
+
+              <p style="font-size:12px; color:#777;">
+                This is an automated receipt. Please keep it for your records.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

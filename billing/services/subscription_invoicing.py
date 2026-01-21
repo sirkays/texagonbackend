@@ -19,7 +19,9 @@ from billing.models import (
     SubscriptionPlan,
 )
 from academics.models import ParentProfile, ParentChildLink, StudentProfile
-
+from texagonbackend.settings import FRONTEND_ORIGIN
+from notifications.services import dispatch
+from notifications.events import INVOICE_GENERATED_PARENT
 
 @dataclass
 class GenerateResult:
@@ -190,7 +192,7 @@ def generate_parent_children_subscription_invoices(
     *,
     org_id: Optional[int] = None,
     now=None,
-    due_in_days: int = 3,
+    due_in_days: int = 1,
     dry_run: bool = False,
     batch_size: int = 1000,
     user=None
@@ -425,6 +427,57 @@ def generate_parent_children_subscription_invoices(
                 )
             )
         InvoiceType.objects.bulk_create(invtype_rows, batch_size=batch_size)
+        # --- notify parents after commit (email + in-app) ---
+        def _notify_parents(created_invoices_snapshot):
+            
+
+            # build lookup: parent_id -> ParentProfile (already in parent_meta)
+            for inv in created_invoices_snapshot:
+                meta = inv.meta or {}
+                parent_id = meta.get("parent_profile_id")
+                student_id = meta.get("student_id")
+                if not parent_id:
+                    continue
+
+                pm = parent_meta.get(int(parent_id))
+                if not pm:
+                    continue
+
+                parent = pm["parent"]              # ParentProfile
+                parent_user = parent.user          # ✅ payer user
+
+                student = student_cache.get(int(student_id)) if student_id else None
+                student_name = (
+                    student.user.get_full_name() if student and getattr(student, "user", None)
+                    else "your child"
+                )
+
+                due_at = inv.due_at
+                due_at_str = timezone.localtime(due_at).strftime("%Y-%m-%d") if due_at else ""
+
+                # Adjust this to your actual frontend invoice page
+                invoice_url = f"{FRONTEND_ORIGIN}/invoice/invoices"
+
+                dispatch(
+                    users=[parent_user],
+                    message=INVOICE_GENERATED_PARENT,
+                    ctx={"app_name": "Texagon Academy"},
+                    data={
+                        "amount": str(inv.amount),
+                        "currency": inv.currency,
+                        "invoice_id": inv.id,
+                        "invoice_number": inv.number,
+                        "student_id": student_id,
+                        "student_name": student_name,
+                        "due_at": due_at_str,
+                        "cta": {"label": "View invoice", "url": invoice_url},
+                    },
+                    send_in_app=True,
+                    send_email=True,
+                    fail_silently=True,
+                )
+
+        transaction.on_commit(lambda: _notify_parents(created_invoices))
 
         # Optional: track last_billed_at per parent (useful for UI)
         # Set to period_start for “this cycle”

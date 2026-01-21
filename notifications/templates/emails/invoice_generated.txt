@@ -1,0 +1,15 @@
+New invoice generated
+
+Hi {{ user.first_name|default:user.email }},
+
+An invoice has been generated for {{ data.student_name }}.
+
+Amount: ₦{{ data.amount }}
+Invoice Number: {{ data.invoice_number }}
+Due Date: {{ data.due_at }}
+
+{% if data.cta %}
+View invoice: {{ data.cta.url }}
+{% endif %}
+
+— The {{ app_name }} Team

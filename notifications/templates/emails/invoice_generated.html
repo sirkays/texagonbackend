@@ -1,0 +1,138 @@
+<!-- templates/emails/invoice_generated.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>New Invoice Generated</title>
+</head>
+
+<body style="margin:0;padding:0;background:#f6f7fb;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+  <!-- Outer wrapper -->
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7fb;padding:24px 0;">
+    <tr>
+      <td align="center" style="padding:0 12px;">
+        <!-- Card -->
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0"
+               style="width:600px;max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 6px 18px rgba(17,24,39,0.08);">
+          <!-- Header -->
+          <tr>
+            <td style="background:#0f172a;padding:22px 24px;">
+              <div style="display:flex;align-items:center;gap:12px;">
+                {% if logo_url %}
+                  <img src="{{ logo_url }}" alt="{{ app_name }}" width="34" height="34"
+                       style="display:block;border-radius:8px;" />
+                {% endif %}
+                <div>
+                  <div style="font-size:14px;color:#cbd5e1;line-height:1.2;">{{ app_name }}</div>
+                  <div style="font-size:20px;color:#ffffff;font-weight:700;line-height:1.2;margin-top:2px;">
+                    New Invoice Generated
+                  </div>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:26px 24px;">
+              <p style="margin:0 0 12px 0;font-size:15px;line-height:1.6;color:#111827;">
+                Hi {{ user.first_name|default:user.email }},
+              </p>
+
+              <p style="margin:0 0 18px 0;font-size:15px;line-height:1.6;color:#111827;">
+                A new invoice has been generated{% if data.student_name %} for <b>{{ data.student_name }}</b>{% endif %}.
+                Please review the details below.
+              </p>
+
+              <!-- Summary box -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="border:1px solid #e5e7eb;border-radius:10px;">
+                <tr>
+                  <td style="padding:14px 14px 6px 14px;">
+                    <div style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;">
+                      Invoice Summary
+                    </div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:6px 14px 14px 14px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding:10px 0;border-bottom:1px solid #f3f4f6;">
+                          <span style="color:#6b7280;font-size:14px;">Invoice Number</span><br />
+                          <span style="color:#111827;font-size:16px;font-weight:700;">{{ data.invoice_number }}</span>
+                        </td>
+                      </tr>
+
+                      <tr>
+                        <td style="padding:10px 0;border-bottom:1px solid #f3f4f6;">
+                          <span style="color:#6b7280;font-size:14px;">Amount</span><br />
+                          <span style="color:#111827;font-size:16px;font-weight:700;">
+                            {% if data.currency %}{{ data.currency }} {% endif %}{{ data.amount }}
+                          </span>
+                        </td>
+                      </tr>
+
+                      <tr>
+                        <td style="padding:10px 0;">
+                          <span style="color:#6b7280;font-size:14px;">Due Date</span><br />
+                          <span style="color:#111827;font-size:16px;font-weight:700;">{{ data.due_at }}</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA -->
+              {% if data.cta and data.cta.url %}
+                <div style="margin:22px 0 8px 0;">
+                  <a href="{{ data.cta.url }}"
+                     style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:700;font-size:14px;">
+                    {{ data.cta.label|default:"View invoice" }}
+                  </a>
+                </div>
+                <p style="margin:10px 0 0 0;font-size:13px;line-height:1.5;color:#6b7280;">
+                  If the button doesn’t work, copy and paste this link into your browser:<br />
+                  <span style="color:#2563eb;">{{ data.cta.url }}</span>
+                </p>
+              {% endif %}
+
+              <!-- Extra note -->
+              <p style="margin:20px 0 0 0;font-size:14px;line-height:1.6;color:#374151;">
+                If you’ve already completed this payment, you can ignore this message.
+              </p>
+
+              <p style="margin:18px 0 0 0;font-size:14px;line-height:1.6;color:#374151;">
+                — The {{ app_name }} Team
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:16px 24px;background:#f9fafb;border-top:1px solid #eef2f7;">
+              <p style="margin:0;font-size:12px;line-height:1.5;color:#6b7280;">
+                This is an automated message. Please do not reply to this email.
+              </p>
+              <p style="margin:6px 0 0 0;font-size:12px;line-height:1.5;color:#9ca3af;">
+                Sent on {{ now|date:"F j, Y" }}.
+              </p>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Small spacer -->
+        <div style="height:18px;"></div>
+
+        <!-- Tiny footer (outside card) -->
+        <div style="max-width:600px;color:#9ca3af;font-size:12px;line-height:1.5;text-align:center;">
+          © {{ now|date:"Y" }} {{ app_name }}. All rights reserved.
+        </div>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

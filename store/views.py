@@ -4,7 +4,7 @@ import heapq
 from itertools import islice
 from decimal import Decimal
 from datetime import datetime
-
+from notifications.dispatcher import _dispatch_order_created
 from django.db import transaction
 from django.db.models import F, Q, Avg, Count, Prefetch
 from django.utils import timezone
@@ -596,6 +596,22 @@ def checkout_create_order(request):
 
             first_img = product.images.first()
             image_url = first_img.get_absolute_url(request) if first_img else None
+            items = [{
+                "title": product.title,
+                "quantity": quantity,
+                "line_total": str(_quant((product.price or Decimal("0.00")) * Decimal(quantity))),
+            }]
+
+            bnpl_info = {
+                "pay_today": str(pay_today),
+                "total_amount": str(agreement.total_amount),
+                "num_installments": agreement.num_installments,
+                "interval_days": agreement.interval_days,
+            }
+
+            transaction.on_commit(lambda: _dispatch_order_created(
+                user, order, items, is_bnpl=True, bnpl=bnpl_info
+            ))
 
             return Response(
                 {
@@ -684,6 +700,15 @@ def checkout_create_order(request):
 
             first_img = product.images.first()
             image_url = first_img.get_absolute_url(request) if first_img else None
+            items = [{
+                "title": product.title,
+                "quantity": quantity,
+                "line_total": str(_quant((product.price or Decimal("0.00")) * Decimal(quantity))),
+            }]
+
+            transaction.on_commit(lambda: _dispatch_order_created(
+                user, order, items, is_buy_now=True
+            ))
 
             return Response(
                 {
@@ -741,6 +766,15 @@ def checkout_create_order(request):
                 quantity=ci.quantity,
                 line_total=_quant(Decimal(ci.quantity) * (ci.product.price or Decimal("0.00"))),
             )
+        items = [{
+            "title": ci.product.title,
+            "quantity": ci.quantity,
+            "line_total": str(_quant(Decimal(ci.quantity) * (ci.product.price or Decimal("0.00")))),
+        } for ci in cart.items.select_related("product")]
+
+        transaction.on_commit(lambda: _dispatch_order_created(
+            user, order, items, is_buy_now=False
+        ))
 
         return Response(
             {"id": str(order.id), "order_id": str(order.id), "grand_total": str(order.grand_total)},
@@ -1108,7 +1142,6 @@ def orders_list(request):
                 "next_payment": next_payment,
                 "remaining_payments": remaining,
             })
-
         return Response({"results": data})
 
     except Exception as e:
