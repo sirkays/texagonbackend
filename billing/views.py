@@ -704,7 +704,7 @@ def confirm_payment(request):
             elif invoice_type and invoice_type.invoice_type == "store":
                 # Keep your existing store logic here (order/bnpl) — unchanged
                 # Make sure any exception here rolls back invoice paid update below.
-                if invoice_type.object_type == "order":
+                if invoice_type.object_type == "order" or invoice_type.object_type == "bnpl":
                     order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=user)
                     if not order or order is False:
                         raise ValueError("Order not found")
@@ -717,15 +717,12 @@ def confirm_payment(request):
                     CartItem.objects.filter(product__pk__in=list(products), cart__user=user).delete()
                     Cart.objects.filter(user=user).update(coupon=None)
 
-                    if order.coupon_code:
+                    if order.coupon_code and invoice_type.object_type == "order":
                         coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
                         if coupon:
                             coupon.used_count = (coupon.used_count or 0) + 1
                             coupon.save(update_fields=["used_count"])
 
-                elif invoice_type.object_type == "bnpl":
-                    # keep your BNPL code here if you want it in this endpoint
-                    pass
 
             elif invoice_type and invoice_type.invoice_type == "subscription":
                 # Your subscription activation logic (as you already wrote)
