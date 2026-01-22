@@ -1,3 +1,4 @@
+# store/utils.py
 from decimal import Decimal
 from django.utils import timezone
 from django.db.models import Avg, Count

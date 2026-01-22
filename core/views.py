@@ -3,24 +3,49 @@ from typing import Optional, Dict, Any, List
 import traceback
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q, Count, Max
+from django.shortcuts import get_object_or_404
+from django.utils.text import slugify
+
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
-from rest_framework import status
+
 from rest_framework_api_key.permissions import HasAPIKey
 
-from api.authentication import SessionTokenAuthentication  # your existing class
+from api.authentication import SessionTokenAuthentication
+from core.permissions import IsAdminAccess
+from rest_framework_api_key.permissions import HasAPIKey
+
 from orgs.models import OrganizationMembership
 from academics.models import StudentProfile
 from learning.models import (
-    Module, Lesson, Course, Enrollment,CoursePassCriteria
+    Module,
+    Lesson,
+    Course,
+    Enrollment,
+    CoursePassCriteria,
 )
-from .utils import (_get_student_for_user,_is_org_admin_or_teacher,_season_to_dict,
-    _parse_dt,_resolve_org,_criteria_to_dict,_parse_positive_int)
 from gamification.models import LeaderboardSeason
-from django.db import  transaction
-from django.utils.text import slugify
-from django.shortcuts import get_object_or_404
+
+from store.models import Category, Product, ProductImage
+from store.serializers import (
+    CategorySerializer,
+    ProductAdminSerializer,
+    ProductImageSerializer,
+)
+
+from .utils import (
+    _get_student_for_user,
+    _is_org_admin_or_teacher,
+    _season_to_dict,
+    _parse_dt,
+    _resolve_org,
+    _criteria_to_dict,
+    _parse_positive_int,
+)
+
 
 
 @api_view(["GET"])
@@ -562,3 +587,179 @@ def course_pass_criteria_view(request, course_id: int):
             {"detail": "Unexpected error", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+
+
+
+
+
+def _paginate(request, qs, serializer_cls, *, context=None):
+    page = int(request.query_params.get("page", 1) or 1)
+    page_size = int(request.query_params.get("page_size", 20) or 20)
+    page_size = max(1, min(page_size, 100))
+
+    total = qs.count()
+    start = (page - 1) * page_size
+    end = start + page_size
+    rows = qs[start:end]
+
+    ser = serializer_cls(rows, many=True, context=context or {})
+    return Response({
+        "count": total,
+        "page": page,
+        "page_size": page_size,
+        "results": ser.data
+    })
+
+
+# -------------------------
+# Categories CRUD
+# -------------------------
+
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_categories_list_create(request):
+    if request.method == "GET":
+        qs = Category.objects.all().order_by("name")
+        return _paginate(request, qs, CategorySerializer, context={"request": request})
+
+    ser = CategorySerializer(data=request.data, context={"request": request})
+    ser.is_valid(raise_exception=True)
+    obj = ser.save()
+    return Response(CategorySerializer(obj, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_categories_detail(request, category_id):
+    obj = Category.objects.filter(id=category_id).first()
+    if not obj:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        return Response(CategorySerializer(obj, context={"request": request}).data)
+
+    if request.method == "PATCH":
+        ser = CategorySerializer(obj, data=request.data, partial=True, context={"request": request})
+        ser.is_valid(raise_exception=True)
+        obj = ser.save()
+        return Response(CategorySerializer(obj, context={"request": request}).data)
+
+    # DELETE
+    obj.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# -------------------------
+# Products CRUD
+# -------------------------
+
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_products_list_create(request):
+    if request.method == "GET":
+        qs = Product.objects.select_related("category").prefetch_related("images").order_by("-created_at")
+
+        q = (request.query_params.get("q") or "").strip()
+        if q:
+            qs = qs.filter(
+                Q(title__icontains=q) |
+                Q(slug__icontains=q) |
+                Q(sku__icontains=q)
+            )
+
+        product_type = (request.query_params.get("product_type") or "").strip()
+        if product_type:
+            qs = qs.filter(product_type=product_type)
+
+        category_id = (request.query_params.get("category_id") or "").strip()
+        if category_id:
+            qs = qs.filter(category_id=category_id)
+
+        is_active = request.query_params.get("is_active")
+        if is_active in ("true", "false"):
+            qs = qs.filter(is_active=(is_active == "true"))
+
+        return _paginate(request, qs, ProductAdminSerializer, context={"request": request})
+
+    # POST create
+    ser = ProductAdminSerializer(data=request.data, context={"request": request})
+    ser.is_valid(raise_exception=True)
+    obj = ser.save()
+    return Response(ProductAdminSerializer(obj, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_products_detail(request, product_id):
+    obj = Product.objects.select_related("category").prefetch_related("images").filter(id=product_id).first()
+    if not obj:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        return Response(ProductAdminSerializer(obj, context={"request": request}).data)
+
+    if request.method == "PATCH":
+        ser = ProductAdminSerializer(obj, data=request.data, partial=True, context={"request": request})
+        ser.is_valid(raise_exception=True)
+        obj = ser.save()
+        return Response(ProductAdminSerializer(obj, context={"request": request}).data)
+
+    # DELETE
+    obj.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# -------------------------
+# Product Images (upload + delete + reorder)
+# -------------------------
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def admin_product_images_upload(request, product_id):
+    product = Product.objects.filter(id=product_id).first()
+    if not product:
+        return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # multipart expected: file in "product_image"
+    file = request.FILES.get("product_image")
+    if not file:
+        return Response({"detail": "product_image file is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    alt_text = request.data.get("alt_text", "") or ""
+    sort_order = int(request.data.get("sort_order") or 0)
+
+    img = ProductImage.objects.create(
+        product=product,
+        product_image=file,
+        alt_text=alt_text,
+        sort_order=sort_order,
+    )
+
+    return Response(ProductImageSerializer(img, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["DELETE", "PATCH"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_product_images_detail(request, image_id):
+    img = ProductImage.objects.select_related("product").filter(id=image_id).first()
+    if not img:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "PATCH":
+        # allow alt_text / sort_order edits
+        ser = ProductImageSerializer(img, data=request.data, partial=True, context={"request": request})
+        ser.is_valid(raise_exception=True)
+        img = ser.save()
+        return Response(ProductImageSerializer(img, context={"request": request}).data)
+
+    img.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)

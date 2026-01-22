@@ -704,7 +704,7 @@ def confirm_payment(request):
             elif invoice_type and invoice_type.invoice_type == "store":
                 # Keep your existing store logic here (order/bnpl) — unchanged
                 # Make sure any exception here rolls back invoice paid update below.
-                if invoice_type.object_type == "order" or invoice_type.object_type == "bnpl":
+                if invoice_type.object_type == "order":
                     order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=user)
                     if not order or order is False:
                         raise ValueError("Order not found")
@@ -722,6 +722,88 @@ def confirm_payment(request):
                         if coupon:
                             coupon.used_count = (coupon.used_count or 0) + 1
                             coupon.save(update_fields=["used_count"])
+                elif invoice_type.object_type == "bnpl":
+                    order = get_object_or_404_ajax(Order, pk=invoice_type.object_id, user=request.user)
+                    if not order or order is False:
+                        return Response({"status":"failed", "message":"Order not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+                    # 1) Mark order as paid OR keep pending + bnpl flag (your call)
+                    order.status = "paid"
+                    order.save(update_fields=["status"])
+                    order.reduce_stock()
+                    # 2) Create / ensure BNPLAgreement exists
+                    agreement = getattr(order, "bnpl_agreement", None)
+                    if agreement is None:
+                        # You MUST know what plan was chosen.
+                        # Ideally you stored plan on the order at create-order time.
+                        # Example: store chosen plan id in order.notes or a dedicated field.
+                        plan_id = invoice_type.meta.get('bnpl_plan_id')
+                        plan = BNPLPlanTemplate.objects.filter(id=plan_id, active=True).first()
+                        if not plan:
+                            return Response({"detail": "BNPL plan missing for this order."}, status=400)
+
+                        agreement = BNPLAgreement.objects.create(
+                            order=order,
+                            plan=plan,
+                            provider=plan.provider,
+                            status=BNPLAgreement.Status.PENDING,
+
+                            num_installments=plan.num_installments,
+                            interval_days=plan.interval_days,
+                            take_downpayment_now=plan.take_downpayment_now,
+
+                            currency=plan.currency or "NGN",
+                            principal_amount=order.grand_total,
+                            customer_fee_flat=plan.customer_fee_flat,
+                            customer_fee_rate=plan.customer_fee_rate,
+                            total_amount=order.grand_total,  # or principal + fee if that’s your design
+
+                            provider_checkout_id=subscription_payment.reference,  # optional mapping
+                        )
+
+                    # 3) Initialize schedule if not already created
+                    if not agreement.installments.exists():
+                        agreement.initialize_schedule()
+
+                    # 4) Mark installment #1 as captured using the paid amount
+                    # The payment amount is subscription_payment.amount (invoice.amount)
+                    meta = invoice_type.meta or {}
+                    installment_id = meta.get("installment_id")
+
+                    inst_qs = agreement.installments.order_by("index")
+
+                    if installment_id:
+                        inst = inst_qs.filter(id=installment_id).first()
+                        if not inst:
+                            return Response({"detail": "Installment not found for this agreement."}, status=400)
+                    else:
+                        # fallback (initial downpayment)
+                        inst = inst_qs.first()
+
+                    if not inst:
+                        return Response({"detail": "BNPL schedule missing."}, status=500)
+
+                    # ✅ prevent double pay
+                    if inst.is_settled:
+                        return Response({"detail": "Installment already settled."}, status=400)
+
+                    # ✅ optional: block paying before due date (your policy)
+                    if inst.due_at and inst.due_at > timezone.now():
+                        return Response({"detail": "Installment is not due yet."}, status=400)
+
+                    inst.mark_captured(subscription_payment.amount)
+
+                    # 5) Clear cart items (same as your normal order flow)
+                    products = OrderItem.objects.filter(order=order).values_list("product", flat=True)
+                    CartItem.objects.filter(product__pk__in=list(products), cart__user=request.user).delete()
+                    Cart.objects.filter(user=request.user).update(coupon=None)
+
+                    # 6) Coupon used_count handling (optional — but keep consistent with normal checkout)
+                    if order.coupon_code:
+                        coupon = get_object_or_404_ajax(Coupon, code=order.coupon_code)
+                        if coupon:
+                            coupon.used_count = coupon.used_count + 1
+                            coupon.save()
 
 
             elif invoice_type and invoice_type.invoice_type == "subscription":
