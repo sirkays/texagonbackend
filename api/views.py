@@ -14,7 +14,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.response import Response
 from rest_framework import permissions
 from rest_framework_api_key.permissions import HasAPIKey
-from accounts.models import User
+from accounts.models import User,AdminAccess
 from .authentication import SessionTokenAuthentication
 from .models import SessionToken
 from academics.models import Language
@@ -343,10 +343,20 @@ class ClassroomViewSet(APIKeySessionViewSet):
             return self._org_error
         return super().retrieve(request, *args, **kwargs)
 
-
 class SubjectViewSet(APIKeySessionViewSet):
-    queryset = Subject.objects.all()
+    queryset = Subject.objects.all()   # ✅ add this
     serializer_class = SubjectSerializer
+
+    def get_queryset(self):
+        user = self.request.user       # ✅ define user
+
+        try:
+            admin_access = user.adminaccess
+            return Subject.objects.filter(
+                organization=admin_access.selected_organization
+            )
+        except AdminAccess.DoesNotExist:
+            return Subject.objects.none()
 
 class LanguageViewSet(APIKeySessionViewSet):
     queryset = Language.objects.all()

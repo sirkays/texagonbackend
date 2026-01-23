@@ -19,7 +19,8 @@ from core.permissions import IsAdminAccess
 from rest_framework_api_key.permissions import HasAPIKey
 
 from orgs.models import OrganizationMembership
-from academics.models import StudentProfile
+from academics.models import StudentProfile, Classroom, TeacherProfile
+
 from learning.models import (
     Module,
     Lesson,
@@ -44,6 +45,9 @@ from .utils import (
     _resolve_org,
     _criteria_to_dict,
     _parse_positive_int,
+    _get_user_avatar_url,
+    _try_fetch_courses_for_classroom
+
 )
 
 
@@ -763,3 +767,91 @@ def admin_product_images_detail(request, image_id):
 
     img.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_classroom_modal_data(request, classroom_id: int):
+    try:
+        """
+        GET /api/admin/classrooms/<id>/modal/
+
+        Returns ONLY what the ClassroomDetailsModal needs.
+        ✅ No Student Grade included.
+        """
+        classroom = (
+            Classroom.objects.select_related("organization")
+            .prefetch_related("teachers")
+            .filter(id=classroom_id)
+            .first()
+        )
+        if not classroom:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Students in this classroom
+        students_qs = (
+            StudentProfile.objects.select_related("user")
+            .filter(organization_id=classroom.organization_id, current_classroom_id=classroom.id)
+            .order_by("user__first_name", "user__last_name")
+        )
+
+        students = [
+            {
+                "id": s.id,
+                "user_id": s.user_id,
+                "name": _full_name(s.user),
+                "email": getattr(s.user, "email", "") or "",
+                "avatar_url": _get_user_avatar_url(request, s.user),
+                "admission_no": s.admission_no or "",
+            }
+            for s in students_qs
+        ]
+
+        # Teachers attached to classroom (many-to-many)
+        teacher_user_ids = list(classroom.teachers.values_list("id", flat=True))
+        teachers_profiles = (
+            TeacherProfile.objects.select_related("user")
+            .prefetch_related("specialties")
+            .filter(organization_id=classroom.organization_id, user_id__in=teacher_user_ids)
+        )
+        # map for quick lookup
+        tp_by_user = {tp.user_id: tp for tp in teachers_profiles}
+
+        teachers = []
+        for u in classroom.teachers.all():
+            tp = tp_by_user.get(u.id)
+            teachers.append(
+                {
+                    "user_id": u.id,
+                    "name": u.get_full_name(),
+                    "email": getattr(u, "email", "") or "",
+                    "avatar_url": _get_user_avatar_url(request, u),
+                    "specialties": [s.name for s in (tp.specialties.all() if tp else [])],
+                }
+            )
+
+        # Courses (optional inference)
+        courses, courses_count = _try_fetch_courses_for_classroom(classroom)
+
+        payload = {
+            "id": classroom.id,
+            "name": classroom.name,
+            "code": classroom.code,
+            "description": getattr(classroom, "description", "") or "",
+            "stats": {
+                "students": len(students),
+                "teachers": len(teachers),
+                "courses": courses_count,
+            },
+            "students": students,  # ✅ no grade field here
+            "teachers": teachers,
+            "courses": courses,
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(e)
+    return Response({}, status=status.HTTP_400_BAD_REQUEST)

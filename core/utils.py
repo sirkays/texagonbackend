@@ -294,6 +294,7 @@ def _course_to_card_dict(c) -> dict:
         "modules": c.modules_count or 0,
         "status": "active" if c.is_active else "inactive",
         "progress": progress_int,
+        "description":c.description,
     }
 
 
@@ -600,3 +601,45 @@ def _enrollment_to_dict(e: Enrollment) -> dict:
             "course_type": getattr(c, "course_type", "public"),
         },
     }
+
+
+
+
+
+
+def _get_user_avatar_url(request, user) -> str | None:
+    """
+    Optional: if you store avatar/photo on User model.
+    Adjust this to your actual user field (e.g. user.avatar, user.photo, etc).
+    """
+    avatar = getattr(user, "avatar", None) or getattr(user, "photo", None)
+    if not avatar:
+        return None
+    try:
+        return request.build_absolute_uri(avatar.url)
+    except Exception:
+        return None
+
+
+def _try_fetch_courses_for_classroom(classroom: Classroom):
+    """
+    Courses are not directly linked to Classroom in the snippet you shared.
+    If you have learning.Enrollment with (student -> StudentProfile, course -> Course),
+    we can infer courses from students in this classroom.
+    If your schema differs, edit here.
+    """
+    try:
+        from learning.models import Enrollment  # type: ignore
+    except Exception:
+        return [], 0
+
+    qs = (
+        Enrollment.objects.select_related("course")
+        .filter(student__current_classroom_id=classroom.id)
+        .values("course_id", "course__name")
+        .distinct()
+        .order_by("course__name")
+    )
+
+    courses = [{"id": row["course_id"], "title": row["course__name"]} for row in qs]
+    return courses, len(courses)

@@ -8,7 +8,7 @@ from .views import (update_subscription_payment,create_subscription_payment,fetc
     update_complaint,
     delete_complaint_attachment,
     add_complaint_attachments,
-    flutterwave_webhook
+    flutterwave_webhook,generate_invoice
 )
 
 urlpatterns = [
@@ -17,6 +17,7 @@ urlpatterns = [
 
     path("api/fetch/invoices/", fetch_parent_invoices, name="fetch_parent_invoices"),
 
+    path("api/parent/<int:pk>/generate-invoice/", generate_invoice, name="confirm_payment"),
 
     path("api/confirm/payment/", confirm_payment, name="confirm_payment"),
 

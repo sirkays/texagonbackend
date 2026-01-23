@@ -289,6 +289,7 @@ class TeacherListSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(read_only=True)
     name = serializers.SerializerMethodField()
     email = serializers.EmailField(source="user.email", read_only=True)
+    phone = serializers.CharField(source="user.phone", read_only=True)
     experience = serializers.IntegerField()
     bio = serializers.CharField()
     specialties = serializers.SerializerMethodField()
@@ -298,7 +299,7 @@ class TeacherListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TeacherProfile
-        fields = ["id", "name", "email", "experience", "bio", "specialties", "courses", "avatarUrl", "status"]
+        fields = ["id", "name", "email", "phone", "experience", "bio", "specialties", "courses", "avatarUrl", "status"]
 
     def get_name(self, obj):
         u = obj.user

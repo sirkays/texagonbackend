@@ -2,6 +2,7 @@ from __future__ import annotations
 import traceback
 import heapq
 import secrets
+from core.permissions import IsAdminAccess
 from datetime import datetime
 from decimal import Decimal,Decimal, ROUND_HALF_UP, InvalidOperation
 from itertools import islice
@@ -40,6 +41,7 @@ from rest_framework.permissions import AllowAny
 from texagonbackend.settings import FRONTEND_ORIGIN
 from notifications.services import dispatch
 from notifications.events import PAYMENT_CONFIRMED
+from billing.services.subscription_invoicing import generate_parent_children_subscription_invoices
 
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25MB per file
 ALLOWED_CONTENT_TYPES = None  # e.g. {"image/png","image/jpeg","application/pdf"}
@@ -530,6 +532,41 @@ def fetch_parent_invoices(request):
         return Response({"count": len(data), "results": data}, status=status.HTTP_200_OK)
     except Exception as e:
         print(e)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey & IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def generate_invoice(request, pk):
+    try:
+        parent_profile = ParentProfile.objects.select_related(
+            "user", "organization"
+        ).get(pk=pk)
+    except ParentProfile.DoesNotExist:
+        return Response(
+            {"detail": "Parent not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    result = generate_parent_children_subscription_invoices(
+        user=parent_profile.user,                    # ✅ limits to this parent
+        org_id=parent_profile.organization_id,       # ✅ correct org filter
+        now=timezone.now(),
+        due_in_days=1,
+        dry_run=True,
+    )
+
+    return Response(
+        {
+            "message": "Invoice generation completed",
+            "created": result.created,
+            "skipped_existing": result.skipped_existing,
+            "parents_processed": result.parents_processed,
+            "children_processed": result.children_processed,
+        },
+        status=status.HTTP_200_OK,
+    )
 
 
 

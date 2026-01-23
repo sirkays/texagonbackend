@@ -2686,6 +2686,9 @@ class ParentViewSet(viewsets.ModelViewSet):
                 user.primary_org = org
                 user.save(update_fields=["primary_org"])
 
+                parent.organization_subscription = OrganizationSubscription.get_lastest_org_sub(org)
+                parent.save()
+
             # Return detail payload
             detail = ParentDetailSerializer(parent, context={"request": request}).data
             return Response(detail, status=status.HTTP_201_CREATED)
@@ -2739,10 +2742,10 @@ class ParentViewSet(viewsets.ModelViewSet):
             if error:
                 return error
             parent = self.get_object()
-            student_id = request.data.get("student_id")
-            if not student_id:
-                return Response({"detail": "student_id is required."}, status=status.HTTP_400_BAD_REQUEST)
-            student = StudentProfile.objects.filter(id=student_id, organization=org).first()
+            email = request.data.get("student_email")
+            if not email:
+                return Response({"detail": "email is required."}, status=status.HTTP_400_BAD_REQUEST)
+            student = StudentProfile.objects.filter(user__email=email, organization=org).first()
             if not student:
                 return Response({"detail": "Student not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
             ParentChildLink.objects.get_or_create(parent=parent, student=student)

@@ -2,7 +2,7 @@
 from django.urls import path
 from .views import (active_modules_for_user,leaderboard_seasons_view,leaderboard_season_detail_view,leaderboard_season_set_active_view,
 course_pass_criteria_view,admin_categories_list_create,admin_categories_detail,admin_products_list_create,
-admin_products_detail,admin_product_images_upload,admin_product_images_detail)
+admin_products_detail,admin_product_images_upload,admin_product_images_detail,admin_classroom_modal_data)
 
 urlpatterns = [
     path("api/academics/modules/active/", active_modules_for_user, name="active-modules-for-user"),
@@ -20,4 +20,7 @@ urlpatterns = [
 
     path("api/admin/store/products/<uuid:product_id>/images/upload", admin_product_images_upload),
     path("api/admin/store/product-images/<uuid:image_id>", admin_product_images_detail),
+
+    # classroom
+     path("api/admin/classrooms/<int:classroom_id>/modal/", admin_classroom_modal_data),
 ]
