@@ -186,6 +186,7 @@ class Badge(NamedModel):
     points = models.PositiveIntegerField(default=0)  # threshold
     criteria = models.TextField(blank=True)
     rules = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)  # ✅ add this
 
     class Meta:
         verbose_name = "Badge"

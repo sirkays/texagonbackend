@@ -22,6 +22,7 @@ from gamification.models import (
     Streak,
     AchievementDefinition,
     AchievementAcquired,
+    ActivityEvent
 )
 from learning.models import Enrollment
 from orgs.models import OrganizationMembership
@@ -31,8 +32,188 @@ from core.utils import (
     _status_from_user_membership,
     _avatar_url_for,
     resolve_season,
+    _get_admin_selected_org_id
 )
 from api.permissions import RequiresActiveStudentSubscription
+from core.permissions import IsAdminAccess 
+from gamification.services.rules import SUPPORTED_METRICS
+from .serializers import AchievementDefinitionSerializer, BadgeSerializer
+from django.db import transaction
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_gamification_meta(request):
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # “what available”: event types that actually exist for this org
+    event_types = list(
+        ActivityEvent.objects.filter(organization_id=org_id)
+        .values_list("event_type", flat=True)
+        .distinct()
+        .order_by("event_type")
+    )
+
+    return Response(
+        {
+            "supported_metrics": sorted(list(SUPPORTED_METRICS)),
+            "available_event_types": event_types,
+            # "seed_templates": DEFAULT_ACHIEVEMENTS,  # optional
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+# -------- AchievementDefinition --------
+
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def admin_achievement_definitions(request):
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if request.method == "GET":
+        qs = AchievementDefinition.objects.all().order_by("code")
+        # optional filters
+        q = (request.query_params.get("q") or "").strip()
+        active = request.query_params.get("active")
+        if q:
+            qs = qs.filter(
+                Q(code__icontains=q) | Q(title__icontains=q) | Q(category__icontains=q)
+            )
+        if active in ("true", "false"):
+            qs = qs.filter(is_active=(active == "true"))
+
+        return Response(AchievementDefinitionSerializer(qs, many=True).data)
+
+    # POST create
+    serializer = AchievementDefinitionSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # attach org
+    obj = AchievementDefinition.objects.create(
+        organization_id=org_id,
+        **serializer.validated_data,
+    )
+    return Response(AchievementDefinitionSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def admin_achievement_definition_update(request, pk: int):
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+
+    obj = AchievementDefinition.objects.filter(id=pk).first()
+    if not obj:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = AchievementDefinitionSerializer(obj, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+    return Response(AchievementDefinitionSerializer(obj).data, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def admin_achievement_definition_deactivate(request, pk: int):
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+
+    obj = AchievementDefinition.objects.filter(id=pk).first()
+    if not obj:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    obj.is_active = False
+    obj.save(update_fields=["is_active"])
+    return Response({"detail": "Deactivated."}, status=status.HTTP_200_OK)
+
+
+# -------- Badge --------
+
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def admin_badges(request):
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if request.method == "GET":
+        qs = Badge.objects.all().order_by("points", "name")
+        q = (request.query_params.get("q") or "").strip()
+        active = request.query_params.get("active")
+        if q:
+            qs = qs.filter(Q(name__icontains=q))
+        if active in ("true", "false"):
+            qs = qs.filter(is_active=(active == "true"))
+
+        return Response(BadgeSerializer(qs, many=True).data)
+
+    serializer = BadgeSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    obj = Badge.objects.create(
+        organization_id=org_id,
+        **serializer.validated_data,
+    )
+    return Response(BadgeSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def admin_badge_update(request, pk: int):
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+
+    obj = Badge.objects.all(id=pk).first()
+    if not obj:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = BadgeSerializer(obj, data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+    return Response(BadgeSerializer(obj).data, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def admin_badge_deactivate(request, pk: int):
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+
+    obj = Badge.objects.filter(id=pk).first()
+    if not obj:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    obj.is_active = False
+    obj.save(update_fields=["is_active"])
+    return Response({"detail": "Deactivated."}, status=status.HTTP_200_OK)
+
 # ---------- helpers ----------
 def _get_student_for_user(user) -> Optional[StudentProfile]:
     mem = (OrganizationMembership.objects

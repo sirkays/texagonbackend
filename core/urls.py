@@ -2,7 +2,8 @@
 from django.urls import path
 from .views import (active_modules_for_user,leaderboard_seasons_view,leaderboard_season_detail_view,leaderboard_season_set_active_view,
 course_pass_criteria_view,admin_categories_list_create,admin_categories_detail,admin_products_list_create,
-admin_products_detail,admin_product_images_upload,admin_product_images_detail,admin_classroom_modal_data)
+admin_products_detail,admin_product_images_upload,admin_product_images_detail,admin_classroom_modal_data,
+admin_student_devices_search,admin_student_device_delete)
 
 urlpatterns = [
     path("api/academics/modules/active/", active_modules_for_user, name="active-modules-for-user"),
@@ -22,5 +23,9 @@ urlpatterns = [
     path("api/admin/store/product-images/<uuid:image_id>", admin_product_images_detail),
 
     # classroom
-     path("api/admin/classrooms/<int:classroom_id>/modal/", admin_classroom_modal_data),
+    path("api/admin/classrooms/<int:classroom_id>/modal/", admin_classroom_modal_data),
+
+    ### DELETING OF DEVICE ID
+    path("api/admin/student-devices", admin_student_devices_search),
+    path("api/admin/student-devices/<int:device_pk>/", admin_student_device_delete),
 ]

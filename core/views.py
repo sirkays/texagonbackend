@@ -29,6 +29,8 @@ from learning.models import (
     CoursePassCriteria,
 )
 from gamification.models import LeaderboardSeason
+from core.models import StudentDevice
+from core.permissions import IsAdminAccess   # your existing permission
 
 from store.models import Category, Product, ProductImage
 from store.serializers import (
@@ -46,7 +48,8 @@ from .utils import (
     _criteria_to_dict,
     _parse_positive_int,
     _get_user_avatar_url,
-    _try_fetch_courses_for_classroom
+    _try_fetch_courses_for_classroom,
+    _get_admin_selected_org_id
 
 )
 
@@ -855,3 +858,102 @@ def admin_classroom_modal_data(request, classroom_id: int):
     except Exception as e:
         print(e)
     return Response({}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+
+def _device_dict(d: StudentDevice):
+    return {
+        "id": d.id,
+        "device_id": d.device_id,
+        "user_agent": d.user_agent,
+        "first_seen": d.first_seen,
+        "last_seen": d.last_seen,
+    }
+
+
+def _student_result(sp: StudentProfile):
+    u = sp.user
+    full_name = (u.get_full_name() or "").strip()
+    return {
+        "student_id": sp.id,
+        "user_id": u.id,
+        "email": u.email,
+        "full_name": full_name or None,
+        "organization_id": sp.organization_id,
+        "devices": [_device_dict(d) for d in sp.devices.order_by("-last_seen")],
+    }
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_student_devices_search(request):
+    """
+    GET /api/admin/student-devices?query=...&limit=20
+    Search by student email or name, return students + their devices.
+    Scoped to adminaccess.selected_organization.
+    """
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response(
+            {"detail": "No selected organization for this admin."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    query = (request.query_params.get("query") or "").strip()
+    limit = int(request.query_params.get("limit") or 20)
+    limit = max(1, min(limit, 50))
+
+    if not query:
+        return Response({"count": 0, "results": []}, status=status.HTTP_200_OK)
+
+    # Search students in selected org by email or name
+    qs = (
+        StudentProfile.objects
+        .select_related("user")
+        .prefetch_related("devices")
+        .filter(organization_id=org_id)
+        .filter(
+            Q(user__email__icontains=query)
+            | Q(user__first_name__icontains=query)
+            | Q(user__last_name__icontains=query)
+            | Q(user__first_name__icontains=query.split(" ")[0])  # helps partials
+        )
+        .order_by("user__first_name", "user__last_name")
+    )
+
+    students = list(qs[:limit])
+    return Response(
+        {"count": qs.count(), "results": [_student_result(sp) for sp in students]},
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def admin_student_device_delete(request, device_pk: int):
+    """
+    DELETE /api/admin/student-devices/<device_pk>/
+    Deletes one StudentDevice (scoped to admin selected org).
+    """
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response(
+            {"detail": "No selected organization for this admin."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    device = (
+        StudentDevice.objects
+        .select_related("student", "student__user")
+        .filter(id=device_pk, student__organization_id=org_id)
+        .first()
+    )
+    if not device:
+        return Response({"detail": "Device not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    device.delete()
+    return Response({"detail": "Deleted."}, status=status.HTTP_200_OK)

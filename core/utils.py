@@ -643,3 +643,13 @@ def _try_fetch_courses_for_classroom(classroom: Classroom):
 
     courses = [{"id": row["course_id"], "title": row["course__name"]} for row in qs]
     return courses, len(courses)
+
+
+
+def _get_admin_selected_org_id(request):
+    adminaccess = getattr(request.user, "adminaccess", None)
+    if not adminaccess or not adminaccess.active:
+        return None
+    if not adminaccess.selected_organization_id:
+        return None
+    return adminaccess.selected_organization_id
