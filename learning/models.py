@@ -2,7 +2,9 @@ from django.db import models
 from django.conf import settings
 from core.models import TimeStampedModel, NamedModel
 from live.models import TutoringBooking
-from cloudinary_storage.storage import RawMediaCloudinaryStorage
+from cloudinary_storage.storage import RawMediaCloudinaryStorage,MediaCloudinaryStorage
+from .utils.image import convert_to_webp
+
 
 class Course(NamedModel):
     USAGE_CHOICE = (
@@ -82,6 +84,7 @@ class Module(NamedModel):
         ordering = ["order"]
         unique_together = ("course", "order")
 
+
 class Lesson(NamedModel):
     class ContentType(models.TextChoices):
         VIDEO = "video", "Video"
@@ -91,13 +94,21 @@ class Lesson(NamedModel):
         LINK = "link", "External Link"
 
     module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name="lessons")
-    cover_image = models.ImageField(upload_to="texagon/covers/", blank=True, null=True)
+    cover_image = models.ImageField(
+        upload_to="texagon/covers/",
+        storage=MediaCloudinaryStorage(),
+        blank=True,
+        null=True
+    )
+
+
     order = models.PositiveIntegerField(default=1)
     content_type = models.CharField(max_length=16, choices=ContentType.choices)
     file = models.FileField(
-        upload_to="texagon/lessons/files/", 
+        upload_to="texagon/lessons/files/",
         storage=RawMediaCloudinaryStorage(),
-        blank=True, null=True
+        blank=True,
+        null=True
     )
     url = models.URLField(blank=True)
     duration_seconds = models.PositiveIntegerField(default=0)
@@ -107,6 +118,12 @@ class Lesson(NamedModel):
     class Meta:
         ordering = ["order"]
         unique_together = ("module", "order")
+
+    def save(self, *args, **kwargs):
+        if self.cover_image and not self.cover_image.name.endswith(".webp"):
+            self.cover_image = convert_to_webp(self.cover_image)
+        super().save(*args, **kwargs)
+
 
 class Material(TimeStampedModel):
     class Kind(models.TextChoices):

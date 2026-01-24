@@ -465,6 +465,7 @@ def fetch_parent_invoices(request):
         # -----------------------
         # Query
         # -----------------------
+        print(membership, " mem....")
         qs = (
             SubscriptionInvoice.objects
             .select_related(
@@ -475,7 +476,7 @@ def fetch_parent_invoices(request):
             .filter(organization_membership=membership)
             .order_by("-issued_at")
         )
-
+        print(qs, " this is where wwe are...")
         if status_param:
             qs = qs.filter(status=status_param)
 
@@ -492,7 +493,7 @@ def fetch_parent_invoices(request):
                 Q(invoicetype__object_type__icontains=search_param) |
                 Q(invoicetype__object_id__isnull=False, invoicetype__object_id__icontains=search_param)
             )
-
+        print(qs ," again....")
         # -----------------------
         # Serializer
         # -----------------------
@@ -529,6 +530,7 @@ def fetch_parent_invoices(request):
             }
 
         data = [_serialize(inv) for inv in qs]
+        print(data, " data")
         return Response({"count": len(data), "results": data}, status=status.HTTP_200_OK)
     except Exception as e:
         print(e)
@@ -554,7 +556,7 @@ def generate_invoice(request, pk):
         org_id=parent_profile.organization_id,       # ✅ correct org filter
         now=timezone.now(),
         due_in_days=1,
-        dry_run=True,
+        dry_run=False,
     )
 
     return Response(
