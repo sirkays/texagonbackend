@@ -153,15 +153,17 @@ def admin_badges(request):
     org_id = _get_admin_selected_org_id(request)
     if not org_id:
         return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
-
+    print("sckdlcmkdcmdkmk")
     if request.method == "GET":
         qs = Badge.objects.all().order_by("points", "name")
+        print(qs, " dcdkmckdcmk")
         q = (request.query_params.get("q") or "").strip()
         active = request.query_params.get("active")
         if q:
             qs = qs.filter(Q(name__icontains=q))
         if active in ("true", "false"):
-            qs = qs.filter(is_active=(active == "true"))
+            pass
+            #qs = qs.filter(is_active=(active == "true"))
 
         return Response(BadgeSerializer(qs, many=True).data)
 
