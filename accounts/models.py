@@ -68,6 +68,7 @@ class AdminAccess(models.Model):
         null=True,
     )
     active = models.BooleanField(default=True)
+    super_user = models.BooleanField(default=False)
 
     def clean(self):
         if self.user and not (self.user.is_staff or self.user.is_superuser):

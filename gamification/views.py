@@ -97,10 +97,10 @@ def admin_achievement_definitions(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     # attach org
-    obj = AchievementDefinition.objects.create(
-        organization_id=org_id,
-        **serializer.validated_data,
-    )
+    if request.user.adminaccess.super_user:
+        obj = AchievementDefinition.objects.create(
+            **serializer.validated_data,
+        )
     return Response(AchievementDefinitionSerializer(obj).data, status=status.HTTP_201_CREATED)
 
 
@@ -121,7 +121,8 @@ def admin_achievement_definition_update(request, pk: int):
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    serializer.save()
+    if request.user.adminaccess.super_user:
+        serializer.save()
     return Response(AchievementDefinitionSerializer(obj).data, status=status.HTTP_200_OK)
 
 
@@ -129,19 +130,33 @@ def admin_achievement_definition_update(request, pk: int):
 @permission_classes([HasAPIKey, IsAdminAccess])
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
-def admin_achievement_definition_deactivate(request, pk: int):
+def admin_achievement_definition_status_update(request, pk: int):
     org_id = _get_admin_selected_org_id(request)
     if not org_id:
-        return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"detail": "No selected organization."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     obj = AchievementDefinition.objects.filter(id=pk).first()
     if not obj:
-        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
 
-    obj.is_active = False
-    obj.save(update_fields=["is_active"])
-    return Response({"detail": "Deactivated."}, status=status.HTTP_200_OK)
+    # Toggle active/inactive
+    obj.is_active = not obj.is_active
+    if request.user.adminaccess.super_user:
+        obj.save(update_fields=["is_active"])
 
+    return Response(
+        {
+            "detail": "Activated." if obj.is_active else "Deactivated.",
+            "is_active": obj.is_active,
+        },
+        status=status.HTTP_200_OK,
+    )
 
 # -------- Badge --------
 
@@ -153,10 +168,8 @@ def admin_badges(request):
     org_id = _get_admin_selected_org_id(request)
     if not org_id:
         return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
-    print("sckdlcmkdcmdkmk")
     if request.method == "GET":
         qs = Badge.objects.all().order_by("points", "name")
-        print(qs, " dcdkmckdcmk")
         q = (request.query_params.get("q") or "").strip()
         active = request.query_params.get("active")
         if q:
@@ -170,11 +183,10 @@ def admin_badges(request):
     serializer = BadgeSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    obj = Badge.objects.create(
-        organization_id=org_id,
-        **serializer.validated_data,
-    )
+    if request.user.adminaccess.super_user:
+        obj = Badge.objects.create(
+            **serializer.validated_data,
+        )
     return Response(BadgeSerializer(obj).data, status=status.HTTP_201_CREATED)
 
 
@@ -194,27 +206,41 @@ def admin_badge_update(request, pk: int):
     serializer = BadgeSerializer(obj, data=request.data, partial=True)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    serializer.save()
+    if request.user.adminaccess.super_user:
+        serializer.save()
     return Response(BadgeSerializer(obj).data, status=status.HTTP_200_OK)
-
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey, IsAdminAccess])
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
-def admin_badge_deactivate(request, pk: int):
+def admin_badge_status_update(request, pk: int):
     org_id = _get_admin_selected_org_id(request)
     if not org_id:
-        return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"detail": "No selected organization."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     obj = Badge.objects.filter(id=pk).first()
     if not obj:
-        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
 
-    obj.is_active = False
-    obj.save(update_fields=["is_active"])
-    return Response({"detail": "Deactivated."}, status=status.HTTP_200_OK)
+    # Toggle active/inactive
+    obj.is_active = not obj.is_active
+    if request.user.adminaccess.super_user:
+        obj.save(update_fields=["is_active"])
+
+    return Response(
+        {
+            "detail": "Activated." if obj.is_active else "Deactivated.",
+            "is_active": obj.is_active,
+        },
+        status=status.HTTP_200_OK,
+    )
 
 # ---------- helpers ----------
 def _get_student_for_user(user) -> Optional[StudentProfile]:
@@ -231,11 +257,6 @@ def _get_student_for_user(user) -> Optional[StudentProfile]:
     return (StudentProfile.objects
             .filter(user=user).select_related("user", "organization")
             .order_by("-id").first())
-from typing import Any, Dict, List, Optional
-
-from django.db.models import Count
-# from academics.models import StudentProfile
-# from achievements.models import BadgeAward, Streak
 
 
 def _avatar_url(u) -> Optional[str]:

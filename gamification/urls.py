@@ -3,10 +3,10 @@ from .views import (leaderboard_overview,parent_rewards,
     admin_gamification_meta,
     admin_achievement_definitions,
     admin_achievement_definition_update,
-    admin_achievement_definition_deactivate,
+    admin_achievement_definition_status_update,
     admin_badges,
     admin_badge_update,
-    admin_badge_deactivate,
+    admin_badge_status_update,
 )
 
 urlpatterns = [
@@ -19,10 +19,10 @@ urlpatterns = [
 
     path("api/admin/gamification/achievements", admin_achievement_definitions),
     path("api/admin/gamification/achievements/<int:pk>", admin_achievement_definition_update),
-    path("api/admin/gamification/achievements/<int:pk>/deactivate", admin_achievement_definition_deactivate),
+    path("api/admin/gamification/achievements/<int:pk>/status", admin_achievement_definition_status_update),
 
     path("api/admin/gamification/badges", admin_badges),
     path("api/admin/gamification/badges/<int:pk>", admin_badge_update),
-    path("api/admin/gamification/badges/<int:pk>/deactivate", admin_badge_deactivate),
+    path("api/admin/gamification/badges/<int:pk>/status", admin_badge_status_update),
 
 ]
