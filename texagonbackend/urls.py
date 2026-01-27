@@ -4,8 +4,13 @@ from django.urls import path, include
 from django.conf.urls.static import static
 from django.contrib.auth import views as auth_views
 from django.conf import settings
+
+def healthz(_request):
+    return JsonResponse({"ok": True})
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path("healthz/", healthz),
     path('api/', include('api.urls')),
     path('accounts/', include('accounts.urls')),
     path('assessments/', include('assessments.urls')),

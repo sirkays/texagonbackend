@@ -4,7 +4,7 @@ import traceback
 from datetime import timedelta
 
 from django.conf import settings
-from django.db.models import Q, Sum, Count
+from django.db.models import Q, Sum, Count, Value, IntegerField
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -15,6 +15,7 @@ from api.authentication import SessionTokenAuthentication
 from academics.models import ParentProfile, ParentChildLink, StudentProfile
 from assessments.models import TestAttempt
 from codeide.models import CodeSubmission
+from django.db.models.functions import Coalesce
 from gamification.models import (
     Badge,
     BadgeAward,
@@ -22,10 +23,11 @@ from gamification.models import (
     Streak,
     AchievementDefinition,
     AchievementAcquired,
-    ActivityEvent
+    ActivityEvent,
+    LeaderboardSeason,
 )
 from learning.models import Enrollment
-from orgs.models import OrganizationMembership
+from orgs.models import OrganizationMembership,Organization
 from core.utils import (
     _sum_points,
     _resolve_org,
@@ -39,6 +41,140 @@ from core.permissions import IsAdminAccess
 from gamification.services.rules import SUPPORTED_METRICS
 from .serializers import AchievementDefinitionSerializer, BadgeSerializer
 from django.db import transaction
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_student_leaderboard(request):
+    """
+    Admin leaderboard:
+    - filter by season
+    - search by student name
+    - scope by selected org or all orgs
+    """
+    try:
+        org_id = _get_admin_selected_org_id(request)
+        if not org_id:
+            return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # query params
+        season_id = request.query_params.get("season")
+        q = (request.query_params.get("q") or "").strip()
+        org_scope = (request.query_params.get("org_scope") or "selected").strip()  # selected | all
+        page = int(request.query_params.get("page") or 1)
+        page_size = min(int(request.query_params.get("page_size") or 25), 100)
+
+        # base student qs
+        students = StudentProfile.objects.select_related("user", "organization")
+
+        if org_scope != "all":
+            students = students.filter(organization_id=org_id)
+
+        if q:
+            # adjust fields to match your User model fields
+            students = students.filter(
+                Q(user__first_name__icontains=q) |
+                Q(user__last_name__icontains=q) |
+                Q(user__email__icontains=q)
+            )
+
+        # season filter for transactions/badges/achievements
+        season = None
+        if season_id:
+            season = LeaderboardSeason.objects.filter(id=season_id).first()
+
+        tx_filter = Q(point_transactions__isnull=False)
+        if season:
+            tx_filter &= Q(point_transactions__season=season)
+        else:
+            # if no season passed, you can default to active for selected org
+            # (or return error; your choice)
+            active = LeaderboardSeason.get_active(Organization.objects.filter(id=org_id).first())
+            if active:
+                season = active
+                tx_filter &= Q(point_transactions__season=active)
+
+        # annotate totals
+        students = students.annotate(
+            total_points=Coalesce(
+                Sum("point_transactions__points", filter=tx_filter),
+                Value(0),
+                output_field=IntegerField(),
+            ),
+            badges_count=Coalesce(
+                Count("badge_awards", filter=Q(badge_awards__season=season) if season else Q()),
+                Value(0),
+                output_field=IntegerField(),
+            ),
+            achievements_count=Coalesce(
+                Count("achievements_acquired", filter=Q(achievements_acquired__season=season) if season else Q()),
+                Value(0),
+                output_field=IntegerField(),
+            ),
+        ).order_by("-total_points", "user__last_name", "user__first_name")
+
+        total = students.count()
+
+        # pagination
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_qs = students[start:end]
+
+        # compute rank (simple rank = offset + index + 1)
+        results = []
+        for idx, s in enumerate(page_qs, start=start + 1):
+            results.append({
+                "rank": idx,
+                "student_id": s.id,
+                "name": s.user.get_full_name() or s.user.username,
+                "organization": s.organization.name if s.organization else None,
+                "total_points": int(s.total_points or 0),
+                "badges_count": int(s.badges_count or 0),
+                "achievements_count": int(s.achievements_count or 0),
+            })
+
+        return Response({
+            "season": {"id": season.id, "name": season.name} if season else None,
+            "org_scope": org_scope,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "results": results,
+        })
+    except Exception as e:
+        print(e)
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_leaderboard_seasons(request):
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
+
+    org_scope = (request.query_params.get("org_scope") or "selected").strip()
+
+    qs = LeaderboardSeason.objects.all()
+    #if org_scope != "all":
+        #qs = qs.filter(organization_id=org_id)
+
+    qs = qs.order_by("-start_at")
+
+    return Response([
+        {
+            "id": s.id,
+            "name": s.name,
+            "slug": s.slug,
+            "start_at": s.start_at,
+            "end_at": s.end_at,
+            "is_active": s.is_active,
+            "organization_id": s.organization_id,
+        }
+        for s in qs
+    ])
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey, IsAdminAccess])
@@ -101,7 +237,8 @@ def admin_achievement_definitions(request):
         obj = AchievementDefinition.objects.create(
             **serializer.validated_data,
         )
-    return Response(AchievementDefinitionSerializer(obj).data, status=status.HTTP_201_CREATED)
+        return Response(AchievementDefinitionSerializer(obj).data, status=status.HTTP_201_CREATED)
+    return Response({"detail":"Url not available"}, status=status.HTTP_404_NOT_FOUND)
 
 
 @api_view(["PATCH"])
@@ -187,7 +324,8 @@ def admin_badges(request):
         obj = Badge.objects.create(
             **serializer.validated_data,
         )
-    return Response(BadgeSerializer(obj).data, status=status.HTTP_201_CREATED)
+        return Response(BadgeSerializer(obj).data, status=status.HTTP_201_CREATED)
+    return Response({"detail":"Url not available"}, status=status.HTTP_404_NOT_FOUND)
 
 
 @api_view(["PATCH"])
@@ -199,13 +337,14 @@ def admin_badge_update(request, pk: int):
     if not org_id:
         return Response({"detail": "No selected organization."}, status=status.HTTP_400_BAD_REQUEST)
 
-    obj = Badge.objects.all(id=pk).first()
+    obj = Badge.objects.filter(id=pk).first()
     if not obj:
         return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
     serializer = BadgeSerializer(obj, data=request.data, partial=True)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
     if request.user.adminaccess.super_user:
         serializer.save()
     return Response(BadgeSerializer(obj).data, status=status.HTTP_200_OK)

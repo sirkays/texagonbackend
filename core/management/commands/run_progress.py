@@ -1,4 +1,4 @@
-# learning/management/commands/recalc_enrollment_progress.py
+# texagon_academy\texagonbackend\core\management\commands\run_progress.py
 from __future__ import annotations
 
 from contextlib import contextmanager

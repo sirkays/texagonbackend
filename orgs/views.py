@@ -744,7 +744,16 @@ def admin_complaints(request):
     page = max(int(request.query_params.get("page") or 1), 1)
     page_size = min(max(int(request.query_params.get("page_size") or 10), 1), 50)
 
-    qs = Complaint.objects.all().order_by("-created_at")
+    qs = (
+        Complaint.objects
+        .filter(
+            created_by__memberships__organization=org,
+            created_by__memberships__is_active=True,
+        )
+        .distinct()
+        .order_by("-created_at")
+    )
+
 
     # If your Complaint should be org-scoped, add your org filter here.
     # Example (if you add organization FK later):

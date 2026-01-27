@@ -1,4 +1,4 @@
-# gamification/management/commands/run_gamification.py
+# texagon_academy\texagonbackend\core\management\commands\run_gamification.py
 from django.core.management.base import BaseCommand
 from django.db import models
 from orgs.models import Organization

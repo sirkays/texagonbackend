@@ -1,3 +1,4 @@
+# texagon_academy\texagonbackend\billing\management\commands\generate_subscription_invoices.py
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 

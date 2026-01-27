@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     "api",
     "rest_framework",
     "rest_framework_api_key",
+    "django_celery_results",
 
 ]
 
@@ -235,3 +236,17 @@ if os.environ.get("LOCAL") == "0":
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024      # 50MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024      # 50MB
+
+
+USE_CELERY = os.environ.get("USE_CELERY", "0") == "1"
+REDIS_URL = os.environ.get("REDIS_URL", "")
+
+if USE_CELERY:
+    CELERY_BROKER_URL = REDIS_URL
+    CELERY_RESULT_BACKEND = REDIS_URL
+    CELERY_ACCEPT_CONTENT = ["json"]
+    CELERY_TASK_SERIALIZER = "json"
+    CELERY_RESULT_SERIALIZER = "json"
+    CELERY_TIMEZONE = TIME_ZONE
+
+    INSTALLED_APPS += ["django_celery_results"]

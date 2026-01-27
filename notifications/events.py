@@ -1,4 +1,4 @@
-# notifications/events.py
+# texagon_academy\texagonbackend\notifications\events.py
 from .messages import MessageSpec
 from .models import Notification
 

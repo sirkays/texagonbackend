@@ -437,13 +437,19 @@ def verify_email_view(request):
                         student_profile.organization =  request.user.primary_org
                         student_profile.save()
 
-                        generate_parent_children_subscription_invoices(
-                            org_id=request.user.primary_org.id,
-                            now=timezone.now(),
-                            dry_run=False,
-                            user=request.user,
-                        
-                        )
+                        def _after_commit():
+                            if getattr(settings, "USE_CELERY", False):
+                                from billing.tasks import generate_invoices_for_org
+                                generate_invoices_for_org.delay(request.user.primary_org.id)
+                            else:
+                                generate_parent_children_subscription_invoices(
+                                    org_id=request.user.primary_org.id,
+                                    now=timezone.now(),
+                                    dry_run=False,
+                                    user=request.user,
+                                )
+
+                        transaction.on_commit(_after_commit)
 
         except Exception as e:
             print(e)

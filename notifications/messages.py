@@ -1,4 +1,4 @@
-# notifications/messages.py
+# texagon_academy\texagonbackend\notifications\messages.py
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Optional
 from django.template.loader import render_to_string

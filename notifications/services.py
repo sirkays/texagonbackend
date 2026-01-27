@@ -1,4 +1,4 @@
-# notifications/services.py
+# texagon_academy\texagonbackend\notifications\services.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -76,8 +76,8 @@ def dispatch(
 
     if send_email:
         email_from = email_from or getattr(settings, "DEFAULT_FROM_EMAIL", None)
+
         for user in users:
-            # skip if user has no email
             user_email = getattr(user, "email", None)
             if not user_email:
                 continue
@@ -92,12 +92,13 @@ def dispatch(
             subject = message.render_email_subject(per_user_ctx) or message.render_title(per_user_ctx)
             text_body, html_body = message.render_email(per_user_ctx)
 
-            # if you didn't provide email templates, use notification body
             if not text_body and not html_body:
                 text_body = message.render_body(per_user_ctx)
 
-            try:
-                _send_email(
+            # ✅ staging: send inline, production: queue
+            if getattr(settings, "USE_CELERY", False):
+                from .tasks import send_email_task
+                send_email_task.delay(
                     to=[user_email],
                     subject=subject,
                     text_body=text_body,
@@ -105,9 +106,19 @@ def dispatch(
                     from_email=email_from,
                 )
                 emails_sent += 1
-            except Exception:
-                if not fail_silently:
-                    raise
+            else:
+                try:
+                    _send_email(
+                        to=[user_email],
+                        subject=subject,
+                        text_body=text_body,
+                        html_body=html_body,
+                        from_email=email_from,
+                    )
+                    emails_sent += 1
+                except Exception:
+                    if not fail_silently:
+                        raise
 
     return DispatchResult(
         created_notifications=len(notifications_to_create) if send_in_app else 0,

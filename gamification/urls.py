@@ -7,6 +7,8 @@ from .views import (leaderboard_overview,parent_rewards,
     admin_badges,
     admin_badge_update,
     admin_badge_status_update,
+    admin_student_leaderboard,
+    admin_leaderboard_seasons,
 )
 
 urlpatterns = [
@@ -24,5 +26,8 @@ urlpatterns = [
     path("api/admin/gamification/badges", admin_badges),
     path("api/admin/gamification/badges/<int:pk>", admin_badge_update),
     path("api/admin/gamification/badges/<int:pk>/status", admin_badge_status_update),
+
+    path("api/admin/leaderboard/students/", admin_student_leaderboard),
+    path("api/admin/leaderboard/seasons/", admin_leaderboard_seasons),
 
 ]
