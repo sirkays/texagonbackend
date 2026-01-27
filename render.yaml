@@ -1,6 +1,6 @@
 databases:
   - name: texagon-db
-    plan: starter
+    plan: basic
 
 services:
   - type: keyvalue
