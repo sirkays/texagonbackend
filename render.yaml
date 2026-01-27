@@ -1,57 +1,39 @@
-# render.yaml (Blueprint)
-# Updated to support USE_CELERY toggle + new billing cron command enqueue_subscription_invoices
-# Notes:
-# - Set USE_CELERY=0 in staging, USE_CELERY=1 in production
-# - Cron schedules on Render are typically UTC; adjust times as needed.
-
 databases:
   - name: texagon-db
     plan: starter
 
 services:
-  # ----------------------------
-  # 1) Redis-compatible Key Value
-  # ----------------------------
   - type: keyvalue
     name: texagon-redis
     plan: starter
     ipAllowList: []
 
-  # ----------------------------
-  # 2) Django API (Docker Web Service)
-  # ----------------------------
+  # WEB
   - type: web
     name: texagon-backend
     runtime: docker
     plan: starter
     autoDeploy: true
-
     healthCheckPath: /healthz/
-
     preDeployCommand: |
       python manage.py migrate --noinput
       python manage.py collectstatic --noinput
-
-    startCommand: gunicorn texagonbackend.wsgi:application -b 0.0.0.0:$PORT --workers 3 --threads 2 --timeout 60
-
     envVars:
+      - key: PROCESS_TYPE
+        value: "web"
       - key: LOCAL
         value: "0"
       - key: DJANGO_DEBUG
         value: "0"
       - key: USE_CELERY
         value: "1"
-
       - key: DJANGO_SECRET_KEY
         sync: false
-
       - key: DJANGO_ALLOWED_HOSTS
         value: "texagon-backend.onrender.com,texagon.onrender.com,localhost,127.0.0.1"
-
       - key: FRONTEND_ORIGIN
         value: "https://texagon.onrender.com"
 
-      # ---- Postgres (managed) ----
       - key: POSTGRES_HOST
         fromDatabase: { name: texagon-db, property: host }
       - key: POSTGRES_PORT
@@ -63,11 +45,9 @@ services:
       - key: POSTGRES_PASSWORD
         fromDatabase: { name: texagon-db, property: password }
 
-      # ---- Redis / Celery ----
       - key: REDIS_URL
         fromService: { type: keyvalue, name: texagon-redis, property: connectionString }
 
-      # ---- Email ----
       - key: DOMAIN_EMAIL
         sync: false
       - key: SEND_EMAIL
@@ -83,7 +63,6 @@ services:
       - key: DEFAULT_FROM_EMAIL
         sync: false
 
-      # ---- Cloudinary ----
       - key: CLOUDINARY_CLOUD_NAME
         sync: false
       - key: CLOUDINARY_API_KEY
@@ -91,7 +70,6 @@ services:
       - key: CLOUDINARY_API_SECRET
         sync: false
 
-      # ---- Payment/env flags ----
       - key: PAYMENT_TEST
         value: "1"
       - key: FLW_SECRET_KEY
@@ -103,23 +81,21 @@ services:
       - key: LOGO_URL
         value: "https://texagon.onrender.com/logo.png"
 
-  # ----------------------------
-  # 3) Celery Worker (Billing Queue)
-  # ----------------------------
+  # WORKER - BILLING
   - type: worker
     name: texagon-worker-billing
     runtime: docker
     plan: starter
     autoDeploy: true
-    startCommand: celery -A texagonbackend worker -l info -Q billing --concurrency=4 --prefetch-multiplier=1
     envVars:
+      - key: PROCESS_TYPE
+        value: "worker-billing"
       - key: LOCAL
         value: "0"
       - key: DJANGO_DEBUG
         value: "0"
       - key: USE_CELERY
         value: "1"
-
       - key: DJANGO_SECRET_KEY
         sync: false
 
@@ -142,23 +118,21 @@ services:
       - key: FLW_SECRET_HASH
         sync: false
 
-  # ----------------------------
-  # 4) Celery Worker (Email Queue)
-  # ----------------------------
+  # WORKER - EMAIL
   - type: worker
     name: texagon-worker-email
     runtime: docker
     plan: starter
     autoDeploy: true
-    startCommand: celery -A texagonbackend worker -l info -Q email --concurrency=2 --prefetch-multiplier=1
     envVars:
+      - key: PROCESS_TYPE
+        value: "worker-email"
       - key: LOCAL
         value: "0"
       - key: DJANGO_DEBUG
         value: "0"
       - key: USE_CELERY
         value: "1"
-
       - key: DJANGO_SECRET_KEY
         sync: false
 
@@ -191,89 +165,21 @@ services:
       - key: DEFAULT_FROM_EMAIL
         sync: false
 
-  # ----------------------------
-  # 5) Cron Jobs (management commands)
-  # ----------------------------
-
-  # Monthly billing trigger (UPDATED to enqueue tasks)
+  # CRON - MONTHLY BILLING (Render Cron Service)
   - type: cron
     name: texagon-cron-monthly-billing
     runtime: docker
     schedule: "0 1 1 * *"
     autoDeploy: true
-    startCommand: python manage.py enqueue_subscription_invoices
     envVars:
+      - key: PROCESS_TYPE
+        value: "cron-monthly-billing"
       - key: LOCAL
         value: "0"
       - key: DJANGO_DEBUG
         value: "0"
       - key: USE_CELERY
         value: "1"
-
-      - key: DJANGO_SECRET_KEY
-        sync: false
-
-      - key: POSTGRES_HOST
-        fromDatabase: { name: texagon-db, property: host }
-      - key: POSTGRES_PORT
-        fromDatabase: { name: texagon-db, property: port }
-      - key: POSTGRES_DB
-        fromDatabase: { name: texagon-db, property: database }
-      - key: POSTGRES_USER
-        fromDatabase: { name: texagon-db, property: user }
-      - key: POSTGRES_PASSWORD
-        fromDatabase: { name: texagon-db, property: password }
-
-      - key: REDIS_URL
-        fromService: { type: keyvalue, name: texagon-redis, property: connectionString }
-
-  # Nightly cleanup (keep if you have this command)
-  - type: cron
-    name: texagon-cron-nightly-cleanup
-    runtime: docker
-    schedule: "30 2 * * *"
-    autoDeploy: true
-    startCommand: python manage.py cleanup_old_data
-    envVars:
-      - key: LOCAL
-        value: "0"
-      - key: DJANGO_DEBUG
-        value: "0"
-      - key: USE_CELERY
-        value: "1"
-
-      - key: DJANGO_SECRET_KEY
-        sync: false
-
-      - key: POSTGRES_HOST
-        fromDatabase: { name: texagon-db, property: host }
-      - key: POSTGRES_PORT
-        fromDatabase: { name: texagon-db, property: port }
-      - key: POSTGRES_DB
-        fromDatabase: { name: texagon-db, property: database }
-      - key: POSTGRES_USER
-        fromDatabase: { name: texagon-db, property: user }
-      - key: POSTGRES_PASSWORD
-        fromDatabase: { name: texagon-db, property: password }
-
-      - key: REDIS_URL
-        fromService: { type: keyvalue, name: texagon-redis, property: connectionString }
-
-  # Weekly summary (keep if you have this command)
-  - type: cron
-    name: texagon-cron-weekly-summary
-    runtime: docker
-    schedule: "0 8 * * MON"
-    autoDeploy: true
-    startCommand: python manage.py send_weekly_summary
-    envVars:
-      - key: LOCAL
-        value: "0"
-      - key: DJANGO_DEBUG
-        value: "0"
-      - key: USE_CELERY
-        value: "1"
-
       - key: DJANGO_SECRET_KEY
         sync: false
 
