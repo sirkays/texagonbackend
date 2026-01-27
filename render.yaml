@@ -15,7 +15,7 @@ services:
     plan: starter
     autoDeploy: true
     healthCheckPath: /healthz/
-    preDeployCommand: cd /app && python manage.py migrate --noinput && python manage.py collectstatic --noinput
+    preDeployCommand: python manage.py migrate --noinput && python manage.py collectstatic --noinput
 
     envVars:
       - key: DJANGO_SETTINGS_MODULE
