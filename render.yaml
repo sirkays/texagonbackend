@@ -16,7 +16,7 @@ services:
     autoDeploy: true
     healthCheckPath: /healthz/
 
-    preDeployCommand: 'python -m django migrate --noinput && python -m django collectstatic --noinput'
+    preDeployCommand: 'python manage.py migrate --noinput && python manage.py collectstatic --noinput'
 
     envVars:
       - key: DJANGO_SETTINGS_MODULE
