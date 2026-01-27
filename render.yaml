@@ -16,9 +16,10 @@ services:
     autoDeploy: true
     healthCheckPath: /healthz/
 
+    # IMPORTANT: remove preDeployCommand entirely (Render doesn't shell-evaluate && properly)
+    # preDeployCommand: ...
+
     envVars:
-      - key: DJANGO_SETTINGS_MODULE
-        value: "texagonbackend.settings"
       - key: PROCESS_TYPE
         value: "web"
       - key: LOCAL
@@ -165,7 +166,7 @@ services:
       - key: DEFAULT_FROM_EMAIL
         sync: false
 
-  # CRON - MONTHLY BILLING (Render Cron Service)
+  # CRON - MONTHLY BILLING
   - type: cron
     name: texagon-cron-monthly-billing
     runtime: docker

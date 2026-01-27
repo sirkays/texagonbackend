@@ -1,8 +1,12 @@
 #!/bin/sh
 set -eu
 
+# Render injects PORT for web services. Default for local/dev.
+PORT="${PORT:-8000}"
+export PORT
+
 echo "PROCESS_TYPE=${PROCESS_TYPE:-web}"
-echo "PORT=${PORT:-8000}"
+echo "PORT=${PORT}"
 
 run_migrate() {
   echo "Running migrations..."
@@ -18,11 +22,11 @@ case "${PROCESS_TYPE:-web}" in
   web)
     run_migrate
     run_collectstatic
-    exec gunicorn texagonbackend.wsgi:application -b 0.0.0.0:${PORT:-8000} --workers 3 --threads 2 --timeout 60
+    exec gunicorn texagonbackend.wsgi:application \
+      -b 0.0.0.0:${PORT} --workers 3 --threads 2 --timeout 60
     ;;
 
   worker-billing)
-    # Workers normally don't need collectstatic.
     exec celery -A texagonbackend worker -l info -Q billing --concurrency=4 --prefetch-multiplier=1
     ;;
 
@@ -31,7 +35,7 @@ case "${PROCESS_TYPE:-web}" in
     ;;
 
   cron-monthly-billing)
-    # Optional: run migrate here too (safe if only one cron runs at a time)
+    # optional safety: ensure DB schema is up to date before running billing
     run_migrate
     exec python manage.py enqueue_subscription_invoices
     ;;
