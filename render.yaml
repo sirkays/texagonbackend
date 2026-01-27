@@ -15,14 +15,11 @@ services:
     plan: starter
     autoDeploy: true
     healthCheckPath: /healthz/
-
-    preDeployCommand: 'sh -lc "python -m django migrate --noinput; python -m django collectstatic --noinput"'
+    preDeployCommand: "python manage.py migrate --noinput && python manage.py collectstatic --noinput"
 
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: "texagonbackend.settings"
-      - key: PROCESS_TYPE
-        value: "web"
       - key: PROCESS_TYPE
         value: "web"
       - key: LOCAL
