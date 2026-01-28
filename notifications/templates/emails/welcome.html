@@ -15,7 +15,7 @@
               <!-- LOGO -->
               <p style="margin:0 0 20px 0;">
               <img
-                src="{{ logo_url }}"
+                src="{% if logo_url %}{{ logo_url }}{% else %}https://res.cloudinary.com/dscrnk6tr/image/upload/v1768991810/logo_rysimh.png{% endif %}"
                 alt="{{ app_name }} logo"
                 width="140"
                 height="40"
