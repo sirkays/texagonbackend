@@ -48,6 +48,17 @@ from texagonbackend.settings import FRONTEND_ORIGIN
 from notifications.services import dispatch
 from notifications.events import SYSTEM_WELCOME
 
+def test_email(request):
+    send_mail(
+        subject="Verification Test",
+        message=f"This email test is success",
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        recipient_list=["attehkayode2@gmail.com"],
+        fail_silently=False,
+    )
+
+    return JsonResponse({})
+
 def create_admin(request):
     try:
         email = "sirkays"
