@@ -36,7 +36,7 @@ ENV DJANGO_SETTINGS_MODULE=texagonbackend.settings \
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', int('${PORT}')))"
 
-# migrate, collectstatic, run
+# migrate, collectstatic, run 
 CMD python manage.py migrate --noinput && \
     python manage.py collectstatic --noinput && \
     gunicorn texagonbackend.wsgi:application
