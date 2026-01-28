@@ -55,7 +55,7 @@ def dispatch(
                     "user": user,
                     "data": merged_data,
                     "now": timezone.now(),
-                    "logo_url":"https://res.cloudinary.com/dscrnk6tr/image/upload/v1768991810/logo_rysimh.png",
+                    "logo_url":"https://res.cloudinary.com/dqzqyeijp/image/upload/v1769618417/techxagon_logo_xbv3k2.png",
                 }
 
                 title = message.render_title(per_user_ctx)
