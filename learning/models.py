@@ -4,7 +4,7 @@ from core.models import TimeStampedModel, NamedModel
 from live.models import TutoringBooking
 from cloudinary_storage.storage import RawMediaCloudinaryStorage,MediaCloudinaryStorage
 from .utils.image import convert_to_webp
-
+from core.storage_backends import lesson_file_storage, dynamic_storage
 
 class Course(NamedModel):
     USAGE_CHOICE = (
@@ -96,7 +96,7 @@ class Lesson(NamedModel):
     module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name="lessons")
     cover_image = models.ImageField(
         upload_to="texagon/covers/",
-        storage=MediaCloudinaryStorage(),
+        storage=dynamic_storage(),
         blank=True,
         null=True
     )
@@ -106,7 +106,7 @@ class Lesson(NamedModel):
     content_type = models.CharField(max_length=16, choices=ContentType.choices)
     file = models.FileField(
         upload_to="texagon/lessons/files/",
-        storage=RawMediaCloudinaryStorage(),
+        storage=lesson_file_storage(),
         blank=True,
         null=True
     )
@@ -140,7 +140,7 @@ class Material(TimeStampedModel):
     kind = models.CharField(max_length=16, choices=Kind.choices)
     file = models.FileField(
         upload_to="texagon/materials/files/", 
-        storage=RawMediaCloudinaryStorage(),
+        storage=lesson_file_storage(),
         blank=True, null=True
     )
     cover_image = models.ImageField(upload_to="texagon/materials/covers/", blank=True, null=True)
