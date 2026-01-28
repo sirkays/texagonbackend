@@ -13,7 +13,7 @@ static/
 #**/migrations/*
 #!**/migrations/__init__.py
 .env
-
+.env.prod
 # Backup files # 
 *.bak 
 /media

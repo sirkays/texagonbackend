@@ -294,8 +294,6 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL")
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-if os.environ.get("LOCAL") == "0":
-    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024      # 50MB
