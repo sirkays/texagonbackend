@@ -17,32 +17,26 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 libjpeg62-turbo zlib1g \
-    && rm -rf /var/lib/apt/lists/*
+    libpq5 libjpeg62-turbo zlib1g && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /wheels /wheels
 RUN pip install --no-index --find-links=/wheels /wheels/*
 
 COPY . .
 
-# copy entrypoint and make it executable
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
-# non-root user
+# non-root
 RUN useradd -m -u 10001 django && chown -R django:django /app
 USER django
 
-# IMPORTANT:
-# - Do NOT hardcode PORT here (Render injects PORT dynamically)
-# - Keep settings module only
-ENV DJANGO_SETTINGS_MODULE=texagonbackend.settings
+ENV DJANGO_SETTINGS_MODULE=texagonbackend.settings \
+    PORT=8000 \
+    GUNICORN_CMD_ARGS="--bind 0.0.0.0:8000 --workers 3 --threads 2 --timeout 60"
 
-# healthcheck (use PORT; Render will set it, local defaults come from entrypoint)
+# healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD python -c "import os, socket; p=int(os.getenv('PORT','8000')); s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', p))"
+  CMD python -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', int('${PORT}')))"
 
-ENTRYPOINT ["/app/entrypoint.sh"]
-
-# default command (used for web; entrypoint switches by PROCESS_TYPE)
-CMD ["gunicorn", "texagonbackend.wsgi:application"]
+# migrate, collectstatic, run
+CMD python manage.py migrate --noinput && \
+    python manage.py collectstatic --noinput && \
+    gunicorn texagonbackend.wsgi:application
