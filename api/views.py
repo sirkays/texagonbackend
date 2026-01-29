@@ -97,6 +97,16 @@ def login_view(request):
 
     if not user:
         return Response({"detail": "invalid_credentials", "code":"invalid_credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    if user.primary_org is None:
+        return Response(
+            {
+                "code": "NOT_ACTIVE",  # e.g. PAST_DUE
+                "detail": "You are not yet activated",
+                "subscription_id": "NONE",
+            },
+            status=status.HTTP_401_UNAUTHORIZED,
+        ) 
 
     if getattr(user, "student_profile", None):
         res = student_subscription_status(request, user.student_profile)
@@ -111,6 +121,7 @@ def login_view(request):
                 },
                 status=status.HTTP_401_UNAUTHORIZED,
             )
+  
 
     st = SessionToken.create_for_user(user, hours_valid=hours_valid, ip=request.META.get("REMOTE_ADDR"))
     return Response({"sessionToken": st.key, "expiresAt": st.expires_at.isoformat(), "userId": user.id})
