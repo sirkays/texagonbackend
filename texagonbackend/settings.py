@@ -34,6 +34,8 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-session-token",
 ]
 
+#CORS_ALLOW_METHODS = list(default_methods)  # optional but fine
+
 CORS_ALLOW_CREDENTIALS = True
 
 if os.environ.get('LOCAL') == "0":

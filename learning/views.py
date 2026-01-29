@@ -1,29 +1,55 @@
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 import traceback
+import os
+import json
+import uuid
+import logging
+import time
+
+import boto3
+import cloudinary
+import cloudinary.utils
+
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Count, Sum, Prefetch
 from django.db.utils import DataError
 from django.utils import timezone
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
-from rest_framework.response import Response
+from django.http import JsonResponse
+
 from rest_framework import status
-from rest_framework_api_key.permissions import HasAPIKey
-from api.authentication import SessionTokenAuthentication
-from academics.models import StudentProfile, TeacherProfile
-from learning.models import Bookmark, Course, Enrollment, Lesson, Material, Module, Note, ModuleCategory
-from orgs.models import OrganizationMembership
-from live.models import LiveSession  # if LiveSession is in a different app, update import
-import os
-import json
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from rest_framework.decorators import parser_classes
-import logging
+from rest_framework.decorators import (
+    api_view,
+    permission_classes,
+    authentication_classes,
+    parser_classes,
+)
+
+from rest_framework_api_key.permissions import HasAPIKey
+
+from api.authentication import SessionTokenAuthentication
 from api.permissions import RequiresActiveStudentSubscription
 from api.serializers import LessonSerializer
+
+from academics.models import StudentProfile, TeacherProfile
+from learning.models import (
+    Bookmark,
+    Course,
+    Enrollment,
+    Lesson,
+    Material,
+    Module,
+    Note,
+    ModuleCategory,
+)
+from orgs.models import OrganizationMembership
+from live.models import LiveSession
 from .serializers import CourseGeneralActivationSerializer
-from rest_framework.permissions import IsAuthenticated
+
 
 logger = logging.getLogger(__name__)
 
@@ -1512,6 +1538,102 @@ def publish_module(request, module_id: int):
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])  # ✅ ADD
+@authentication_classes([SessionTokenAuthentication])  # ✅ ADD
+def cloudinary_signature(request):
+    timestamp = int(time.time())
+    folder = "texagon/lessons"
+    params_to_sign = {"timestamp": timestamp, "folder": folder}
+
+    signature = cloudinary.utils.api_sign_request(
+        params_to_sign,
+        os.getenv("CLOUDINARY_API_SECRET")
+    )
+
+    return JsonResponse({
+        "timestamp": timestamp,
+        "signature": signature,
+        "api_key": os.getenv("CLOUDINARY_API_KEY"),
+        "cloud_name": os.getenv("CLOUDINARY_CLOUD_NAME"),
+        "folder": folder,
+    })
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+@authentication_classes([SessionTokenAuthentication])  # ✅ ADD
+def presign_s3(request):
+    filename = (request.data.get("filename") or "").strip()
+    content_type = (request.data.get("content_type") or "application/octet-stream").strip()
+
+    if not filename:
+        return Response({"detail": "filename is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ✅ create a safe unique key
+    ext = os.path.splitext(filename)[1].lower()
+    key = f"lessons/{uuid.uuid4().hex}{ext}"
+
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME,
+    )
+
+    upload_url = s3.generate_presigned_url(
+        ClientMethod="put_object",
+        Params={
+            "Bucket": settings.AWS_STORAGE_BUCKET_NAME,
+            "Key": key,
+            "ContentType": content_type,
+        },
+        ExpiresIn=60 * 15,  # 15 mins to upload
+    )
+
+    return Response({"upload_url": upload_url, "key": key})
+
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+@authentication_classes([SessionTokenAuthentication])  # ✅ ADD
+def lesson_media_url(request, lesson_id: int):
+    from .models import Lesson
+
+    lesson = Lesson.objects.filter(id=lesson_id).first()
+    if not lesson:
+        return Response({"detail": "Lesson not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if lesson.file:
+        return Response({"url": lesson.file.url})
+
+    value = (lesson.url or "").strip()
+    if not value:
+        return Response({"detail": "No media set for this lesson"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ✅ Cloudinary (or any direct URL) → return as-is
+    if value.startswith("http://") or value.startswith("https://"):
+        return Response({"url": value})
+
+    # ✅ Otherwise treat as S3 key → presign GET
+    key = value
+
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME,
+    )
+
+    signed_get = s3.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={"Bucket": settings.AWS_STORAGE_BUCKET_NAME, "Key": key},
+        ExpiresIn=60 * 60,
+    )
+    return Response({"url": signed_get})
+
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
@@ -1610,12 +1732,14 @@ def add_lesson(request, module_id: int):
                     content_type = guessed
         
         # Create lesson (assign file if provided)
+        s3_key = (data.get("s3_key") or "").strip()  # ✅ ADD
+        direct_url = (data.get("url") or "").strip() # ✅ ADD
         lesson = Lesson(
             name=title,
             module=module,
             order=order,
             content_type=content_type,
-            url=data.get("url", "") or "",
+            url=s3_key or direct_url,
             duration_seconds=duration_seconds,
             meta=meta,
             active=True
@@ -1677,9 +1801,10 @@ def update_lesson(request, module_id: int, lesson_id: int):
             content_type = data["type"]
             if content_type in [choice[0] for choice in Lesson.ContentType.choices]:
                 lesson.content_type = content_type
-
+        s3_key = (data.get("s3_key") or "").strip()  # ✅ ADD
+        direct_url = (data.get("url") or "").strip() # ✅ ADD
         if "url" in data:
-            lesson.url = data["url"] or ""
+            lesson.url = s3_key if s3_key else (data.get("url", "") or "")
 
         if "duration" in data:
             try:

@@ -32,5 +32,13 @@ urlpatterns = [
     # Helper endpoints
     path('api/teacher/courses/', views.get_teacher_courses, name='teacher_get_courses'),
     path('api/teacher/module-categories/', views.get_module_categories, name='teacher_get_module_categories'),
+
+
+    path('api/cloudinary-signature/', views.cloudinary_signature, name='cloudinary_signature'),
+
+    path('api/presign-s3/', views.presign_s3, name='create_presigned_upload'),
+
+    path('api/lesson-media-url/<int:lesson_id>/', views.lesson_media_url, name='lesson_media_url'),
+    
     
 ]
