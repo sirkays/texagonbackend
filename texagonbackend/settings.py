@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from decimal import Decimal
+from corsheaders.defaults import default_headers
 
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -23,8 +24,14 @@ FLAT_SHIPPING = Decimal("1000.99")
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    'http://127.0.0.1:3000',
     "https://texagonbackend.onrender.com",
     "https://texagon.onrender.com",
+    "https://learn.techxagonacademy.com",
+]
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-session-token",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -35,7 +42,9 @@ if os.environ.get('LOCAL') == "0":
         "https://texagonbackend.epichouse.online",
         "https://texagonbackend.onrender.com",
         "http://127.0.0.1:9098",
-        "http://localhost"
+        "http://localhost",
+        "http://127.0.0.1:3000",
+        "https://learn.techxagonacademy.com",
     ]
 
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -296,8 +305,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 
-DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024      # 50MB
-FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024      # 50MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024      # 100MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024      # 100MB
 
 
 USE_CELERY = os.environ.get("USE_CELERY", "0") == "1"

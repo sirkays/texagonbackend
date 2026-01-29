@@ -17,19 +17,30 @@
                style="width:600px;max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 6px 18px rgba(17,24,39,0.08);">
           <!-- Header -->
           <tr>
-            <td style="background:#0f172a;padding:22px 24px;">
-              <div style="display:flex;align-items:center;gap:12px;">
-                {% if logo_url %}
-                  <img src="{{ logo_url }}" alt="{{ app_name }}" width="34" height="34"
-                       style="display:block;border-radius:8px;" />
-                {% endif %}
-                <div>
-                  <div style="font-size:14px;color:#cbd5e1;line-height:1.2;">{{ app_name }}</div>
-                  <div style="font-size:20px;color:#ffffff;font-weight:700;line-height:1.2;margin-top:2px;">
-                    New Invoice Generated
-                  </div>
-                </div>
-              </div>
+            <td align="center" style="background:#0f172a;padding:22px 24px;">
+              <table cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center">
+                    <img
+                      src="{% if logo_url %}{{ logo_url }}{% else %}https://res.cloudinary.com/dqzqyeijp/image/upload/v1769618417/techxagon_logo_xbv3k2.png{% endif %}"
+                      alt="{{ app_name }}"
+                      width="34"
+                      height="34"
+                      style="display:block;border-radius:8px;margin:0 auto 8px auto;"
+                    />
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="font-size:14px;color:#cbd5e1;line-height:1.2;">
+                    {{ app_name }}
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="font-size:20px;color:#ffffff;font-weight:700;line-height:1.2;padding-top:2px;">
+                    Order Created
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
 

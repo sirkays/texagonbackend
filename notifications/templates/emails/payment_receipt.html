@@ -12,14 +12,16 @@
           <tr>
             <td>
                           <!-- LOGO -->
-              <p style="margin:0 0 20px 0;">
-                <img
-                  src="{% if logo_url %}{{ logo_url }}{% else %}https://res.cloudinary.com/dqzqyeijp/image/upload/v1769618417/techxagon_logo_xbv3k2.png{% endif %}"
-                  alt="{{ app_name }} logo"
-                  style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:140px;"
-                />
-              </p>
-
+              <tr>
+                <td align="center" style="padding-bottom:20px;">
+                  <img
+                    src="{% if logo_url %}{{ logo_url }}{% else %}https://res.cloudinary.com/dqzqyeijp/image/upload/v1769618417/techxagon_logo_xbv3k2.png{% endif %}"
+                    alt="{{ app_name }} logo"
+                    style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:140px;"
+                  />
+                </td>
+              </tr>
+              
               <h2 style="margin-top:0;">Payment Received ✅</h2>
 
               <p>

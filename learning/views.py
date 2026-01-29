@@ -23,6 +23,7 @@ import logging
 from api.permissions import RequiresActiveStudentSubscription
 from api.serializers import LessonSerializer
 from .serializers import CourseGeneralActivationSerializer
+from rest_framework.permissions import IsAuthenticated
 
 logger = logging.getLogger(__name__)
 
@@ -1512,7 +1513,7 @@ def publish_module(request, module_id: int):
 
 
 @api_view(["POST"])
-@permission_classes([HasAPIKey])
+@permission_classes([IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 @transaction.atomic
@@ -1641,7 +1642,7 @@ def add_lesson(request, module_id: int):
 
 
 @api_view(["PUT", "PATCH"])
-@permission_classes([HasAPIKey])
+@permission_classes([IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 @transaction.atomic
