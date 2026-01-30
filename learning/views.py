@@ -696,6 +696,9 @@ def save_lesson_to_my_materials(request, lesson_id: int):
             if has_file and lesson.file is None and existing.file != lesson.file:
                 existing.file = lesson.file
                 updated_fields.append("file")
+            if lesson.cover_image is None and existing.cover_image != lesson.cover_image:
+                existing.cover_image = lesson.cover_image
+                updated_fields.append("cover_image")
 
             if updated_fields:
                 existing.save(update_fields=updated_fields)
@@ -717,12 +720,11 @@ def save_lesson_to_my_materials(request, lesson_id: int):
             lesson=lesson,  # ✅ link it
         )
 
-        print("lessonlessonlessonlesson ", has_file)
+        if lesson.cover_image:
+            m.cover_image = lesson.cover_image
 
         if has_file:
             m.file = lesson.file  # reference the same stored file
-            if lesson.cover_image:
-                m.cover_image = lesson.cover_image
 
         m.save()
 
