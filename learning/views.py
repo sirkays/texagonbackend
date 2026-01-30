@@ -6,7 +6,6 @@ import json
 import uuid
 import logging
 import time
-
 import boto3
 import cloudinary
 import cloudinary.utils
@@ -170,6 +169,7 @@ def my_materials(request):
                 "thumbnail": _safe_url(getattr(m, "cover_image", None), None),
                 "videoUrl":file,
                 "blur":blur,
+                "lesson_id":m.lesson.id
             })
 
         # Audio
@@ -191,7 +191,8 @@ def my_materials(request):
                 "duration": "—",
                 "progress": 0,
                 "audioUrl": file,
-                "blur":blur
+                "blur":blur,
+                "lesson_id":m.lesson.id
             })
 
         # PDFs
@@ -213,7 +214,8 @@ def my_materials(request):
                 "pages": None,
                 "size": _fmt_size(m.file),
                 "downloadUrl": file,
-                "blur":blur
+                "blur":blur,
+                "lesson_id":m.lesson.id
             })
 
         # ---------- Notes ----------
@@ -552,17 +554,16 @@ def _kind_from_lesson(lesson: Lesson) -> str:
     return m.get(lesson.content_type, Material.Kind.OTHER)
 
 
-def _abs_url_or_none(request, maybe_url: Optional[str]) -> Optional[str]:
-    if not maybe_url:
+
+
+def _file_url_or_none(request, file_field):
+    if not file_field:   # handles None/""/no file
         return None
     try:
-        # if it's already absolute, keep it; else build absolute
-        if maybe_url.startswith("http://") or maybe_url.startswith("https://"):
-            return maybe_url
-        return request.build_absolute_uri(maybe_url)
-    except Exception:
-        return maybe_url
-
+        return _abs_url_or_none(request, file_field.url)
+    except ValueError:
+        # covers "has no file associated"
+        return None
 
 def _material_to_dict(request, m: Material, lesson: Lesson) -> Dict[str, Any]:
     return {
@@ -576,7 +577,7 @@ def _material_to_dict(request, m: Material, lesson: Lesson) -> Dict[str, Any]:
             "id": m.organization_id,
             "name": getattr(m.organization, "name", None),
         },
-        "file_url": _abs_url_or_none(request, getattr(m.file, "url", None)),
+        "file_url": _file_url_or_none(request, m.file),
         "url": m.url or None,
         "created_at": m.created_at.isoformat(),
         "lesson": {
@@ -635,7 +636,6 @@ def save_lesson_to_my_materials(request, lesson_id: int):
         kind = _kind_from_lesson(lesson)
         src_url = (lesson.url or "").strip() or None
         has_file = bool(getattr(lesson, "file", None) and lesson.file)
-
         if not src_url and not has_file:
             return Response({"detail": "Lesson has no file or URL to save."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -659,7 +659,6 @@ def save_lesson_to_my_materials(request, lesson_id: int):
 
         base_tags = [lesson.content_type, f"lesson:{lesson.id}"]
         tags = list(dict.fromkeys(base_tags + input_tags))  # unique, preserve order
-
         if existing:
             updated_fields = []
 
@@ -694,14 +693,12 @@ def save_lesson_to_my_materials(request, lesson_id: int):
             if (existing.url or "") != desired_url:
                 existing.url = desired_url
                 updated_fields.append("url")
-
-            if has_file and existing.file != lesson.file:
+            if has_file and lesson.file is None and existing.file != lesson.file:
                 existing.file = lesson.file
                 updated_fields.append("file")
 
             if updated_fields:
                 existing.save(update_fields=updated_fields)
-
             return Response(
                 {"detail": "already_saved", "material": _material_to_dict(request, existing, lesson)},
                 status=status.HTTP_200_OK
@@ -720,6 +717,8 @@ def save_lesson_to_my_materials(request, lesson_id: int):
             lesson=lesson,  # ✅ link it
         )
 
+        print("lessonlessonlessonlesson ", has_file)
+
         if has_file:
             m.file = lesson.file  # reference the same stored file
             if lesson.cover_image:
@@ -733,6 +732,7 @@ def save_lesson_to_my_materials(request, lesson_id: int):
         )
 
     except Exception as e:
+        print(e)
         err = {"detail": "Failed to save lesson to My Materials.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true", "True"} or getattr(settings, "DEBUG", False):
             err["traceback"] = traceback.format_exc()
@@ -894,6 +894,8 @@ def resource_materials(request):
                 file = ""
             else:
                 file =  _safe_file_or_url(ls) if ls.file else None
+                if ls.url and file is None:
+                    file = ls.url
             pdfs.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -926,6 +928,8 @@ def resource_materials(request):
                 file = ""
             else:
                 file =  _safe_file_or_url(ls) if ls.file else None
+                if ls.url and file is None:
+                    file = ls.url
             videos.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -954,6 +958,8 @@ def resource_materials(request):
                 file = ""
             else:
                 file =  _safe_file_or_url(ls) if ls.file else None
+                if ls.url and file is None:
+                    file = ls.url
             audio.append({
                 "id": str(ls.id),
                 "title": ls.name,
