@@ -693,10 +693,12 @@ def save_lesson_to_my_materials(request, lesson_id: int):
             if (existing.url or "") != desired_url:
                 existing.url = desired_url
                 updated_fields.append("url")
-            if has_file and lesson.file is None and existing.file != lesson.file:
+
+            if has_file and existing.file != lesson.file:
                 existing.file = lesson.file
                 updated_fields.append("file")
-            if lesson.cover_image is None and existing.cover_image != lesson.cover_image:
+
+            if lesson.cover_image and existing.cover_image != lesson.cover_image:
                 existing.cover_image = lesson.cover_image
                 updated_fields.append("cover_image")
 
