@@ -26,6 +26,6 @@ urlpatterns = [
     path("api/admin/classrooms/<int:classroom_id>/modal/", admin_classroom_modal_data),
 
     ### DELETING OF DEVICE ID
-    path("api/admin/student-devices", admin_student_devices_search),
+    path("api/admin/student-devices/", admin_student_devices_search),
     path("api/admin/student-devices/<int:device_pk>/", admin_student_device_delete),
 ]

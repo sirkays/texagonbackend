@@ -399,6 +399,8 @@ def start_test(request, test_id: int):
             "duration_seconds": duration_seconds,
             "expires_at": expires_at.isoformat(),
             "questions": questions_out,
+            "server_now_ms": int(now.timestamp() * 1000),
+            "expires_at_ms": int(expires_at.timestamp() * 1000),
         }, status=200)
 
     except Exception as e:
