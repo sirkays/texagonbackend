@@ -118,7 +118,7 @@ def my_materials(request):
             m_base = Material.objects.filter(owner=user)
         else:
             m_base = Material.objects.filter(
-                Q(owner=user) | Q(organization=student.organization)
+                Q(owner=user)
             ).filter(
                 lesson__module__course__enrollments__student=student,
                 lesson__module__course__enrollments__status__in=allowed_statuses,
@@ -139,8 +139,8 @@ def my_materials(request):
 
 
         def _owner_name(m):
-            owner = getattr(m, "owner", None)
-            return (owner.get_full_name() or owner.username) if owner else None
+            owner = m.lesson.module.course.teacher.user
+            return owner.get_full_name() if owner else None
 
         def _safe_url(file_field, fallback_url):
             try:

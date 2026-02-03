@@ -14,10 +14,16 @@ class CodeSnippet(TimeStampedModel):
     """
     Saved code drafts (student only). Not necessarily submitted.
     """
+    class LANGUAGE_TYPE(models.TextChoices):
+        JAVASCRIPT = "javascript", "javascript"
+        HTML = "html", "html"
+        CSS = "CSS", "CSS"
+        PYTHON = "python", "python"
+        JAVA = "java", "java"
     student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="code_snippets")
     lesson = models.ForeignKey(Lesson, on_delete=models.SET_NULL, null=True, blank=True, related_name="code_snippets")
     title = models.CharField(max_length=255, blank=True)
-    language = models.CharField(max_length=64)  # e.g. 'python', 'javascript', 'java', ...
+    language = models.CharField(max_length=64, choices=LANGUAGE_TYPE.choices, default=LANGUAGE_TYPE.HTML)  # e.g. 'python', 'javascript', 'java', ...
     code_text = models.TextField()
     meta = models.JSONField(default=dict, blank=True)
 
