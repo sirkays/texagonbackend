@@ -3,7 +3,7 @@ from rest_framework import serializers
 from .models import CodeSnippet, CodeSubmission, CodeComment,CodeFile
 from academics.models import StudentProfile
 from learning.models import Lesson
-
+from django.db.models import Max
 
 class CodeFileSerializer(serializers.ModelSerializer):
     url = serializers.SerializerMethodField(read_only=True)
@@ -49,11 +49,22 @@ class CodeCommentSerializer(serializers.ModelSerializer):
         return (getattr(u, "get_full_name", lambda: "")() or u.email or str(u.pk))
 
 
+
+class CodeSubmissionMiniSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id", "title", "lesson", "student", "language",
+            "code_text", "created_at", "updated_at",
+            "status", "score", "feedback", "correction_code",
+        ]
+
 class CodeSubmissionSerializer(serializers.ModelSerializer):
     title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     comments = CodeCommentSerializer(many=True, read_only=True)
 
     graded_by_name = serializers.SerializerMethodField()
+    latest_same_title_submission = serializers.SerializerMethodField()
 
     class Meta:
         model = CodeSubmission
@@ -62,17 +73,61 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
             "status", "score", "feedback", "correction_code",
             "graded_by", "graded_by_name", "graded_at",
             "created_at", "updated_at", "comments",
+            "latest_same_title_submission",
         ]
 
     def get_graded_by_name(self, obj):
         if not obj.graded_by:
             return None
-        # adjust these fields based on your TeacherProfile model
         user = getattr(obj.graded_by, "user", None)
         if user:
             return user.get_full_name() or user.username or user.email
         return str(obj.graded_by)
 
+
+    def get_latest_same_title_submission(self, obj):
+        """
+        Return the newest *other* submission with the same title,
+        for EACH language (javascript/python/html/css/...)
+        keyed by language.
+        """
+        if not obj.title:
+            return {}
+
+        base = (
+            CodeSubmission.objects
+            .filter(
+                student=obj.student,
+                lesson=obj.lesson,   # remove if you want across lessons
+                title=obj.title,
+            )
+            .exclude(id=obj.id)
+        )
+
+        # For each language, find the newest created_at
+        latest_times = (
+            base.values("language")
+            .annotate(latest_created_at=Max("created_at"))
+        )
+
+        if not latest_times:
+            return {}
+
+        out = {}
+        for row in latest_times:
+            lang = row["language"]
+            dt = row["latest_created_at"]
+
+            # Get the actual latest submission row for that language
+            latest_obj = (
+                base.filter(language=lang, created_at=dt)
+                .order_by("-created_at", "-id")
+                .first()
+            )
+            if latest_obj:
+                out[lang] = CodeSubmissionMiniSerializer(latest_obj).data
+
+        return out
 
 
 class TeacherUpdateSubmissionSerializer(serializers.ModelSerializer):
@@ -155,26 +210,80 @@ class TeacherCodeCommentSerializer(serializers.ModelSerializer):
         full = (getattr(u, "get_full_name", lambda: "")() or "").strip()
         return full or u.email or f"user-{getattr(u, 'pk', '')}"
 
+class TeacherCodeSubmissionMiniSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id", "title", "created_at", "updated_at",
+            "status", "language", "code_text",
+            "score", "feedback", "correction_code",
+            "graded_at", "graded_by_id",
+        ]
+
 
 class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     student_id = serializers.IntegerField(source="student.id", read_only=True)
+
+    # ✅ include title (since you want to match by title)
+    title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
     lesson = serializers.SerializerMethodField()
     course = serializers.SerializerMethodField()
     classroom = serializers.SerializerMethodField()
     comments = TeacherCodeCommentSerializer(many=True, read_only=True)
 
+    # ✅ add latest same-title submission
+    latest_same_title_submission = serializers.SerializerMethodField()
+
     class Meta:
         model = CodeSubmission
         fields = [
-            "id", "created_at", "updated_at",
+            "id", "title", "created_at", "updated_at",
             "status", "language", "code_text",
             "score", "feedback", "correction_code",
             "graded_at", "graded_by_id",
             "student_id", "student_name",
             "lesson", "course", "classroom",
             "comments",
+            "latest_same_title_submission",
         ]
+
+
+    def get_latest_same_title_submission(self, obj: CodeSubmission):
+        title = (obj.title or "").strip()
+        if not title:
+            return {}
+
+        base = CodeSubmission.objects.filter(
+            student=obj.student,
+            lesson=obj.lesson,
+            title=title,
+        )
+
+        latest_times = base.values("language").annotate(
+            latest_created_at=Max("created_at")
+        )
+
+        out = {}
+        for row in latest_times:
+            lang = row["language"]
+            dt = row["latest_created_at"]
+
+            latest_obj = (
+                base.filter(language=lang, created_at=dt)
+                .order_by("-created_at", "-id")
+                .first()
+            )
+
+            # ✅ IMPORTANT: don't return the same object again
+            if not latest_obj or latest_obj.id == obj.id:
+                continue
+
+            out[lang] = TeacherCodeSubmissionMiniSerializer(latest_obj).data
+
+        return out
+
 
     def get_student_name(self, obj: CodeSubmission) -> str:
         u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
@@ -194,14 +303,12 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
         return {"id": getattr(c, "id", None), "name": getattr(c, "name", "")} if c else {"id": None, "name": ""}
 
     def get_classroom(self, obj):
-        # Prefer course.classroom
         try:
             room = obj.lesson.module.course.classroom
             if room:
                 return {"id": room.id, "name": room.name}
         except Exception:
             pass
-        # Fallback student.classroom
         try:
             room = obj.student.classroom
             if room:

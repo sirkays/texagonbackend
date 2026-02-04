@@ -31,6 +31,7 @@ from .serializers import (
 )
 from .utils import user_is_submission_student, user_teaches_lesson, user_is_teacher
 from api.permissions import RequiresActiveStudentSubscription
+from django.db.models.functions import Lower, Trim
 
 logger = logging.getLogger(__name__)
 # ---------- SNIPPETS ----------
@@ -201,12 +202,13 @@ def submission_detail(request, submission_id: int):
     """
     Student or course teacher: fetch submission detail (with comments).
     """
+
     submission = get_object_or_404(CodeSubmission, id=submission_id)
 
     # permission: owner student OR the lesson's teacher
     if not (user_is_submission_student(request.user, submission) or user_teaches_lesson(request.user, submission.lesson)):
         return Response({"detail": "Not allowed."}, status=403)
-
+    
     return Response(CodeSubmissionSerializer(submission).data)
 
 
@@ -506,7 +508,16 @@ def teacher_submissions_list(request):
         return err
 
     qs = _apply_filters(request, qs)
+    # normalize title: trim + lower
+    qs = qs.annotate(
+        title_norm=Lower(Trim("title"))
+    ).exclude(title_norm="")  # optional: drop empty titles
 
+    # keep ONLY latest per (student, lesson, title_norm)
+    qs = (
+        qs.order_by("student_id", "lesson_id", "title_norm", "-created_at", "-id")
+        .distinct("student_id", "lesson_id", "title_norm")
+    )
     paginator = QuickPagination()
     page = paginator.paginate_queryset(qs, request)
     ser = SubmissionListSerializer(page, many=True)
@@ -522,8 +533,10 @@ def teacher_submission_detail(request, pk: int):
     if err:
         return err
     obj = get_object_or_404(qs, pk=pk)
-    ser = TeacherCodeSubmissionDetailSerializer(obj)
-    return Response(ser.data)
+    ser = TeacherCodeSubmissionDetailSerializer(obj, context={"request": request})
+    data = ser.data
+    return Response(data)
+
 
 # ---------- 3) Comments list/create ----------
 @api_view(["GET", "POST"])

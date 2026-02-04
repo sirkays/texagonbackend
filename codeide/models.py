@@ -17,7 +17,7 @@ class CodeSnippet(TimeStampedModel):
     class LANGUAGE_TYPE(models.TextChoices):
         JAVASCRIPT = "javascript", "javascript"
         HTML = "html", "html"
-        CSS = "CSS", "CSS"
+        CSS = "css", "css"
         PYTHON = "python", "python"
         JAVA = "java", "java"
     student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="code_snippets")
@@ -26,6 +26,7 @@ class CodeSnippet(TimeStampedModel):
     language = models.CharField(max_length=64, choices=LANGUAGE_TYPE.choices, default=LANGUAGE_TYPE.HTML)  # e.g. 'python', 'javascript', 'java', ...
     code_text = models.TextField()
     meta = models.JSONField(default=dict, blank=True)
+    
 
     class Meta:
         ordering = ["-created_at"]
@@ -38,6 +39,12 @@ class CodeSubmission(TimeStampedModel):
     """
     Submitted code by lesson (student). A teacher can grade/correct.
     """
+    class LANGUAGE_TYPE(models.TextChoices):
+        JAVASCRIPT = "javascript", "javascript"
+        HTML = "html", "html"
+        CSS = "css", "css"
+        PYTHON = "python", "python"
+        JAVA = "java", "java"
     class Status(models.TextChoices):
         SUBMITTED = "submitted", "Submitted"
         GRADED = "graded", "Graded"
@@ -46,7 +53,7 @@ class CodeSubmission(TimeStampedModel):
     student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="code_submissions")
     lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="code_submissions")
 
-    language = models.CharField(max_length=64)
+    language = models.CharField(max_length=64, choices=LANGUAGE_TYPE.choices, default=LANGUAGE_TYPE.HTML) 
     code_text = models.TextField()
 
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.SUBMITTED)
