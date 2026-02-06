@@ -1,5 +1,6 @@
 import json
 import traceback
+from nanoid import generate
 from decimal import Decimal
 from datetime import timedelta
 from .permissions import IsStudent
@@ -1355,6 +1356,7 @@ def _update_private_enrollment_for_booking(booking, enrollment_status: str):
 @api_view(["GET", "POST", "PATCH", "DELETE"])
 @authentication_classes([SessionTokenAuthentication])
 @permission_classes([HasAPIKey])
+@transaction.atomic
 def teacher_tutoring_bookings(request):
     """
     Endpoint for teacher tutoring bookings page.
@@ -1430,11 +1432,32 @@ def teacher_tutoring_bookings(request):
         elif request.method == "POST":
             # Create PrivateTutoring (for "Private Sessions" tab)
             data = request.data.copy()
-            data["teacher"] = teacher.id
-            serializer = PrivateTutoringSerializer(data=data)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            course = data.get('course')
+            course = get_object_or_404_ajax(Course,pk=course)
+            if course:
+                classroom = Classroom.objects.create(
+                    name=f"{course.classroom.name}_{user.email.replace("@","")}_private",
+                    organization=course.classroom.organization,
+                    code=f"{generate(size=10)}",
+                    class_type="private"
+                )
+                classroom.teachers.add(user)
+                course = Course.objects.create(
+                    name=f"{course.name}_{user.email.replace("@","")}_private",
+                    organization=course.organization,
+                    subject=course.subject,
+                    classroom=classroom,
+                    teacher=course.teacher,
+                    description=course.description,
+                    course_type="private",
+                    parent_course=course,
+                )
+                data['course'] = course.id
+                data["teacher"] = teacher.id
+                serializer = PrivateTutoringSerializer(data=data)
+                if serializer.is_valid():
+                    serializer.save()
+                    return Response(serializer.data, status=status.HTTP_201_CREATED)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         elif request.method == "PATCH":

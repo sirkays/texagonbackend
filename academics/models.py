@@ -16,12 +16,21 @@ from django.db.models import Max
 from django.utils.dateparse import parse_datetime
 
 class Classroom(NamedModel):
+    USAGE_CHOICE = (
+        ('public','public'),
+        ('private','private'),
+    )
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="classrooms")
     code = models.CharField(max_length=32, blank=True)
     teachers = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="teaching_classrooms", blank=True)
+    class_type = models.CharField(
+        max_length=20,
+        choices=USAGE_CHOICE,
+        default='public',
+    )
 
     class Meta:
-        unique_together = ("organization", "name")
+        unique_together = ("organization", "name", "code")
 
 class Subject(NamedModel):
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="subjects")

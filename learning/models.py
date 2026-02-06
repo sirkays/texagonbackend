@@ -25,7 +25,7 @@ class Course(NamedModel):
         default='public',
     )
     freeze_code_submission = models.BooleanField(default=False)
-
+    parent_course = models.ForeignKey("Course", on_delete=models.CASCADE, blank=True, null=True)
 
 
     def __str__(self):
