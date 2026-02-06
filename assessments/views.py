@@ -1271,14 +1271,12 @@ def update_test(request, test_id: int):
 
         data = request.data or {}
         
-        if "mode" in data:
-            mode = (data.get("mode") or "").strip().lower()
+        if "mode" in data or "test_type" in mode:
+            mode = (data.get("mode") or data.get("test_type")).strip().lower()
             if mode not in ("online", "offline"):
                 return Response({"detail": "mode must be 'online' or 'offline'."},
                                 status=status.HTTP_400_BAD_REQUEST)
-            print("mode: ", mode)
             test.mode = mode
-            print(mode, " test ", test.mode)
 
         # Core fields
         if "title" in data:
@@ -1478,7 +1476,7 @@ def create_test(request):
 
         data = request.data or {}
 
-        mode = (data.get("mode") or "online").strip().lower()
+        mode = (data.get("test_type") or data.get("mode", "online")).strip().lower()
         if mode not in ("online", "offline"):
             return Response({"detail": "mode must be 'online' or 'offline'."},
                             status=status.HTTP_400_BAD_REQUEST)
