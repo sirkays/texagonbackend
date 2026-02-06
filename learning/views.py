@@ -1088,6 +1088,7 @@ def _serialize_module(module: Module, include_lessons: bool = False) -> Dict[str
         } if module.course else None,
         "createdAt": module.created_at.isoformat() if hasattr(module, 'created_at') else None,
         "updatedAt": module.updated_at.isoformat() if hasattr(module, 'updated_at') else None,
+        "freeze_code_submission":module.course.freeze_code_submission,
     }
     
     if include_lessons:
@@ -1971,6 +1972,7 @@ def get_teacher_courses(request):
                 "description": course.description,
                 "isActive": course.is_active,
                 "course_type": course.course_type,
+                "freeze_code_submission":course.freeze_code_submission,
                 "general_activation":course.general_activation,
                 "general_activation_date": course.general_activation_date.isoformat() if course.general_activation_date else None
 
@@ -2211,3 +2213,33 @@ def update_course_general_activation(request, course_id: int):
         },
         status=status.HTTP_200_OK
     )
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def toggle_code_submit(request):
+    teacher = _get_teacher_for_user(request.user)
+    if not teacher:
+        return Response({"detail": "No teacher profile found."}, status=status.HTTP_403_FORBIDDEN)
+
+    course_id = request.query_params.get("course_id")
+    course = (Course.objects
+              .filter(id=course_id, teacher=teacher)
+              .first())
+    if not course:
+        return Response({"detail": "Course not found for this teacher."}, status=status.HTTP_404_NOT_FOUND)
+    
+    if course.freeze_code_submission:
+        course.freeze_code_submission = False
+    else:
+        course.freeze_code_submission = True
+    
+    course.save()
+    return Response(
+        {
+            "id": course.id,
+        },
+        status=status.HTTP_200_OK
+    )
+

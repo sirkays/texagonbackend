@@ -461,6 +461,11 @@ class LessonViewSet(APIKeySessionViewSet):
             if course_id:
                 qs = qs.filter(module__course_id=course_id)
 
+            freezed = request.query_params.get("freezed")
+
+            if str(freezed) == "1":
+                qs = qs.filter(module__course__freeze_code_submission=False)
+
             return qs
 
         except Exception as e:

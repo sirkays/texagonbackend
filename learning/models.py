@@ -24,6 +24,7 @@ class Course(NamedModel):
         choices=USAGE_CHOICE,
         default='public',
     )
+    freeze_code_submission = models.BooleanField(default=False)
 
 
 
