@@ -1443,7 +1443,7 @@ def teacher_tutoring_bookings(request):
                 )
                 classroom.teachers.add(user)
                 course = Course.objects.create(
-                    name=f"{course.name}_{user.email.replace("@","")}_private",
+                    name=data.get("title"),
                     organization=course.organization,
                     subject=course.subject,
                     classroom=classroom,

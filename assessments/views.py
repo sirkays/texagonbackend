@@ -7,6 +7,7 @@ from datetime import datetime, timezone as py_tz
 from decimal import Decimal
 from typing import Any, DefaultDict, Dict, List, Optional
 from gamification.services.engine import log_event 
+from django.core.paginator import Paginator
 from gamification.models import Streak
 # ===== Django Imports =====
 from django.conf import settings
@@ -63,6 +64,7 @@ from core.utils import (
     client_ip,
     hash_ip,
     COOKIE_NAME,
+    _clean_excluded_students
 )
 from learning.models import Course, Enrollment, Lesson, Module
 from orgs.models import Organization, OrganizationMembership
@@ -70,7 +72,7 @@ from orgs.models import Organization, OrganizationMembership
 # ===== Local Module Imports =====
 from api.authentication import SessionTokenAuthentication
 from rest_framework_api_key.permissions import HasAPIKey
-from .serializers import TestAttemptSerializer, TestMiniSerializer
+from .serializers import TestAttemptSerializer, TestMiniSerializer,StudentProfileMiniSerializer
 from api.permissions import RequiresActiveStudentSubscription
 
 logger = logging.getLogger(__name__)
@@ -1251,13 +1253,11 @@ def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
 
     return result
 
-
 @api_view(["PUT", "PATCH"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
 def update_test(request, test_id: int):
-    """Update test details (title, instructions/description, duration, settings, start_at, end_at)."""
     try:
         user = request.user
         teacher = _get_teacher_for_user(user)
@@ -1270,19 +1270,18 @@ def update_test(request, test_id: int):
             return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
 
         data = request.data or {}
-        
-        if "mode" in data or "test_type" in mode:
-            mode = (data.get("mode") or data.get("test_type")).strip().lower()
+
+        # ✅ FIXED
+        if "mode" in data or "test_type" in data:
+            mode = (data.get("mode") or data.get("test_type") or "").strip().lower()
             if mode not in ("online", "offline"):
                 return Response({"detail": "mode must be 'online' or 'offline'."},
                                 status=status.HTTP_400_BAD_REQUEST)
             test.mode = mode
 
-        # Core fields
         if "title" in data:
             test.title = (data["title"] or "").strip()
 
-        # Allow either `instructions` or `description` (your client sends 'description')
         if "instructions" in data:
             test.instructions = data["instructions"] or ""
         elif "description" in data:
@@ -1301,12 +1300,12 @@ def update_test(request, test_id: int):
             except (TypeError, ValueError):
                 return Response({"detail": "duration must be a positive integer (minutes)."},
                                 status=status.HTTP_400_BAD_REQUEST)
-        if "start_at" in data:
-            test.start_at = _to_aware_utc(data["start_at"])
-        if "end_at" in data:
-            test.end_at = _to_aware_utc(data["end_at"])
 
-        # Settings (difficulty/category)
+        if "start_at" in data:
+            test.start_at = _to_aware_utc(data["start_at"]) if data["start_at"] else None
+        if "end_at" in data:
+            test.end_at = _to_aware_utc(data["end_at"]) if data["end_at"] else None
+
         settings_dict = test.settings or {}
         if "difficulty" in data:
             settings_dict["difficulty"] = data["difficulty"]
@@ -1316,26 +1315,29 @@ def update_test(request, test_id: int):
 
         test.save()
 
+        # ✅ NEW: update excluded students if key is present
+        try:
+            excluded_ids = _clean_excluded_students(data, test.course)
+        except ValueError as ve:
+            return Response({"detail": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if excluded_ids is not None:
+            test.excluded_users.set(excluded_ids)
+
         serialized_test = _serialize_test(test, include_questions=True)
-        return Response(
-            {"test": serialized_test, "message": "Test updated successfully."},
-            status=status.HTTP_200_OK
-        )
+        return Response({"test": serialized_test, "message": "Test updated successfully."},
+                        status=status.HTTP_200_OK)
 
     except (ValueError, TypeError) as e:
-        print(e)
-        # Likely bad datetime or type issues
         payload = {"detail": "Invalid input.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
-        print(e)
         payload = {"detail": "Error updating test.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 
 @api_view(["GET"])
@@ -1452,22 +1454,6 @@ def teacher_test_detail(request, test_id: int):
 @authentication_classes([SessionTokenAuthentication])
 @transaction.atomic
 def create_test(request):
-    """
-    Create a new test.
-    
-    Expected JSON body:
-    {
-        "title": "Algebra Midterm",
-        "instructions": "Complete all questions within the time limit.",
-        "duration": 60,
-        "difficulty": "Medium",
-        "course_id": 123,
-        "category": "Math",
-        "start_date": "2025-09-25T09:00:00Z",
-        "end_date": "2025-09-25T10:00:00Z"
-    }
-
-    """
     try:
         user = request.user
         teacher = _get_teacher_for_user(user)
@@ -1481,63 +1467,119 @@ def create_test(request):
             return Response({"detail": "mode must be 'online' or 'offline'."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        # Validate required fields
-        title = data.get('title', '').strip()
+        title = data.get("title", "").strip()
         if not title:
             return Response({"detail": "Title is required."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        course_id = data.get('course_id')
+
+        course_id = data.get("course_id")
         if not course_id:
             return Response({"detail": "Course ID is required."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Verify teacher owns the course
+
         try:
             course = Course.objects.get(id=course_id, teacher=teacher)
         except Course.DoesNotExist:
             return Response({"detail": "Course not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
 
-        if "start_at" in data:
-            start_at = _to_aware_utc(data["start_at"])
-        if "end_at" in data:
-            end_at = _to_aware_utc(data["end_at"])     
+        start_at = _to_aware_utc(data["start_at"]) if data.get("start_at") else None
+        end_at = _to_aware_utc(data["end_at"]) if data.get("end_at") else None
 
-        # Create test
-        test_data = {
-            "mode": mode,  # ✅ NEW
-            'course': course,
-            'title': title,
-            'start_at':start_at,
-            'end_at':end_at,
-            'instructions': data.get('instructions', ''),
-            'total_marks': data.get("total_marks", 100),
-            'duration_minutes': max(1, int(data.get('duration', 30))),
-            'visibility': 'draft',
-            'settings': {
-                'difficulty': data.get('difficulty', 'Medium'),
-                'category': data.get('category', ''),
-            }
-        }
-        
-        test = Test.objects.create(**test_data)
-        
+        # ✅ NEW: parse excluded_students (optional)
+        try:
+            excluded_ids = _clean_excluded_students(data, course)
+        except ValueError as ve:
+            return Response({"detail": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
+
+        test = Test.objects.create(
+            mode=mode,
+            course=course,
+            title=title,
+            start_at=start_at,
+            end_at=end_at,
+            instructions=data.get("instructions", ""),
+            total_marks=data.get("total_marks", 100),
+            duration_minutes=max(1, int(data.get("duration", 30))),
+            visibility="draft",
+            settings={
+                "difficulty": data.get("difficulty", "Medium"),
+                "category": data.get("category", ""),
+            },
+        )
+
+        # ✅ NEW: save excluded students
+        if excluded_ids is not None:
+            test.excluded_users.set(excluded_ids)
+
         serialized_test = _serialize_test(test, include_questions=True)
-        
-        return Response({
-            "test": serialized_test,
-            "message": "Test created successfully."
-        }, status=status.HTTP_201_CREATED)
-        
+
+        return Response({"test": serialized_test, "message": "Test created successfully."},
+                        status=status.HTTP_201_CREATED)
+
     except Exception as e:
-        payload = {
-            "detail": "Error creating test.",
-            "error": f"{type(e).__name__}: {e}",
-        }
+        payload = {"detail": "Error creating test.", "error": f"{type(e).__name__}: {e}"}
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def fetch_course_students(request):
+    user = request.user
+    teacher = _get_teacher_for_user(user)
+    if not teacher:
+        return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+    course_id = request.query_params.get("course_id")
+    test_id = request.query_params.get("test_id")
+
+    if not course_id:
+        return Response({"detail": "course_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # pagination params
+    page = int(request.query_params.get("page", 1))
+    limit = int(request.query_params.get("limit", 10))
+
+    enrolled_user_ids = Enrollment.objects.filter(
+        course_id=course_id,
+        completed_at__isnull=True,
+    ).values_list("student_id", flat=True)
+
+    qs = StudentProfile.objects.filter(
+        user_id__in=enrolled_user_ids
+    ).select_related("user").order_by("user__first_name", "user__last_name")
+
+    test = None
+    excluded_ids = set()
+
+    if test_id:
+        test = Test.objects.filter(id=test_id, course_id=course_id).first()
+        if test:
+            excluded_ids = set(test.excluded_users.values_list("id", flat=True))
+
+    paginator = Paginator(qs, limit)
+    page_obj = paginator.get_page(page)
+
+    serializer = StudentProfileMiniSerializer(
+        page_obj.object_list,
+        many=True,
+        context={"test": test, "excluded_ids": excluded_ids},
+    )
+
+    return Response(
+        {
+            "results": serializer.data,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": paginator.count,
+                "pages": paginator.num_pages,
+            },
+        },
+        status=status.HTTP_200_OK,
+    )
 
 @api_view(["DELETE"])
 @permission_classes([HasAPIKey])

@@ -42,5 +42,8 @@ urlpatterns = [
 
 
     path('api/teacher/fetch-my-test/', views.fetch_my_tests, name='fetch_my_tests'),
+
+
+    path('api/teacher/fetch-course-students/', views.fetch_course_students, name='fetch_course_students'),
 ]
 

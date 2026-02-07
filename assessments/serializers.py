@@ -1,6 +1,27 @@
 from django.utils import timezone
 from rest_framework import serializers
 from assessments.models import TestAttempt, Test
+from academics.models import StudentProfile
+from .models import Test
+
+
+class StudentProfileMiniSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    is_exclude = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentProfile
+        fields = ("id", "admission_no", "dob", "full_name", "is_exclude")
+
+    def get_full_name(self, obj):
+        u = obj.user
+        return f"{u.first_name} {u.last_name}".strip()
+
+    def get_is_exclude(self, obj):
+        test = self.context.get("test")
+        if not test:
+            return False
+        return obj.id in self.context.get("excluded_ids", set())
 
 
 class TestMiniSerializer(serializers.ModelSerializer):

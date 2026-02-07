@@ -653,3 +653,45 @@ def _get_admin_selected_org_id(request):
     if not adminaccess.selected_organization_id:
         return None
     return adminaccess.selected_organization_id
+
+
+
+def _clean_excluded_students(data, course):
+    """
+    Returns a list of StudentProfile IDs that are enrolled in the given course.
+    Raises Response on invalid.
+    """
+    raw = data.get("excluded_students", None)
+    if raw is None:
+        return None  # means "do not touch excluded_users"
+
+    if not isinstance(raw, list):
+        raise ValueError("excluded_students must be a list of StudentProfile IDs.")
+
+    # keep only ints
+    try:
+        ids = [int(x) for x in raw]
+    except (TypeError, ValueError):
+        raise ValueError("excluded_students must be a list of integers.")
+
+    ids = list({i for i in ids if i > 0})  # unique, positive
+
+    if not ids:
+        return []  # means "clear all exclusions"
+
+    # validate these profiles are enrolled (active) for this course
+    enrolled_user_ids = Enrollment.objects.filter(
+        course=course,
+        completed_at__isnull=True,
+    ).values_list("student_id", flat=True)
+
+    allowed_profile_ids = set(
+        StudentProfile.objects.filter(user_id__in=enrolled_user_ids)
+        .values_list("id", flat=True)
+    )
+
+    bad = [i for i in ids if i not in allowed_profile_ids]
+    if bad:
+        raise ValueError(f"Some students are not enrolled in this course: {bad}")
+
+    return ids

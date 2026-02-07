@@ -30,6 +30,7 @@ class Test(TimeStampedModel):
     start_at = models.DateTimeField(null=True, blank=True)
     end_at = models.DateTimeField(null=True, blank=True)
     settings = models.JSONField(default=dict, blank=True)
+    excluded_users = models.ManyToManyField("academics.StudentProfile",blank=True)
 
     def __str__(self):
         return self.title
