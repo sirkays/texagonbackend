@@ -1059,6 +1059,7 @@ def _serialize_lesson(lesson: Lesson) -> Dict[str, Any]:
         "url": lesson.url or "",
         "videoUrl": lesson.url if lesson.content_type == "video" else "",
         "audioUrl": lesson.url if lesson.content_type == "audio" else "",
+        "pdfUrl": lesson.url if lesson.content_type == "pdf" else "",
         "textContent": lesson.meta.get("text_content", "") if lesson.meta else "",
         "active": lesson.active,
         "meta": lesson.meta or {},
