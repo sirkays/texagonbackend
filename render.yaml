@@ -170,7 +170,7 @@ services:
   - type: cron
     name: texagon-cron-monthly-billing
     runtime: docker
-    schedule: "0 1 1 * *"
+    schedule: "0 1 1 * *" # Runs at 2:00 AM Lagos time on the 1st of every month
     autoDeploy: true
     envVars:
       - key: PROCESS_TYPE
@@ -203,7 +203,7 @@ services:
   - type: cron
     name: texagon-cron-gamification
     runtime: docker
-    schedule: "10 14 * * *"   # daily 02:00 UTC (03:00 Lagos)
+    schedule: "0 2 * * *"   # daily 02:00 UTC (03:00 Lagos)
     autoDeploy: true
     envVars:
       - key: PROCESS_TYPE
@@ -235,7 +235,7 @@ services:
   - type: cron
     name: texagon-cron-progress
     runtime: docker
-    schedule: "20 14 * * *"   # daily 02:00 UTC (03:00 Lagos)
+    schedule: "0 4 * * 1"   # daily 04:00 UTC (05:00 Lagos)
     autoDeploy: true
     envVars:
       - key: PROCESS_TYPE

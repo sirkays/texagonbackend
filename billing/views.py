@@ -465,7 +465,6 @@ def fetch_parent_invoices(request):
         # -----------------------
         # Query
         # -----------------------
-        print(membership, " mem....")
         qs = (
             SubscriptionInvoice.objects
             .select_related(
@@ -476,7 +475,6 @@ def fetch_parent_invoices(request):
             .filter(organization_membership=membership)
             .order_by("-issued_at")
         )
-        print(qs, " this is where wwe are...")
         if status_param:
             qs = qs.filter(status=status_param)
 
@@ -493,7 +491,6 @@ def fetch_parent_invoices(request):
                 Q(invoicetype__object_type__icontains=search_param) |
                 Q(invoicetype__object_id__isnull=False, invoicetype__object_id__icontains=search_param)
             )
-        print(qs ," again....")
         # -----------------------
         # Serializer
         # -----------------------
@@ -530,7 +527,6 @@ def fetch_parent_invoices(request):
             }
 
         data = [_serialize(inv) for inv in qs]
-        print(data, " data")
         return Response({"count": len(data), "results": data}, status=status.HTTP_200_OK)
     except Exception as e:
         print(e)
@@ -1084,7 +1080,6 @@ def transactions_list(request):
         data = []
         for pay in paginated:
             if isinstance(pay, SubscriptionPayment):
-                print(pay.provider_status, " pppp ", pay.status, " paya ", pay)
                 date = pay.paid_at if pay.status == "success" else pay.created_at
                 customer_email = (
                     pay.invoice.organization_membership.user.email
@@ -1117,7 +1112,6 @@ def transactions_list(request):
                     "order_id": str(pay.order.id) if pay.order else "",
                 }
             data.append(d)
-        print(len(data), " data...")
         if type_param == "subscription":
             count = sub_qs.count()
         elif type_param == "store":
