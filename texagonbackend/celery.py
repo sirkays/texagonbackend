@@ -11,6 +11,7 @@ app.conf.result_backend = os.environ.get("REDIS_URL")
 app.conf.task_routes = {
     "notifications.tasks.*": {"queue": "email"},
     "billing.tasks.*": {"queue": "billing"},
+    "gamification.tasks.*": {"queue": "billing"},
 }
 
 app.autodiscover_tasks()

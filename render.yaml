@@ -197,3 +197,38 @@ services:
 
       - key: REDIS_URL
         fromService: { type: keyvalue, name: texagon-redis, property: connectionString }
+
+  
+    # CRON - MONTHLY BILLING
+  - type: cron
+    name: texagon-cron-gamification
+    runtime: docker
+    schedule: "25 13 * * *"   # daily 02:00 UTC (03:00 Lagos)
+    autoDeploy: true
+    envVars:
+      - key: PROCESS_TYPE
+        value: "cron-gamification"
+      - key: LOCAL
+        value: "0"
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: USE_CELERY
+        value: "1"
+      - key: DJANGO_SECRET_KEY
+        sync: false
+
+      - key: POSTGRES_HOST
+        fromDatabase: { name: texagon-db, property: host }
+      - key: POSTGRES_PORT
+        fromDatabase: { name: texagon-db, property: port }
+      - key: POSTGRES_DB
+        fromDatabase: { name: texagon-db, property: database }
+      - key: POSTGRES_USER
+        fromDatabase: { name: texagon-db, property: user }
+      - key: POSTGRES_PASSWORD
+        fromDatabase: { name: texagon-db, property: password }
+
+      - key: REDIS_URL
+        fromService: { type: keyvalue, name: texagon-redis, property: connectionString }
+
+  
