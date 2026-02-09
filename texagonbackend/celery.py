@@ -12,6 +12,7 @@ app.conf.task_routes = {
     "notifications.tasks.*": {"queue": "email"},
     "billing.tasks.*": {"queue": "billing"},
     "gamification.tasks.*": {"queue": "billing"},
+    "learning.tasks.*": {"queue": "billing"}, 
 }
 
 app.autodiscover_tasks()

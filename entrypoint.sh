@@ -39,11 +39,15 @@ case "${PROCESS_TYPE:-web}" in
     run_migrate
     exec python manage.py enqueue_subscription_invoices
     ;;
+
   cron-gamification)
-    run_migrate
     exec python manage.py enqueue_gamification
     ;;
 
+  cron-progress)
+    exec python manage.py enqueue_progress
+    ;;
+    
   *)
     echo "Unknown PROCESS_TYPE: ${PROCESS_TYPE}"
     exit 1

@@ -10,23 +10,11 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-
 from core.utils import resolve_season
 from gamification.services.engine import log_event
-
-
-def _get_model_any(candidates: Iterable[Tuple[str, str]]):
-    """
-    Resolve a model even if it's located in a different app in your project.
-    Tries (app_label, model_name) pairs in order.
-    """
-    last_err = None
-    for app_label, model_name in candidates:
-        try:
-            return apps.get_model(app_label, model_name)
-        except LookupError as e:
-            last_err = e
-    raise last_err or LookupError("Model not found in any candidate app labels.")
+from codeide.models import CodeSubmission
+from learning.models import CoursePassCriteria, Enrollment
+from assessments.models import TestAttempt
 
 
 def _q2(x: Decimal) -> Decimal:
@@ -79,23 +67,6 @@ class Command(BaseCommand):
         commit = opts["commit"]
         chunk_size = opts["chunk_size"]
 
-        Enrollment = apps.get_model("learning", "Enrollment")
-        CoursePassCriteria = apps.get_model("learning", "CoursePassCriteria")
-
-        TestAttempt = _get_model_any(
-            [
-                ("learning", "TestAttempt"),
-                ("assessments", "TestAttempt"),
-                ("tests", "TestAttempt"),
-                ("exam", "TestAttempt"),
-            ]
-        )
-
-        CodeSubmission = _get_model_any(
-            [
-                ("codeide", "CodeSubmission"),
-            ]
-        )
 
         qs = (
             Enrollment.objects.select_related("course", "student")
