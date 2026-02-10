@@ -13,6 +13,8 @@ from core.utils import resolve_season
 
 def get_points_balance(student) -> int:
     # simplest: sum of transactions
+    if getattr(student, "point_transactions", None) is None:
+        return 0
     return int(student.point_transactions.aggregate(s=Sum("points"))["s"] or 0)
 
 
