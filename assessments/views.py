@@ -418,17 +418,6 @@ def available_tests(request):
         student = _get_student_for_user(user)
         if not student:
             resp = Response({"tests": [], "detail": "No student profile found."}, status=status.HTTP_200_OK)
-            # Set cookie so the browser keeps a stable device id even if no student yet
-            dev_id = get_or_make_device_id(request)
-            resp.set_cookie(
-                COOKIE_NAME,
-                dev_id,
-                httponly=True,
-                samesite="None",   # ✅ REQUIRED for cross-domain
-                secure=True,       # ✅ REQUIRED with SameSite=None
-                max_age=60*60*24*365
-            )
-
             return resp
 
         # ---- Device gate (FIRST device wins) ----
@@ -446,13 +435,8 @@ def available_tests(request):
                 StudentDevice.objects.filter(pk=primary.pk).update(last_seen=timezone.now())
             else:
                 # Not the same device → return empty tests
-                resp = Response({"tests": []}, status=status.HTTP_200_OK)
-                # Still set/refresh cookie so this second device stays consistent
-                resp.set_cookie(
-                    COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
-                    secure=not settings.DEBUG, max_age=60*60*24*365
-                )
-                return resp
+
+                is_allowed_device = False
         else:
             # No device yet → register THIS device as the student's primary
             StudentDevice.objects.create(
@@ -468,11 +452,15 @@ def available_tests(request):
         course_ids = list(enrollments.values_list("course_id", flat=True))
         if not course_ids:
             resp = Response({"tests": []}, status=status.HTTP_200_OK)
-            resp.set_cookie(COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
-                            secure=not settings.DEBUG, max_age=60*60*24*365)
+            # resp.set_cookie(COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
+            #                 secure=not settings.DEBUG, max_age=60*60*24*365)
             return resp
 
         qs = Test.objects.filter(course_id__in=course_ids, start_at__isnull=False, end_at__isnull=False)
+
+        if not is_allowed_device:
+            qs = qs.filter(require_browser_code=False)
+
         course_filter = request.query_params.get("course")
         if course_filter:
             try:
@@ -493,8 +481,8 @@ def available_tests(request):
         test_ids = [t.id for t in tests]
         if not test_ids:
             resp = Response({"tests": []}, status=status.HTTP_200_OK)
-            resp.set_cookie(COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
-                            secure=not settings.DEBUG, max_age=60*60*24*365)
+            # resp.set_cookie(COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
+            #                 secure=not settings.DEBUG, max_age=60*60*24*365)
             return resp
 
         questions = list(Question.objects.filter(test_id__in=test_ids))
@@ -587,10 +575,10 @@ def available_tests(request):
             })
         resp = Response({"tests": items}, status=status.HTTP_200_OK)
         # Ensure browser retains the same device id
-        resp.set_cookie(
-            COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
-            secure=not settings.DEBUG, max_age=60*60*24*365
-        )
+        # resp.set_cookie(
+        #     COOKIE_NAME, dev_id, httponly=True, samesite="Lax",
+        #     secure=not settings.DEBUG, max_age=60*60*24*365
+        # )
         return resp
 
     except Exception as e:
@@ -1278,6 +1266,7 @@ def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
         # windows (handle None safely)
         "start_at": _iso(getattr(test, "start_at", None)),
         "end_at": _iso(getattr(test, "end_at", None)),
+        "require_browser_code": test.require_browser_code,
     }
     if include_questions and questions_manager is not None:
         questions = list(questions_manager.all().order_by("order", "id"))

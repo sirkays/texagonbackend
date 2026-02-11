@@ -31,7 +31,7 @@ class Test(TimeStampedModel):
     end_at = models.DateTimeField(null=True, blank=True)
     settings = models.JSONField(default=dict, blank=True)
     excluded_users = models.ManyToManyField("academics.StudentProfile",blank=True)
-    require_browser_code = models.BooleanField(default=False)
+    require_browser_code = models.BooleanField(default=True)
 
     def __str__(self):
         return self.title
