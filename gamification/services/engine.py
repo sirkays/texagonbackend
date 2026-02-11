@@ -67,16 +67,17 @@ def unlock_badge_if_eligible(student, badge) -> bool:
     balance = get_points_balance(student)
     if balance < int(badge.points):
         return False
-    
-    season = resolve_season(student.organization, timezone.now())
+    if student.organization:
+        season = resolve_season(student.organization, timezone.now())
 
-    obj, created = BadgeAward.objects.get_or_create(
-        student=student,
-        badge=badge,
-        season=season,
-        defaults={"reason": f"Reached {badge.points} points"},
-    )
-    return created
+        obj, created = BadgeAward.objects.get_or_create(
+            student=student,
+            badge=badge,
+            season=season,
+            defaults={"reason": f"Reached {badge.points} points"},
+        )
+        return created
+    return False
 
 
 
