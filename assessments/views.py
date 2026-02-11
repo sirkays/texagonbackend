@@ -601,6 +601,38 @@ def available_tests(request):
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(["GET"])
+@authentication_classes([SessionTokenAuthentication])
+@permission_classes([HasAPIKey, IsAuthenticated])  # << add IsAuthenticated
+@transaction.atomic
+def toggle_require_browser_code(request):
+
+    user = request.user
+    teacher = _get_teacher_for_user(user)
+    if not teacher:
+        return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+    
+    # Apply filters
+    cbt_id = request.query_params.get('cbt_id')
+
+    if cbt_id:
+        test = get_object_or_404_ajax(Test, id=cbt_id, course__teacher=teacher)
+
+        if test:
+            if test.require_browser_code:
+                test.require_browser_code = False
+                message = "Set to not require browser code"
+            else:
+                test.require_browser_code = True
+                message = "Set to require browser code"
+            test.save()
+            return Response({"data": {"require_browser_code":test.require_browser_code}, "message": message},
+                        status=status.HTTP_200_OK)
+    return Response(
+        {"detail": "Unexpected server error while submitting test."},
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
 
 @api_view(["POST"])
 @authentication_classes([SessionTokenAuthentication])

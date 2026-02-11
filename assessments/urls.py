@@ -6,8 +6,6 @@ urlpatterns = [
 
     path("api/tests/<int:test_id>/start/", views.start_test, name="start-test"),
 
-
-
     path('api/teacher/tests/', views.teacher_tests_list, name='teacher_tests_list'),
     path('api/teacher/tests/create/', views.create_test, name='create_test'),
     path('api/teacher/tests/<int:test_id>/', views.teacher_test_detail, name='teacher_test_detail'),
@@ -40,10 +38,10 @@ urlpatterns = [
 
     path('api/teacher/module-analytics/', views.teacher_module_analytics, name='teacher_module_analytics'),
 
-
     path('api/teacher/fetch-my-test/', views.fetch_my_tests, name='fetch_my_tests'),
 
-
     path('api/teacher/fetch-course-students/', views.fetch_course_students, name='fetch_course_students'),
+
+    path('api/teacher/toggle-cbt-require-code/', views.toggle_require_browser_code, name='toggle_require_browser_code'),
 ]
 
