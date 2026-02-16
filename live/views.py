@@ -155,7 +155,7 @@ def create_live_session(request):
 
 
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def user_live_sessions(request):
     """
@@ -173,7 +173,6 @@ def user_live_sessions(request):
         user = request.user
         student = _get_student_for_user(user)
         teacher = None if student else _get_teacher_for_user(user)
-
         if not student and not teacher:
             return Response(
                 {"detail": "Student or Teacher profile not found."},
@@ -210,14 +209,12 @@ def user_live_sessions(request):
                 return Response({"live_sessions": []}, status=status.HTTP_200_OK)
 
             course_ids = list(courses.values_list("id", flat=True))
-
         # Fetch live sessions
         live_sessions = (
             LiveSession.objects.filter(course_id__in=course_ids, active=True)
             .select_related("course__subject", "course__classroom", "course__teacher__user", "host__user")
             .order_by("scheduled_at")
         )
-
         sessions_data = []
         for session in live_sessions:
             sessions_data.append({
