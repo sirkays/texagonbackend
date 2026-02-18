@@ -458,7 +458,7 @@ def _apply_filters(request, qs):
       - lesson_id
       - status (single or CSV)
     """
-    q = request.query_params.get("q", "").strip()
+    q = request.query_params.get("search", "").strip()
     course_id = request.query_params.get("course_id")
     lesson_id = request.query_params.get("lesson_id")
     class_id = request.query_params.get("class_id") or request.query_params.get("classroom_id")
@@ -466,6 +466,7 @@ def _apply_filters(request, qs):
 
     if q:
         qs = qs.filter(
+            Q(title__icontains=q) |
             Q(lesson__name__icontains=q) |
             Q(lesson__module__course__name__icontains=q) |
             Q(student__user__first_name__icontains=q) |
