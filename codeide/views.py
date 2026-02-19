@@ -736,3 +736,59 @@ def student_update_submission(request, submission_id: int):
     )
 
     return Response(CodeSubmissionSerializer(updated).data, status=status.HTTP_200_OK)
+
+
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey, IsAuthenticated])
+@authentication_classes([SessionTokenAuthentication])
+def resolve_upload_by_label(request):
+    """
+    GET /code-ide/uploads/resolve/?label=<label>
+
+    Returns the most recent CodeFile belonging to the authenticated student
+    whose label (or original_name as fallback) matches the given query param.
+    """
+    label = request.query_params.get("label", "").strip()
+
+    if not label:
+        return Response(
+            {"error": "Missing required query param: label"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    student_profile = getattr(request.user, "student_profile", None)
+    if student_profile is None:
+        return Response(
+            {"error": "No student profile associated with this account"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Match on label first, fall back to original_name
+    qs = CodeFile.objects.filter(
+        student=student_profile
+    ).filter(
+        Q(label__iexact=label) | Q(original_name__iexact=label)
+    ).order_by("-created_at")
+
+    file_obj = qs.first()
+
+    if file_obj is None:
+        return Response(
+            {"error": f'No uploaded file found with label: "{label}"'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Build absolute file URL
+    file_url = request.build_absolute_uri(file_obj.file.url)
+
+    return Response({
+        "id":            file_obj.id,
+        "label":         file_obj.label,
+        "original_name": file_obj.original_name,
+        "url":           file_url,
+        "content_type":  file_obj.content_type,
+        "size_bytes":    file_obj.size_bytes,
+        "lesson":        file_obj.lesson_id,
+    })

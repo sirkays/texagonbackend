@@ -29,4 +29,7 @@ urlpatterns = [
     path("api/teacher/submissions/<int:pk>/", views.teacher_submission_detail, name="teacher_submission_detail"),
     path("api/teacher/submissions/<int:pk>/comments/", views.teacher_submission_comments, name="teacher_submission_comments"),
     path("api/teacher/submissions/<int:pk>/grade/", views.teacher_submission_grade, name="teacher_submission_grade"),
+
+    # fetch code file
+    path("api/uploads/resolve/", views.resolve_upload_by_label, name="resolve-upload-by-label"),
 ]
