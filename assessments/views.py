@@ -1569,7 +1569,7 @@ def fetch_course_students(request):
     ).values_list("student_id", flat=True)
 
     qs = StudentProfile.objects.filter(
-        user_id__in=enrolled_user_ids
+        pk__in=enrolled_user_ids
     ).select_related("user").order_by("user__first_name", "user__last_name")
 
     test = None
