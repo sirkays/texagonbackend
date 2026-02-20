@@ -32,4 +32,5 @@ urlpatterns = [
 
     # fetch code file
     path("api/uploads/resolve/", views.resolve_upload_by_label, name="resolve-upload-by-label"),
+    
 ]

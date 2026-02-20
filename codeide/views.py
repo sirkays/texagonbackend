@@ -740,6 +740,7 @@ def student_update_submission(request, submission_id: int):
 
 
 
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey, IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
@@ -757,20 +758,33 @@ def resolve_upload_by_label(request):
             {"error": "Missing required query param: label"},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    teacher_profile = getattr(request.user, "teacher_profile", None)
+    qs = None
+    if teacher_profile:
+        qs = CodeFile.objects.filter(
+            Q(label__iexact=label) | Q(original_name__iexact=label)
+        ).order_by("-created_at")
+    else:
+        student_profile = getattr(request.user, "student_profile", None)
+        if student_profile is None:
+            return Response(
+                {"error": "No student profile associated with this account"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
-    student_profile = getattr(request.user, "student_profile", None)
-    if student_profile is None:
+        # Match on label first, fall back to original_name
+        qs = CodeFile.objects.filter(
+            student=student_profile
+        ).filter(
+            Q(label__iexact=label) | Q(original_name__iexact=label)
+        ).order_by("-created_at")
+
+    if teacher_profile is None and qs is None:
         return Response(
-            {"error": "No student profile associated with this account"},
+            {"error": "No teacher profile associated with this account"},
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    # Match on label first, fall back to original_name
-    qs = CodeFile.objects.filter(
-        student=student_profile
-    ).filter(
-        Q(label__iexact=label) | Q(original_name__iexact=label)
-    ).order_by("-created_at")
 
     file_obj = qs.first()
 
@@ -782,7 +796,7 @@ def resolve_upload_by_label(request):
 
     # Build absolute file URL
     file_url = request.build_absolute_uri(file_obj.file.url)
-
+    
     return Response({
         "id":            file_obj.id,
         "label":         file_obj.label,
@@ -792,3 +806,5 @@ def resolve_upload_by_label(request):
         "size_bytes":    file_obj.size_bytes,
         "lesson":        file_obj.lesson_id,
     })
+
+
