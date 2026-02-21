@@ -120,20 +120,34 @@ def _get_or_create_past_due_student_subscription(
       2) Else if a PAST_DUE exists for same parent+plan -> reuse it (update amount/currency).
       3) Else create new PAST_DUE (no access yet). Activation happens on payment.
     """
-    # 1) Prefer ACTIVE (already subscribed)
+    now = timezone.now()
+    Status = UserAccountSubscription.Status
+
+    # mark expired ACTIVES for this student (so they don't get returned)
+    UserAccountSubscription.objects.filter(
+        organization=student.organization,
+        user=student.user,
+        status=Status.ACTIVE,
+        end_at__isnull=False,
+        end_at__lte=now,
+    ).update(status="expired", updated_at=now)
+
+    # now pick a truly-active subscription (end_at is null or in the future)
     active = (
         UserAccountSubscription.objects
         .filter(
             organization=student.organization,
             user=student.user,
-            status=UserAccountSubscription.Status.ACTIVE,
+            status=Status.ACTIVE,
+        )
+        .filter(
+            Q(end_at__isnull=True) | Q(end_at__gt=now)
         )
         .order_by("-start_at")
         .first()
     )
     if active:
         return active
-
     # 2) Reuse existing PAST_DUE for same parent+plan to avoid duplicates
     past_due = (
         UserAccountSubscription.objects
@@ -214,7 +228,6 @@ def generate_parent_children_subscription_invoices(
     Returns counts for monitoring.
     """
     now = now or timezone.now()
-
     # --- parents with active org subscription ---
     if user:
         parents_qs = (
@@ -282,10 +295,8 @@ def generate_parent_children_subscription_invoices(
     for l in links:
         if l.parent_id in parent_meta and l.student_id:
             candidates.append((l.parent_id, l.student_id))
-
     if not candidates:
         return GenerateResult(created=0, skipped_existing=0, parents_processed=len(parents), children_processed=0)
-
     # --- build existing keys (idempotency) ---
     # Narrow window: from earliest period_start across parents. Add some buffer.
     earliest_start = min(pm["period_start"] for pm in parent_meta.values())
@@ -322,7 +333,6 @@ def generate_parent_children_subscription_invoices(
     for l in links:
         if l.student_id and getattr(l, "student", None):
             student_cache[l.student_id] = l.student
-
     for parent_id, student_id in candidates:
         pm = parent_meta.get(parent_id)
         if not pm:
@@ -340,7 +350,6 @@ def generate_parent_children_subscription_invoices(
         if key in existing_keys:
             skipped += 1
             continue
-
         student = student_cache.get(student_id)
         if not student:
             # fallback lookup (should be rare)
@@ -359,7 +368,6 @@ def generate_parent_children_subscription_invoices(
             continue
 
         billed_parent_ids.add(parent_id)
-
         # Ensure user_subscription exists and is PAST_DUE (or ACTIVE if already subscribed)
         user_sub = _get_or_create_past_due_student_subscription(
             parent=pm["parent"],

@@ -39,6 +39,12 @@ class Subject(NamedModel):
     class Meta:
         unique_together = ("organization", "name")
 
+
+
+class Language(models.Model):
+    language_name = models.CharField(max_length=225)
+    active = models.BooleanField(default=False)
+    
 class StudentProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="students", blank=True, null=True)
@@ -182,10 +188,6 @@ class StudentProfile(TimeStampedModel):
         return queryset
 
 
-
-class Language(models.Model):
-    language_name = models.CharField(max_length=225)
-    active = models.BooleanField(default=False)
 
 class TeacherProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher_profile")
