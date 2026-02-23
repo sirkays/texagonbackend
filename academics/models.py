@@ -53,7 +53,7 @@ class StudentProfile(TimeStampedModel):
     current_classroom = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True)
     
     # Keeping unique=True is highly recommended if you enforce uniqueness
-    admission_no = models.CharField(max_length=64, blank=True, unique=True) 
+    admission_no = models.CharField(max_length=64, blank=True, null=True) 
     dob = models.DateField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
