@@ -1058,6 +1058,8 @@ def post_login(request):
     if not user or not user.is_authenticated:
         return Response({"detail": "Invalid or missing session token."}, status=status.HTTP_401_UNAUTHORIZED)
 
+    user.last_login = timezone.now()
+    user.save()
     # If users can belong to multiple orgs, pick one (latest active) or return all
     membership = (
         OrganizationMembership.objects

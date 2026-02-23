@@ -356,3 +356,34 @@ def auto_mark_attendance(request, course_id):
             "total": marked_present + marked_absent,
         }
     )
+
+
+
+# Add to attendance/views.py
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def delete_attendance_session(request, session_id):
+    """
+    Deletes an AttendanceSession (and all its records via CASCADE)
+    only if it belongs to a course owned by the requesting teacher.
+    """
+    try:
+        teacher_profile = request.user.teacher_profile
+    except Exception:
+        return Response({"detail": "Teacher profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        session = AttendanceSession.objects.select_related("course__teacher").get(id=session_id)
+    except AttendanceSession.DoesNotExist:
+        return Response({"detail": "Session not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Ownership check — session's course must belong to this teacher
+    if session.course.teacher_id != teacher_profile.id:
+        return Response({"detail": "You do not have permission to delete this session."}, status=status.HTTP_403_FORBIDDEN)
+
+    session.delete()
+    return Response({"detail": "Session deleted successfully."}, status=status.HTTP_200_OK)
+
+

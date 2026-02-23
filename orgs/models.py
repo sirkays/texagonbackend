@@ -12,6 +12,7 @@ class Organization(NamedModel):
     contact_email = models.EmailField(blank=True)
     contact_phone = models.CharField(max_length=32, blank=True)
     is_active = models.BooleanField(default=True)
+    year = models.CharField(default="2026")
 
     class Meta:
         indexes = [models.Index(fields=["slug"])]

@@ -14,6 +14,7 @@ from orgs.models import OrganizationMembership, Organization
 from accounts.models import User
 from django.db.models import Max
 from django.utils.dateparse import parse_datetime
+from nanoid import generate # Import NanoID
 
 class Classroom(NamedModel):
     USAGE_CHOICE = (
@@ -44,13 +45,40 @@ class Subject(NamedModel):
 class Language(models.Model):
     language_name = models.CharField(max_length=225)
     active = models.BooleanField(default=False)
-    
+
+
 class StudentProfile(TimeStampedModel):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="students", blank=True, null=True)
     current_classroom = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True)
-    admission_no = models.CharField(max_length=64, blank=True)
+    
+    # Keeping unique=True is highly recommended if you enforce uniqueness
+    admission_no = models.CharField(max_length=64, blank=True, unique=True) 
     dob = models.DateField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        # Only generate if admission_no is empty AND an organization is attached
+        if not self.admission_no and self.organization:
+            
+            org_year = self.organization.year
+            # Custom alphabet: Numbers + Uppercase letters (removed lookalikes like 0, O, I, 1 for clarity if desired, but here is a standard alphanumeric mix)
+            alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' 
+            
+            while True:
+                # Generate a 6-character random string
+                unique_str = generate(alphabet, 6)
+                
+                # Format: e.g., 2026/A4K9X2
+                new_admission_no = f"{org_year}/{unique_str}"
+                
+                # Check for collisions; break the loop if unique
+                if not StudentProfile.objects.filter(admission_no=new_admission_no).exists():
+                    self.admission_no = new_admission_no
+                    break
+
+        # Call the parent class's save method
+        super().save(*args, **kwargs)
+
 
     def __str__(self):
         return f"Student: {self.user.get_full_name() or self.user.username}"
