@@ -9,7 +9,7 @@ from itertools import islice
 from django.db import models
 from rest_framework import status as drf_status
 from django.db import transaction
-from django.db.models import F, Q, Case, When, DateTimeField
+from django.db.models import F, Q, Case, When, DateTimeField, Value, IntegerField
 from django.shortcuts import get_object_or_404
 from django.utils import dateparse, timezone
 
@@ -42,7 +42,6 @@ from texagonbackend.settings import FRONTEND_ORIGIN
 from notifications.services import dispatch
 from notifications.events import PAYMENT_CONFIRMED
 from billing.services.subscription_invoicing import generate_parent_children_subscription_invoices
-
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25MB per file
 ALLOWED_CONTENT_TYPES = None  # e.g. {"image/png","image/jpeg","application/pdf"}
 
@@ -480,7 +479,14 @@ def fetch_parent_invoices(request):
                 "invoicetype",
             )
             .filter(organization_membership=membership)
-            .order_by("-issued_at")
+            .annotate(
+                open_first=Case(
+                    When(status=SubscriptionInvoice.Status.OPEN, then=Value(0)),
+                    default=Value(1),
+                    output_field=IntegerField(),
+                )
+            )
+            .order_by('open_first', '-issued_at')   # open_first=0 (open) comes before 1 (others)
         )
         if status_param:
             qs = qs.filter(status=status_param)
