@@ -78,6 +78,9 @@ def flutterwave_webhook(request):
     if tx_ref:
         pay = SubscriptionPayment.objects.filter(reference=tx_ref).first()
         if pay:
+            is_test = False
+            if pay.invoice.subscription:
+                is_test  = pay.invoice.subscription.plan.is_test
             pay.provider_event = str(event_type)
             pay.provider_status = str(data.get("status") or "").lower()
             pay.meta = {**(pay.meta or {}), "webhook_payload": payload}
@@ -86,7 +89,7 @@ def flutterwave_webhook(request):
             # ✅ ALWAYS re-verify before granting value :contentReference[oaicite:10]{index=10}
             if flw_id:
                 try:
-                    flw = confirm_transaction(str(flw_id))
+                    flw = confirm_transaction(str(flw_id), is_test)
                     flw_data = flw.get("data") or {}
                     flw_status = (flw_data.get("status") or "").lower()
                     normalized = normalize_flutterwave_status(flw_status)
@@ -312,12 +315,16 @@ def create_subscription_payment(request):
             customer_detail = {
                 "email":request.user.email,
             }
+            is_test = False
+            if invoice.subscription:
+                is_test = invoice.subscription.plan.is_test
             payment_link = generate_payment_link(
                 request,
                 request.user.id, 
                 reference, redirect_url,
                 title,customer_detail,
-                amount,payment_plan
+                amount,payment_plan,
+                is_test
             )
         except Exception as e:
             return Response({"detail": "Could not create payment.", "error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -650,7 +657,10 @@ def confirm_payment(request):
 
         # --- Verify with Flutterwave ---
         try:
-            flw = confirm_transaction(transaction_id)  # use improved version: returns dict with ok/data/raw/error
+            is_test = False
+            if subscription_payment.invoice.subscription:
+                is_test  = subscription_payment.invoice.subscription.plan.is_test
+            flw = confirm_transaction(transaction_id, is_test)  # use improved version: returns dict with ok/data/raw/error
             flw_ok = bool(flw.get("ok"))
             flw_data = flw.get("data") or {}
             flw_top_status = (flw.get("status") or "").lower()

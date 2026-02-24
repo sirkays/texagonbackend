@@ -23,7 +23,8 @@ class SubscriptionPlan(NamedModel):
     billing_period = models.CharField(max_length=8, default="30") # BILLING PERIOD IS CALCULATED IN DAYS. DEFAULT IS 30 DAYS
     features = models.JSONField(default=list, blank=True)
     student_limit = models.PositiveIntegerField(default=0)  # 0 = unlimited
-
+    is_test = models.BooleanField(default=False)
+    
 class OrganizationSubscription(TimeStampedModel):
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"

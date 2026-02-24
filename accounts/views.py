@@ -1049,6 +1049,7 @@ def update_parent_child_link(request):
         status=status.HTTP_200_OK,
     )
 
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])

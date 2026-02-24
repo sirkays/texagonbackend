@@ -6,8 +6,8 @@ from django.utils import timezone
 from decimal import Decimal
 import base64, hmac, hashlib
 
-def get_payment_link(payload):
-    if PAYMENT_TEST:
+def get_payment_link(payload, is_test=False):
+    if PAYMENT_TEST and is_test:
         FLW_SECRET_KEY = TEST_KEY_SECRET
         
     url = "https://api.flutterwave.com/v3/payments"
@@ -32,7 +32,7 @@ def get_payment_link(payload):
         return False
 
 
-def generate_payment_link(request, user_id:int, tx_ref:str,redirect_url:str,title:str,customer_detail:dict,total_amount:float, payment_plan:str):
+def generate_payment_link(request, user_id:int, tx_ref:str,redirect_url:str,title:str,customer_detail:dict,total_amount:float, payment_plan:str, is_test=False):
 
     payload = {
         "tx_ref": tx_ref,
@@ -51,9 +51,9 @@ def generate_payment_link(request, user_id:int, tx_ref:str,redirect_url:str,titl
         }
     }
 
-    return get_payment_link(payload)
+    return get_payment_link(payload, is_test)
 
-def confirm_transaction(transaction_id: str) -> dict:
+def confirm_transaction(transaction_id: str, is_test=False) -> dict:
     """
     Verify a Flutterwave transaction and return a consistent payload:
     {
@@ -67,7 +67,7 @@ def confirm_transaction(transaction_id: str) -> dict:
     }
     """
     # Choose keys
-    if PAYMENT_TEST:
+    if PAYMENT_TEST or is_test:
         secret_key = TEST_KEY_SECRET
     else:
         secret_key = FLW_SECRET_KEY
