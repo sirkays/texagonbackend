@@ -7,7 +7,7 @@ from decimal import Decimal
 import base64, hmac, hashlib
 
 def get_payment_link(payload, is_test=False):
-    if PAYMENT_TEST and is_test:
+    if PAYMENT_TEST or is_test:
         FLW_SECRET_KEY = TEST_KEY_SECRET
         
     url = "https://api.flutterwave.com/v3/payments"
@@ -50,6 +50,7 @@ def generate_payment_link(request, user_id:int, tx_ref:str,redirect_url:str,titl
             "logo": LOGO_URL
         }
     }
+
 
     return get_payment_link(payload, is_test)
 
