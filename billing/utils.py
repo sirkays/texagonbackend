@@ -1,4 +1,4 @@
-from texagonbackend.settings import PAYMENT_TEST ,TEST_KEY_SECRET,FLW_SECRET_KEY, LOGO_URL
+from texagonbackend.settings import PAYMENT_TEST ,TEST_KEY_SECRET, LOGO_URL, FLW_SECRET_KEY as LIVE_KEY_SECRET
 import requests
 from django.contrib.sites.shortcuts import get_current_site
 from .models import SubscriptionPayment
@@ -7,30 +7,38 @@ from decimal import Decimal
 import base64, hmac, hashlib
 
 def get_payment_link(payload, is_test=False):
+
+    # ALWAYS define the key
     if PAYMENT_TEST or is_test:
         FLW_SECRET_KEY = TEST_KEY_SECRET
-        
+    else:
+        FLW_SECRET_KEY = LIVE_KEY_SECRET
+
     url = "https://api.flutterwave.com/v3/payments"
 
     headers = {
-        "Authorization": f"Bearer {FLW_SECRET_KEY}"
+        "Authorization": f"Bearer {FLW_SECRET_KEY}",
+        "Content-Type": "application/json"
     }
-    #{'status': 'success', 'message': 'Hosted Link', 'data': 
-    #{'link': 'https://ravemodal-dev.herokuapp.com/v3/hosted/pay/743317355dda6b531839'}}
+
     try:
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
+
         json_response = response.json()
-        if json_response['status'] == 'success':
+
+        if json_response.get('status') == 'success':
             return json_response['data']['link']
-        return False
-    except requests.exceptions.HTTPError as errh:
-        print(f"HTTP Error: {errh}")
-        return False
-    except requests.exceptions.RequestException as err:
-        #print(f"Request Exception: {err}")
+
         return False
 
+    except requests.exceptions.HTTPError as errh:
+        print("Flutterwave HTTP Error:", errh, response.text)
+        return False
+
+    except requests.exceptions.RequestException as err:
+        print("Flutterwave Request Error:", err)
+        return False
 
 def generate_payment_link(request, user_id:int, tx_ref:str,redirect_url:str,title:str,customer_detail:dict,total_amount:float, payment_plan:str, is_test=False):
 
@@ -51,7 +59,6 @@ def generate_payment_link(request, user_id:int, tx_ref:str,redirect_url:str,titl
         }
     }
 
-
     return get_payment_link(payload, is_test)
 
 def confirm_transaction(transaction_id: str, is_test=False) -> dict:
@@ -71,7 +78,7 @@ def confirm_transaction(transaction_id: str, is_test=False) -> dict:
     if PAYMENT_TEST or is_test:
         secret_key = TEST_KEY_SECRET
     else:
-        secret_key = FLW_SECRET_KEY
+        secret_key = LIVE_KEY_SECRET
 
     url = f"https://api.flutterwave.com/v3/transactions/{transaction_id}/verify"
     headers = {
