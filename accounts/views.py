@@ -1,52 +1,81 @@
 from datetime import date, datetime, timedelta
+from decimal import Decimal
+import traceback
+
+# Django core
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction, IntegrityError
 from django.db.models import (
-    Avg, Sum, Count, Min, Max, F, Q, Case, When, FloatField, DecimalField,Value
+    Avg, Sum, Count, Min, Max, F, Q, Case, When, FloatField, DecimalField, Value
 )
 from django.db.models.functions import Coalesce
-
-from django.http import (
-    JsonResponse
-)
-from django.contrib.auth import authenticate
-from core.models import Tier
-from django.core.exceptions import ValidationError
-from django.core.mail import send_mail
-from decimal import Decimal
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
-from django.db import transaction
-from rest_framework import status
+from django.http import JsonResponse
+from django.core.exceptions import ValidationError, ObjectDoesNotExist
+from django.core.mail import send_mail
+from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.password_validation import validate_password, ValidationError as PasswordValidationError
+
+# DRF
+from rest_framework import status, serializers
+from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework_api_key.permissions import HasAPIKey
 
+# Local API
 from api.authentication import SessionTokenAuthentication
 from api.models import SessionToken
 from api.retrieve_token import get_token_from_header
-
-from orgs.models import OrganizationMembership, Organization
-from academics.models import (
-    ParentProfile, StudentProfile, ParentChildLink, Classroom, TeacherProfile,Language, Subject
-)
-from learning.models import Course, Enrollment, Lesson, Bookmark, Material
-from assessments.models import Test, TestAttempt
-from gamification.models import (Badge, BadgeAward, PointTransaction, 
-    Streak, AchievementDefinition, AchievementAcquired,ActivityEvent
-)
-from billing.models import SubscriptionInvoice, SubscriptionPayment,OrganizationSubscription
-from notifications.models import Notification
-import traceback
-from .models import AdminAccess, User,EmailOTP
-from core.utils import _month_bounds, _resolve_org, get_object_or_404_ajax
 from api.permissions import RequiresActiveStudentSubscription
+
+# Core / Utils
+from core.models import Tier
+from core.utils import _month_bounds, _resolve_org, get_object_or_404_ajax
 from .utils import available_certificates_qs
 
+# Accounts
+from .models import AdminAccess, User, EmailOTP
+from .serializers import ResetPasswordSerializer
+
+# Orgs
+from orgs.models import OrganizationMembership, Organization
+
+# Academics
+from academics.models import (
+    ParentProfile, StudentProfile, ParentChildLink,
+    Classroom, TeacherProfile, Language, Subject
+)
+
+# Learning
+from learning.models import Course, Enrollment, Lesson, Bookmark, Material
+
+# Assessments
+from assessments.models import Test, TestAttempt
+
+# Gamification
+from gamification.models import (
+    Badge, BadgeAward, PointTransaction,
+    Streak, AchievementDefinition, AchievementAcquired, ActivityEvent
+)
+
+# Billing
+from billing.models import SubscriptionInvoice, SubscriptionPayment, OrganizationSubscription
 from billing.services.subscription_invoicing import generate_parent_children_subscription_invoices
-from texagonbackend.settings import FRONTEND_ORIGIN
+
+# Notifications
+from notifications.models import Notification
 from notifications.services import dispatch
 from notifications.events import SYSTEM_WELCOME
+
+# Project settings
+from texagonbackend.settings import FRONTEND_ORIGIN
+
+
+# unified user model reference (only once)
+User = get_user_model()
 
 def test_email(request):
     send_mail(
@@ -1078,6 +1107,7 @@ def post_login(request):
             "detail": "User access granted",
             "org_membership_pk": membership.pk,
             "role": membership.role,
+            "is_generated":user.is_generated,
         },
         status=status.HTTP_200_OK,  # <- correct constant
     )
@@ -2670,6 +2700,223 @@ def reset_child_password(request):
         },
         status=status.HTTP_200_OK
     )
+
+
+
+
+
+class ResetPasswordView(APIView):
+    """
+    POST /api/accounts/reset-password/
+    Body for self-change:
+    {
+      "new_password": "newpass123",
+      "current_password": "oldpass123"
+    }
+
+    Body for admin reset:
+    {
+      "user_id": 42,
+      "new_password": "newpass123"
+    }
+    OR
+    {
+      "email": "someone@example.com",
+      "new_password": "newpass123"
+    }
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        serializer = ResetPasswordSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        target_user = serializer.validated_data["target_user"]
+        new_password = serializer.validated_data["new_password"]
+
+        # Set new password
+        target_user.set_password(new_password)
+        target_user.save()
+
+        # Optionally revoke session tokens for the target user (if SessionToken model exists)
+        if SessionToken is not None:
+            try:
+                SessionToken.objects.filter(user=target_user, is_active=True).update(is_active=False)
+            except Exception:
+                # If session revocation fails for some reason, we don't want to crash the whole request.
+                # Log in real app; here we silently continue.
+                pass
+
+        # Be careful about what user info you expose; don't return password or sensitive fields.
+        target_user.is_generated = False
+        target_user.save()
+        return Response(
+            {
+                "detail": "Password reset successfully.",
+                "user_id": target_user.id,
+                "user_email": getattr(target_user, "email", None),
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def update_profile(request):
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response({"detail": "Invalid or missing session token."},
+                        status=status.HTTP_401_UNAUTHORIZED)
+
+    data = request.data or {}
+    account_type = (data.get("account_type") or "").strip().lower() or None
+
+    # auto detect role if not provided
+    def detect_account_type(u):
+        if hasattr(u, "teacher_profile"):
+            return "teacher"
+        if hasattr(u, "student_profile"):
+            return "student"
+        if hasattr(u, "parent_profile"):
+            return "parent"
+        return None
+
+    if not account_type:
+        account_type = detect_account_type(user)
+
+    if account_type not in ("teacher", "student", "parent"):
+        return Response({"detail": "account_type must be one of: teacher, student, parent"},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        with transaction.atomic():
+
+            # COMMON USER FIELD UPDATE FUNCTION
+            def update_user_fields():
+                if "email" in data:
+                    email = data.get("email", "").strip()
+                    if not email:
+                        return Response({"detail": "email cannot be empty."}, status=status.HTTP_400_BAD_REQUEST)
+
+                    if User.objects.filter(email=email).exclude(pk=user.pk).exists():
+                        return Response({"detail": "Email already in use."}, status=status.HTTP_400_BAD_REQUEST)
+
+                    user.email = email
+
+                if "first_name" in data:
+                    user.first_name = data.get("first_name", "").strip()
+
+                if "last_name" in data:
+                    user.last_name = data.get("last_name", "").strip()
+
+                if "phone" in data:
+                    user.phone = data.get("phone", "").strip()
+
+                user.save()
+                return None
+
+            # TEACHER
+            if account_type == "teacher":
+                try:
+                    teacher = user.teacher_profile
+                except ObjectDoesNotExist:
+                    return Response({"detail": "Teacher profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+                err = update_user_fields()
+                if err:
+                    return err
+
+                if "bio" in data:
+                    teacher.bio = data.get("bio", "").strip()
+
+                if "experience" in data:
+                    try:
+                        exp = int(data.get("experience"))
+                        if exp < 0:
+                            raise ValueError()
+                    except Exception:
+                        return Response({"detail": "experience must be a non-negative integer."},
+                                        status=status.HTTP_400_BAD_REQUEST)
+                    teacher.experience = exp
+
+                teacher.save()
+
+                return Response({
+                    "detail": "Teacher profile updated.",
+                    "user": {
+                        "id": user.id,
+                        "email": user.email,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "phone": user.phone
+                    },
+                    "teacher_profile": {
+                        "bio": teacher.bio,
+                        "experience": teacher.experience
+                    }
+                })
+
+            # STUDENT
+            if account_type == "student":
+                try:
+                    student = user.student_profile
+                except ObjectDoesNotExist:
+                    return Response({"detail": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+                err = update_user_fields()
+                if err:
+                    return err
+
+                return Response({
+                    "detail": "Student profile updated.",
+                    "user": {
+                        "id": user.id,
+                        "email": user.email,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "phone": user.phone
+                    }
+                })
+
+            # PARENT (UPDATED PART)
+            if account_type == "parent":
+                try:
+                    parent = user.parent_profile
+                except ObjectDoesNotExist:
+                    return Response({"detail": "Parent profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+                err = update_user_fields()
+                if err:
+                    return err
+
+                if "address" in data:
+                    parent.address = data.get("address", "").strip()
+
+                parent.save()
+
+                return Response({
+                    "detail": "Parent profile updated.",
+                    "user": {
+                        "id": user.id,
+                        "email": user.email,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "phone": user.phone
+                    },
+                    "parent_profile": {
+                        "address": parent.address
+                    }
+                })
+
+    except IntegrityError:
+        return Response({"detail": "Database error updating profile."},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        return Response({"detail": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(["POST"])

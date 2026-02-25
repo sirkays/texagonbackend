@@ -45,6 +45,7 @@ class User(AbstractUser):
         on_delete=models.SET_NULL,
         related_name="primary_users",
     )
+    is_generated = models.BooleanField(default=False)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []  # no username, so leave empty
