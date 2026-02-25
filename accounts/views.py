@@ -1,7 +1,6 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 import traceback
-
 # Django core
 from django.conf import settings
 from django.db import models, transaction, IntegrityError
@@ -29,7 +28,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 from api.authentication import SessionTokenAuthentication
 from api.models import SessionToken
 from api.retrieve_token import get_token_from_header
-from api.permissions import RequiresActiveStudentSubscription
+from api.permissions import RequiresActiveStudentSubscription,APIKeySessionViewSet
 
 # Core / Utils
 from core.models import Tier
@@ -2705,7 +2704,7 @@ def reset_child_password(request):
 
 
 
-class ResetPasswordView(APIView):
+class ResetPasswordView(APIKeySessionViewSet):
     """
     POST /api/accounts/reset-password/
     Body for self-change:
@@ -2725,7 +2724,6 @@ class ResetPasswordView(APIView):
       "new_password": "newpass123"
     }
     """
-    permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def post(self, request, *args, **kwargs):
@@ -2739,13 +2737,13 @@ class ResetPasswordView(APIView):
         target_user.save()
 
         # Optionally revoke session tokens for the target user (if SessionToken model exists)
-        if SessionToken is not None:
-            try:
-                SessionToken.objects.filter(user=target_user, is_active=True).update(is_active=False)
-            except Exception:
-                # If session revocation fails for some reason, we don't want to crash the whole request.
-                # Log in real app; here we silently continue.
-                pass
+        # if SessionToken is not None:
+        #     try:
+        #         SessionToken.objects.filter(user=target_user, is_active=True).update(is_active=False)
+        #     except Exception:
+        #         # If session revocation fails for some reason, we don't want to crash the whole request.
+        #         # Log in real app; here we silently continue.
+        #         pass
 
         # Be careful about what user info you expose; don't return password or sensitive fields.
         target_user.is_generated = False

@@ -3,7 +3,7 @@ import traceback
 from nanoid import generate
 from decimal import Decimal
 from datetime import timedelta
-from .permissions import IsStudent
+from .permissions import IsStudent, APIKeySessionViewSet
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.db import transaction
@@ -310,9 +310,7 @@ def logout_view(request):
     return Response({"detail": "Logged out."}, status=status.HTTP_200_OK)
 
 
-class APIKeySessionViewSet(viewsets.ModelViewSet):
-    permission_classes = [HasAPIKey]
-    authentication_classes = [SessionTokenAuthentication]
+
 
 
 class OrganizationViewSet(APIKeySessionViewSet):

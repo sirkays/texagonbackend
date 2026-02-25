@@ -2,10 +2,12 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 from django.utils import timezone
 from django.db.models import Q
-
+from rest_framework_api_key.permissions import HasAPIKey
+from .authentication import SessionTokenAuthentication
 from billing.models import UserAccountSubscription
 from academics.models import StudentProfile
 from api.services.session_tokens import revoke_all_user_sessions
+from rest_framework import status, viewsets
 
 class IsStudent(BasePermission):
     """
@@ -132,3 +134,7 @@ def RequiresActiveStudentSubscription(*, allow_page=False):
             return True
 
     return _RequiresActiveStudentSubscription
+
+class APIKeySessionViewSet(viewsets.ModelViewSet):
+    permission_classes = [HasAPIKey]
+    authentication_classes = [SessionTokenAuthentication]
