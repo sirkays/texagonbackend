@@ -1,11 +1,13 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 import traceback
+
 # Django core
 from django.conf import settings
 from django.db import models, transaction, IntegrityError
 from django.db.models import (
-    Avg, Sum, Count, Min, Max, F, Q, Case, When, FloatField, DecimalField, Value
+    Avg, Sum, Count, Min, Max, F, Q, Case, When,
+    FloatField, DecimalField, Value
 )
 from django.db.models.functions import Coalesce
 from django.shortcuts import render, get_object_or_404
@@ -14,21 +16,31 @@ from django.http import JsonResponse
 from django.core.exceptions import ValidationError, ObjectDoesNotExist
 from django.core.mail import send_mail
 from django.contrib.auth import authenticate, get_user_model
-from django.contrib.auth.password_validation import validate_password, ValidationError as PasswordValidationError
+from django.contrib.auth.password_validation import (
+    validate_password,
+    ValidationError as PasswordValidationError
+)
 
 # DRF
 from rest_framework import status, serializers
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import (
+    api_view,
+    permission_classes,
+    authentication_classes
+)
 from rest_framework_api_key.permissions import HasAPIKey
 
 # Local API
 from api.authentication import SessionTokenAuthentication
 from api.models import SessionToken
 from api.retrieve_token import get_token_from_header
-from api.permissions import RequiresActiveStudentSubscription,APIKeySessionViewSet
+from api.permissions import (
+    RequiresActiveStudentSubscription,
+    APIKeySessionViewSet
+)
 
 # Core / Utils
 from core.models import Tier
@@ -36,7 +48,7 @@ from core.utils import _month_bounds, _resolve_org, get_object_or_404_ajax
 from .utils import available_certificates_qs
 
 # Accounts
-from .models import AdminAccess, User, EmailOTP
+from .models import AdminAccess, User, EmailOTP, EmailChangeRequest
 from .serializers import ResetPasswordSerializer
 
 # Orgs
@@ -57,12 +69,19 @@ from assessments.models import Test, TestAttempt
 # Gamification
 from gamification.models import (
     Badge, BadgeAward, PointTransaction,
-    Streak, AchievementDefinition, AchievementAcquired, ActivityEvent
+    Streak, AchievementDefinition,
+    AchievementAcquired, ActivityEvent
 )
 
 # Billing
-from billing.models import SubscriptionInvoice, SubscriptionPayment, OrganizationSubscription
-from billing.services.subscription_invoicing import generate_parent_children_subscription_invoices
+from billing.models import (
+    SubscriptionInvoice,
+    SubscriptionPayment,
+    OrganizationSubscription
+)
+from billing.services.subscription_invoicing import (
+    generate_parent_children_subscription_invoices
+)
 
 # Notifications
 from notifications.models import Notification
@@ -72,8 +91,6 @@ from notifications.events import SYSTEM_WELCOME
 # Project settings
 from texagonbackend.settings import FRONTEND_ORIGIN
 
-
-# unified user model reference (only once)
 User = get_user_model()
 
 def test_email(request):
@@ -2702,62 +2719,124 @@ def reset_child_password(request):
 
 
 
-
-
 class ResetPasswordView(APIKeySessionViewSet):
-    """
-    POST /api/accounts/reset-password/
-    Body for self-change:
-    {
-      "new_password": "newpass123",
-      "current_password": "oldpass123"
-    }
-
-    Body for admin reset:
-    {
-      "user_id": 42,
-      "new_password": "newpass123"
-    }
-    OR
-    {
-      "email": "someone@example.com",
-      "new_password": "newpass123"
-    }
-    """
-
     @transaction.atomic
     def post(self, request, *args, **kwargs):
         serializer = ResetPasswordSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+
         target_user = serializer.validated_data["target_user"]
         new_password = serializer.validated_data["new_password"]
+        new_email = serializer.validated_data.get("new_email", None)
 
-        # Set new password
+        # Set new password now
         target_user.set_password(new_password)
-        target_user.save()
 
-        # Optionally revoke session tokens for the target user (if SessionToken model exists)
-        # if SessionToken is not None:
-        #     try:
-        #         SessionToken.objects.filter(user=target_user, is_active=True).update(is_active=False)
-        #     except Exception:
-        #         # If session revocation fails for some reason, we don't want to crash the whole request.
-        #         # Log in real app; here we silently continue.
-        #         pass
+        email_changed = False
+        verification_required = bool(getattr(settings, "EMAIL_CHANGE_VERIFY", True)) and bool(new_email)
 
-        # Be careful about what user info you expose; don't return password or sensitive fields.
+        # If new_email provided
+        if new_email:
+            if verification_required:
+                # Create EmailChangeRequest and send OTP
+                minutes = getattr(settings, "EMAIL_CHANGE_CODE_LIFETIME_MINUTES", 15)
+                req = EmailChangeRequest.create_request(target_user, new_email, minutes_valid=minutes)
+
+                # Build a simple email — customize as you like
+                subject = "Confirm your new email address"
+                # For link flow, you'd build a URL containing the code + user id; here we'll use code OTP
+                message = (
+                    f"Hello {getattr(target_user, 'email', '')},\n\n"
+                    f"You (or someone with access to your account) requested to change the email to {new_email}.\n\n"
+                    f"Please use this verification code to confirm your new email (valid for {minutes} minutes):\n\n"
+                    f"{req.code}\n\n"
+                    "If you did not request this, contact support or ignore this email.\n"
+                )
+                from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
+                # NOTE: If you prefer confirmation link, create a URL with code & user id and send that instead.
+                try:
+                    send_mail(
+                        subject,
+                        message,
+                        from_email,
+                        [new_email],
+                        fail_silently=False,
+                    )
+                    otp_sent = True
+                except Exception:
+                    # If email sending fails, we still don't want to leak too much; raise or return an error
+                    # You may log the exception in production.
+                    return Response({"detail": "Failed to send verification email."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            else:
+                # verification not required -> update right away
+                if target_user.email != new_email:
+                    target_user.email = new_email
+                    email_changed = True
+
         target_user.is_generated = False
         target_user.save()
-        return Response(
-            {
-                "detail": "Password reset successfully.",
-                "user_id": target_user.id,
-                "user_email": getattr(target_user, "email", None),
-            },
-            status=status.HTTP_200_OK
-        )
+
+        resp = {
+            "detail": "Password reset successfully.",
+            "user_id": target_user.id,
+            "user_email": getattr(target_user, "email", None),
+            "email_changed": email_changed,
+        }
+
+        if new_email and verification_required:
+            resp.update({
+                "email_verification_required": True,
+                "email_sent": True,
+                # Optionally don't reveal the code or too many details
+            })
+
+        return Response(resp, status=status.HTTP_200_OK)
 
 
+# Confirm view to apply pending email change
+class ConfirmEmailChangeView(APIKeySessionViewSet):
+    """
+    POST /api/accounts/confirm-email-change/
+    Body:
+    {
+      "code": "123456"
+      # for admin flows optionally include "user_id": 42 (if confirming on behalf)
+    }
+    """
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        code = request.data.get("code")
+        user = request.user
+
+        if not code:
+            return Response({"code": "This field is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Find pending request: code is unique only per user/new_email combination
+        try:
+            req = EmailChangeRequest.objects.select_for_update().get(user=user, code=code, used=False)
+        except EmailChangeRequest.DoesNotExist:
+            return Response({"code": "Invalid code."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not req.is_valid():
+            return Response({"code": "Code expired or already used."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Apply the change (but ensure uniqueness again, race-safe)
+        normalized = User.objects.normalize_email(req.new_email)
+        conflict = User.objects.filter(email__iexact=normalized).exclude(pk=user.pk).exists()
+        if conflict:
+            return Response({"detail": "That email is already used by another account."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.email = normalized
+        user.save()
+
+        req.used = True
+        req.save()
+
+        # Optionally expire other pending requests for the same email or by user
+        EmailChangeRequest.objects.filter(user=user, used=False).exclude(pk=req.pk).update(used=True)
+
+        return Response({"detail": "Email updated successfully.", "user_email": user.email}, status=status.HTTP_200_OK)
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])

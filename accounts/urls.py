@@ -7,6 +7,7 @@ urlpatterns = [
     path("api/dashboard/overview/", views.dashboard_overview, name="dashboard-overview"),
 
     path("api/reset-password/", views.ResetPasswordView.as_view({"post": "post"}), name="api-reset-password"),
+    path("api/confirm-email-change/", views.ConfirmEmailChangeView.as_view({"post": "post"}), name="api-confirm-email"),
     path("api/update-profile/", views.update_profile, name="update_profile"),
 
 

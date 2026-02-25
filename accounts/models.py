@@ -2,13 +2,11 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
-
 import random
 import string
 from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
-
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
@@ -118,6 +116,40 @@ class EmailOTP(models.Model):
         expires_at = timezone.now() + timedelta(minutes=minutes_valid)
         return cls.objects.create(
             user=user,
+            code=code,
+            expires_at=expires_at,
+        )
+
+    def is_valid(self) -> bool:
+        return (not self.used) and (self.expires_at >= timezone.now())
+
+
+
+class EmailChangeRequest(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="email_change_requests")
+    new_email = models.EmailField()
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "code", "used"]),
+            models.Index(fields=["new_email", "code", "used"]),
+        ]
+
+    @classmethod
+    def generate_code(cls, length=6) -> str:
+        return "".join(random.choices(string.digits, k=length))
+
+    @classmethod
+    def create_request(cls, user, new_email, minutes_valid=15):
+        code = cls.generate_code()
+        expires_at = timezone.now() + timedelta(minutes=minutes_valid)
+        return cls.objects.create(
+            user=user,
+            new_email=new_email,
             code=code,
             expires_at=expires_at,
         )

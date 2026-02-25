@@ -305,7 +305,8 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL")
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-
+EMAIL_CHANGE_VERIFY = os.environ.get("EMAIL_CHANGE_VERIFY", "1") == "1"         # set to False to apply email immediately (not recommended)
+EMAIL_CHANGE_CODE_LIFETIME_MINUTES = os.environ.get("EMAIL_CHANGE_CODE_LIFETIME_MINUTES", 15)
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = 600 * 1024 * 1024      # 100MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 600 * 1024 * 1024      # 100MB

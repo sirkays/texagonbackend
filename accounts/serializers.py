@@ -6,40 +6,36 @@ from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+User = get_user_model()
 
 class ResetPasswordSerializer(serializers.Serializer):
-    # identifying the target user (one required for admin resets)
     user_id = serializers.IntegerField(required=False)
     email = serializers.EmailField(required=False)
-
-    # required for both flows
     new_password = serializers.CharField(write_only=True, min_length=8)
-
-    # required when user resets their own password
     current_password = serializers.CharField(write_only=True, required=False)
+    new_email = serializers.EmailField(required=False, write_only=True)
 
     def validate(self, data):
         request_user = self.context["request"].user
 
-        # Determine target user if provided
+        # Resolve target_user
         target_user = None
         if data.get("user_id"):
             try:
                 target_user = User.objects.get(id=data["user_id"])
             except User.DoesNotExist:
                 raise serializers.ValidationError({"user_id": "User with this id does not exist."})
-        elif data.get("email"):
+        elif data.get("email") and not data.get("new_email"):
             try:
                 target_user = User.objects.get(email=data["email"])
             except User.DoesNotExist:
                 raise serializers.ValidationError({"email": "User with this email does not exist."})
         else:
-            # No target provided -> implies self
             target_user = request_user
 
-        # Permission check: if trying to change someone else's password, require staff
+        # Permission check
         if target_user != request_user and not (request_user.is_staff or request_user.is_superuser):
-            raise serializers.ValidationError("You do not have permission to change another user's password.")
+            raise serializers.ValidationError("You do not have permission to change another user's password or email.")
 
         # If self-reset, require current_password and verify
         if target_user == request_user:
@@ -49,13 +45,26 @@ class ResetPasswordSerializer(serializers.Serializer):
             if not request_user.check_password(current):
                 raise serializers.ValidationError({"current_password": "Current password is incorrect."})
 
-        # validate new_password with Django validators (length already enforced by min_length)
+        # Disallow using the same password again
         new_password = data.get("new_password")
+        # Only check if the target_user has a usable password (check_password handles unusable)
+        if target_user.check_password(new_password):
+            raise serializers.ValidationError({"new_password": "New password must be different from your current password."})
+
+        # Validate new_password with Django validators
         try:
             validate_password(new_password, user=target_user)
         except PasswordValidationError as e:
             raise serializers.ValidationError({"new_password": list(e.messages)})
 
-        # Attach resolved target to validated data for use in view
+        # Validate new_email uniqueness (if provided)
+        new_email = data.get("new_email")
+        if new_email:
+            normalized = User.objects.normalize_email(new_email)
+            already = User.objects.filter(email__iexact=normalized).exclude(pk=target_user.pk).exists()
+            if already:
+                raise serializers.ValidationError({"new_email": "This email is already in use by another account."})
+            data["new_email"] = normalized
+
         data["target_user"] = target_user
         return data
