@@ -6,6 +6,10 @@ urlpatterns = [
     path("api/post-login/", views.post_login, name="post_login"),
     path("api/dashboard/overview/", views.dashboard_overview, name="dashboard-overview"),
 
+    path("api/reset-password/", views.ResetPasswordView.as_view(), name="api-reset-password"),
+    path("api/update-profile/", views.update_profile, name="update_profile"),
+
+
     # PARENT OVERVIEW
     path("api/dashboard/parent/overview/", views.parent_overview, name="parent-overview"),
     path('api/parent/children-progress/', views.children_progress_view, name='children_progress'),
@@ -34,7 +38,4 @@ urlpatterns = [
 
     path("api/update-parent-child-link/", views.update_parent_child_link, name="update_parent_child_link"),
 
-    path("api/reset-password/", views.ResetPasswordView.as_view(), name="api-reset-password"),
-
-    path("api/update-profile/", views.update_profile, name="update_profile"),
 ]
