@@ -11,26 +11,37 @@ from django.utils.text import slugify
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
 
 from rest_framework_api_key.permissions import HasAPIKey
 
 from api.authentication import SessionTokenAuthentication
 from core.permissions import IsAdminAccess
-from rest_framework_api_key.permissions import HasAPIKey
 
-from orgs.models import OrganizationMembership
-from academics.models import StudentProfile, Classroom, TeacherProfile
+from orgs.models import OrganizationMembership, Organization
+from academics.models import (
+    StudentProfile,
+    Classroom,
+    TeacherProfile,
+    ParentProfile,
+    ParentChildLink,
+    Subject
+)
+
+from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
 
 from learning.models import (
     Module,
     Lesson,
     Course,
     Enrollment,
-    CoursePassCriteria,
+    CoursePassCriteria
 )
+
 from gamification.models import LeaderboardSeason
-from core.models import StudentDevice
-from core.permissions import IsAdminAccess   # your existing permission
+from core.models import StudentDevice, TimeStampedModel
+from billing.models import OrganizationSubscription
 
 from store.models import Category, Product, ProductImage
 from store.serializers import (
@@ -50,10 +61,21 @@ from .utils import (
     _get_user_avatar_url,
     _try_fetch_courses_for_classroom,
     _get_admin_selected_org_id
-
 )
 
+# academics/api.py
+import csv
+import io
+import re
+import secrets
+from datetime import datetime
+from decimal import Decimal
 
+from django.utils import timezone
+from django.http import HttpResponse
+
+
+User = get_user_model()
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -194,7 +216,7 @@ def active_modules_for_user(request):
         for m in modules_page:
             c: Course = m.course
             teacher_user = getattr(c.teacher, "user", None) if c and c.teacher else None
-            teacher_name = (teacher_user.get_full_name() or teacher_user.username) if teacher_user else None
+            teacher_name = teacher_user.get_full_name() if teacher_user else None
             subj_name = getattr(c.subject, "name", None) if c and c.subject else None
             classroom_name = getattr(c.classroom, "name", None) if c and c.classroom else None
 
@@ -957,3 +979,402 @@ def admin_student_device_delete(request, device_pk: int):
 
     device.delete()
     return Response({"detail": "Deleted."}, status=status.HTTP_200_OK)
+
+
+
+
+TEMPLATE_HEADERS = [
+    "parent_first",
+    "parent_last",
+    "parent_email",
+    "parent_phone",
+    "parent_address",
+    "student_first",
+    "student_last",
+    "student_email",
+    "student_dob(YYYY-MM-DD)",
+    "relationship",
+    "teacher_email",
+    "course_name",
+    "classroom_name",
+    "subject_name",
+    "class_type",  # public|private
+]
+
+
+def _make_generated_email(first: str, last: str, domain: str = "testtechxagonacademy.com"):
+    """Generate deterministic-looking email from names; remove special chars."""
+    base = f"{(first or '')}{(last or '')}".lower()
+    # remove non-alphanumeric
+    base = re.sub(r"[^a-z0-9]", "", base)
+    if not base:
+        base = "user" + secrets.token_hex(3)
+    email = f"{base}@{domain}"
+    # ensure unique by appending numeric suffix if needed
+    attempt = 0
+    candidate = email
+    while User.objects.filter(email=candidate).exists():
+        attempt += 1
+        candidate = f"{base}{attempt}@{domain}"
+    return candidate
+
+
+def _get_request_org(request):
+    """Return the Organization of the current logged-in user (first active membership)."""
+    try:
+        membership = OrganizationMembership.objects.filter(user=request.user, is_active=True).first()
+        if membership:
+            return membership.organization
+    except Exception:
+        pass
+    # fallback: if request.user has organization relation etc
+    org = getattr(request.user, "organization", None)
+    return org
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])  # adjust per your project, you had SessionTokenAuthentication
+def download_csv_template(request):
+    """Return a CSV template for admins to download and fill."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(TEMPLATE_HEADERS)
+    # Provide an example row (optional)
+    writer.writerow([
+        "Jane", "Doe", "jane.doe@example.com", "+2348012345678", "12 Main St, Ikeja",
+        "John", "Doe", "", "2014-05-01", "mother", "teacher@example.com", "Intro to Math", "Primary 1", "Mathematics", "public"
+    ])
+
+    resp = HttpResponse(output.getvalue(), content_type="text/csv")
+    resp["Content-Disposition"] = 'attachment; filename="parent_student_template.csv"'
+    return resp
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication]) 
+def upload_parent_student_csv(request):
+    """
+    Accepts a multipart/form-data file under key "file" or raw CSV body.
+    CSV columns (header expected):
+    parent_first,parent_last,parent_email,parent_phone,parent_address,
+    student_first,student_last,student_email,student_dob(YYYY-MM-DD),relationship,
+    teacher_email,course_name,classroom_name,subject_name,class_type
+    """
+    file_obj = request.FILES.get("file") or request.data.get("file")
+    if not file_obj:
+        return Response({"error": "CSV file is required in 'file' field."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Determine organization from request user
+    org = _get_request_org(request)
+    if org is None:
+        return Response({"error": "Could not determine organization for the current user."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # --- NEW: require active leaderboard season BEFORE doing any creation ---
+    active_season = LeaderboardSeason.get_active(org=org)
+    if active_season is None:
+        return Response(
+            {"error": "No active leaderboard season found for this organisation. Aborting import. Please activate a LeaderboardSeason before importing."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    decoded = file_obj.read().decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(decoded))
+
+    header = reader.fieldnames or []
+    missing = [h for h in TEMPLATE_HEADERS if h not in header]
+    if missing:
+        return Response({"error": "Missing columns", "missing": missing}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Caches to avoid repeated DB lookups
+    parents_cache = {}  # key by email or name+phone -> ParentProfile
+    students_cache = {}
+    teachers_cache = {}
+    classrooms_cache = {}
+    subjects_cache = {}
+    courses_created = {}
+    created_users = []
+    created_parents = []
+    created_students = []
+    created_teachers = []
+    created_courses = []
+    created_enrollments = []
+    errors = []
+    row_no = 1
+
+    with transaction.atomic():
+        for row in reader:
+            row_no += 1
+            try:
+                p_first = (row.get("parent_first") or "").strip()
+                p_last = (row.get("parent_last") or "").strip()
+                p_email = (row.get("parent_email") or "").strip()
+                p_phone = (row.get("parent_phone") or "").strip()
+                p_address = (row.get("parent_address") or "").strip()
+
+                s_first = (row.get("student_first") or "").strip()
+                s_last = (row.get("student_last") or "").strip()
+                s_email = (row.get("student_email") or "").strip()
+                s_dob = (row.get("student_dob(YYYY-MM-DD)") or "").strip()
+                relationship = (row.get("relationship") or "").strip() or "parent"
+
+                teacher_email = (row.get("teacher_email") or "").strip()
+                course_name = (row.get("course_name") or "").strip()
+                classroom_name = (row.get("classroom_name") or "").strip()
+                subject_name = (row.get("subject_name") or "").strip()
+                class_type = (row.get("class_type") or "public").strip()
+
+                if not (p_first or p_last):
+                    raise ValueError("Parent name missing")
+                if not (s_first or s_last):
+                    raise ValueError("Student name missing")
+
+                # Parent
+                parent_key = p_email.lower() if p_email else f"{p_first.lower()}_{p_last.lower()}_{p_phone}"
+                parent_profile = parents_cache.get(parent_key)
+                if not parent_profile:
+                    parent_user = None
+                    if p_email:
+                        parent_user = User.objects.filter(email__iexact=p_email).first()
+                    if not parent_user:
+                        generated_email = p_email or _make_generated_email(p_first, p_last)
+                        base_email = generated_email
+                        attempt = 0
+                        while User.objects.filter(email=generated_email).exists():
+                            attempt += 1
+                            generated_email = f"{slugify(p_first + p_last or 'user') or 'user'}{attempt}@testtechxagonacademy.com"
+                        parent_user = User.objects.create(
+                            email=generated_email,
+                            first_name=p_first,
+                            last_name=p_last,
+                            password=make_password(secrets.token_hex(8)),
+                        )
+                        created_users.append(parent_user)
+                        try:
+                            setattr(parent_user, "is_generated", True)
+                            parent_user.save(update_fields=["is_generated"])
+                        except Exception:
+                            parent_user.save()
+
+                    parent_profile_obj, _ = ParentProfile.objects.get_or_create(
+                        user=parent_user,
+                        defaults={"organization": org, "address": p_address}
+                    )
+                    if p_address and parent_profile_obj.address != p_address:
+                        parent_profile_obj.address = p_address
+                        parent_profile_obj.save(update_fields=["address"])
+
+                    OrganizationMembership.objects.get_or_create(
+                        user=parent_user,
+                        organization=org,
+                        role=OrganizationMembership.Role.PARENT,
+                        defaults={"is_active": True},
+                    )
+                    parents_cache[parent_key] = parent_profile_obj
+                    parent_profile = parent_profile_obj
+                    created_parents.append(parent_profile)
+
+                # Student
+                student_key = s_email.lower() if s_email else f"{s_first.lower()}_{s_last.lower()}_{parent_key}_{s_dob}"
+                student_profile = students_cache.get(student_key)
+                if not student_profile:
+                    student_user = None
+                    if s_email:
+                        student_user = User.objects.filter(email__iexact=s_email).first()
+                    if not student_user:
+                        gen_email = s_email or _make_generated_email(s_first, s_last)
+                        attempt = 0
+                        candidate = gen_email
+                        while User.objects.filter(email=candidate).exists():
+                            attempt += 1
+                            candidate = f"{slugify(s_first + s_last or 'student') or 'student'}{attempt}@testtechxagonacademy.com"
+                        student_user = User.objects.create(
+                            email=candidate,
+                            first_name=s_first,
+                            last_name=s_last,
+                            password=make_password(secrets.token_hex(8)),
+                        )
+                        created_users.append(student_user)
+                        try:
+                            setattr(student_user, "is_generated", True)
+                            student_user.save(update_fields=["is_generated"])
+                        except Exception:
+                            student_user.save()
+
+                    stu_defaults = {"organization": org}
+                    if s_dob:
+                        try:
+                            stu_defaults["dob"] = datetime.strptime(s_dob, "%Y-%m-%d").date()
+                        except Exception:
+                            pass
+
+                    student_profile_obj, _ = StudentProfile.objects.get_or_create(
+                        user=student_user,
+                        defaults=stu_defaults
+                    )
+                    if s_dob and (not student_profile_obj.dob):
+                        try:
+                            student_profile_obj.dob = datetime.strptime(s_dob, "%Y-%m-%d").date()
+                            student_profile_obj.save(update_fields=["dob"])
+                        except Exception:
+                            pass
+
+                    OrganizationMembership.objects.get_or_create(
+                        user=student_user,
+                        organization=org,
+                        role=OrganizationMembership.Role.STUDENT,
+                        defaults={"is_active": True},
+                    )
+
+                    students_cache[student_key] = student_profile_obj
+                    student_profile = student_profile_obj
+                    created_students.append(student_profile)
+
+                ParentChildLink.objects.get_or_create(
+                    parent=parent_profile,
+                    student=student_profile,
+                    defaults={"relationship": relationship}
+                )
+
+                # Teacher
+                teacher = None
+                if teacher_email:
+                    tkey = teacher_email.lower()
+                    teacher = teachers_cache.get(tkey)
+                    if not teacher:
+                        t_user = User.objects.filter(email__iexact=teacher_email).first()
+                        if not t_user:
+                            t_user = User.objects.create(
+                                email=teacher_email,
+                                first_name="",
+                                last_name="",
+                                password=make_password(secrets.token_hex(8)),
+                            )
+                            created_users.append(t_user)
+                            try:
+                                setattr(t_user, "is_generated", True)
+                                t_user.save(update_fields=["is_generated"])
+                            except Exception:
+                                t_user.save()
+
+                        teacher_profile_obj, _ = TeacherProfile.objects.get_or_create(
+                            user=t_user,
+                            organization=org,
+                            defaults={"bio": ""}
+                        )
+                        OrganizationMembership.objects.get_or_create(
+                            user=t_user,
+                            organization=org,
+                            role=OrganizationMembership.Role.TEACHER,
+                            defaults={"is_active": True},
+                        )
+                        teachers_cache[tkey] = teacher_profile_obj
+                        teacher = teacher_profile_obj
+
+                # Classroom
+                classroom = None
+                if classroom_name:
+                    ckey = f"{org.id}::{classroom_name}::{class_type}"
+                    classroom = classrooms_cache.get(ckey)
+                    if not classroom:
+                        classroom_obj, _ = Classroom.objects.get_or_create(
+                            organization=org,
+                            name=classroom_name,
+                            defaults={"code": slugify(classroom_name)[:32], "class_type": class_type or "public"}
+                        )
+                        classrooms_cache[ckey] = classroom_obj
+                        classroom = classroom_obj
+
+                # Subject
+                subject = None
+                if subject_name:
+                    skey = f"{org.id}::{subject_name}"
+                    subject = subjects_cache.get(skey)
+                    if not subject:
+                        subject_obj, _ = Subject.objects.get_or_create(
+                            organization=org,
+                            name=subject_name,
+                            defaults={"code": slugify(subject_name)[:32]}
+                        )
+                        subjects_cache[skey] = subject_obj
+                        subject = subject_obj
+
+                # Course
+                course_obj = None
+                if course_name:
+                    # If teacher/classroom/subject present, try to find or create
+                    # If any dependency is missing we still attempt creation but prefer full set
+                    t_id = getattr(teacher, "id", None)
+                    c_id = getattr(classroom, "id", None)
+                    s_id = getattr(subject, "id", None)
+
+                    ckey = f"{org.id}::{course_name}::{s_id}::{c_id}::{t_id}"
+                    if ckey not in courses_created:
+                        course_defaults = {
+                            "name": course_name,
+                            "description": f"Auto-created course {course_name}",
+                            "is_active": True,
+                            "course_type": class_type or "public",
+                        }
+                        # Try to set foreign keys only if available
+                        course_filter = {"organization": org}
+                        if s_id:
+                            course_filter["subject_id"] = s_id
+                        if c_id:
+                            course_filter["classroom_id"] = c_id
+                        if t_id:
+                            course_filter["teacher_id"] = t_id
+
+                        course_obj, created_flag = Course.objects.get_or_create(
+                            defaults=course_defaults,
+                            **course_filter
+                        ) if course_filter else Course.objects.get_or_create(
+                            organization=org,
+                            subject=subject,
+                            classroom=classroom,
+                            teacher=teacher,
+                            defaults=course_defaults
+                        )
+                        # above: attempt to be flexible to find existing; adjust to your project's preferred lookup
+                        courses_created[ckey] = course_obj
+                        if created_flag:
+                            created_courses.append(course_obj)
+                    else:
+                        course_obj = courses_created[ckey]
+
+                # --- ENROLLMENT: if course exists (created or previously existed), create Enrollment for active season ---
+                if course_obj:
+                    enrollment_obj, created_enrolled = Enrollment.objects.get_or_create(
+                        student=student_profile,
+                        course=course_obj,
+                        defaults={
+                            "leaderboard_season": active_season,
+                            "status": Enrollment.Status.ACTIVE,
+                            "progress_pct": 0,
+                        },
+                    )
+                    # If enrollment existed but had null leaderboard_season, try to set it (only if null)
+                    if not created_enrolled:
+                        if enrollment_obj.leaderboard_season is None:
+                            enrollment_obj.leaderboard_season = active_season
+                            enrollment_obj.save(update_fields=["leaderboard_season"])
+                    if created_enrolled:
+                        created_enrollments.append(enrollment_obj)
+
+            except Exception as e:
+                errors.append({"row": row_no, "error": str(e), "row": row})
+                # continue to next row
+
+    summary = {
+        "rows_processed": row_no - 1,
+        "users_created": len(created_users),
+        "parents_created": len(created_parents),
+        "students_created": len(created_students),
+        "teachers_created": len(created_teachers),
+        "courses_created": len(created_courses),
+        "enrollments_created": len(created_enrollments),
+        "errors": errors,
+    }
+    status_code = status.HTTP_207_MULTI_STATUS if errors else status.HTTP_201_CREATED
+    return Response(summary, status=status_code)
