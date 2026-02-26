@@ -90,10 +90,6 @@ from notifications.events import SYSTEM_WELCOME
 
 # Project settings
 from texagonbackend.settings import FRONTEND_ORIGIN
-import logging
-import uuid
-
-logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -2723,159 +2719,63 @@ def reset_child_password(request):
 
 
 
-
 class ResetPasswordView(APIKeySessionViewSet):
     @transaction.atomic
     def post(self, request, *args, **kwargs):
-        # create a small correlation id for this request -> shows in each log line to correlate events
-        req_id = str(uuid.uuid4())
-
-        logger.info(
-            "[%s] ResetPasswordView POST start: path=%s user=%s",
-            req_id,
-            request.path,
-            getattr(request.user, "id", None),
-        )
-
-        serializer = ResetPasswordSerializer(
-            data=request.data, context={"request": request}
-        )
-
-        try:
-            serializer.is_valid(raise_exception=True)
-        except Exception as e:
-            # This will include serializer error info (not the secret data). Good to examine why validation failed.
-            logger.warning(
-                "[%s] ResetPasswordView validation failed: errors=%s user=%s",
-                req_id,
-                getattr(serializer, "errors", repr(e)),
-                getattr(request.user, "id", None),
-            )
-            raise
+        serializer = ResetPasswordSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
 
         target_user = serializer.validated_data["target_user"]
-        # DO NOT log new_password. Never log passwords.
         new_password = serializer.validated_data["new_password"]
         new_email = serializer.validated_data.get("new_email", None)
 
-        logger.info(
-            "[%s] Preparing to reset password: req_user=%s target_user=%s target_email=%s",
-            req_id,
-            getattr(request.user, "id", None),
-            getattr(target_user, "id", None),
-            getattr(target_user, "email", None),
-        )
-
-        # Set new password now (no logging of the actual password).
+        # Set new password now
         target_user.set_password(new_password)
 
         email_changed = False
-        verification_required = bool(
-            getattr(settings, "EMAIL_CHANGE_VERIFY", True)
-        ) and bool(new_email)
+        verification_required = bool(getattr(settings, "EMAIL_CHANGE_VERIFY", True)) and bool(new_email)
 
+        # If new_email provided
         if new_email:
-            logger.info(
-                "[%s] New email provided for user=%s: new_email=%s verification_required=%s",
-                req_id,
-                getattr(target_user, "id", None),
-                new_email,
-                verification_required,
-            )
-
             if verification_required:
+                # Create EmailChangeRequest and send OTP
                 minutes = getattr(settings, "EMAIL_CHANGE_CODE_LIFETIME_MINUTES", 15)
+                req = EmailChangeRequest.create_request(target_user, new_email, minutes_valid=minutes)
+
+                # Build a simple email — customize as you like
+                subject = "Confirm your new email address"
+                # For link flow, you'd build a URL containing the code + user id; here we'll use code OTP
+                message = (
+                    f"Hello {getattr(target_user, 'email', '')},\n\n"
+                    f"You (or someone with access to your account) requested to change the email to {new_email}.\n\n"
+                    f"Please use this verification code to confirm your new email (valid for {minutes} minutes):\n\n"
+                    f"{req.code}\n\n"
+                    "If you did not request this, contact support or ignore this email.\n"
+                )
+                from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
+                # NOTE: If you prefer confirmation link, create a URL with code & user id and send that instead.
                 try:
-                    req = EmailChangeRequest.create_request(
-                        target_user, new_email, minutes_valid=minutes
+                    send_mail(
+                        subject,
+                        message,
+                        from_email,
+                        [new_email],
+                        fail_silently=False,
                     )
-                    # IMPORTANT: do NOT log req.code (OTP) or its full object.
-                    logger.info(
-                        "[%s] Created EmailChangeRequest for user=%s (expires in %s minutes)",
-                        req_id,
-                        getattr(target_user, "id", None),
-                        minutes,
-                    )
-
-                    subject = "Confirm your new email address"
-                    message = (
-                        f"Hello {getattr(target_user, 'email', '')},\n\n"
-                        f"You (or someone with access to your account) requested to change the email to {new_email}.\n\n"
-                        f"Please use the verification code sent to confirm your new email (valid for {minutes} minutes).\n\n"
-                        "If you did not request this, contact support or ignore this email.\n"
-                    )
-                    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
-
-                    try:
-                        send_mail(
-                            subject,
-                            message,
-                            from_email,
-                            [new_email],
-                            fail_silently=False,
-                        )
-                        otp_sent = True
-                        logger.info(
-                            "[%s] Verification email sent to %s for user=%s",
-                            req_id,
-                            new_email,
-                            getattr(target_user, "id", None),
-                        )
-                    except Exception:
-                        # log the exception and return an error (don't leak internals in the response)
-                        logger.exception(
-                            "[%s] Failed to send verification email to %s for user=%s",
-                            req_id,
-                            new_email,
-                            getattr(target_user, "id", None),
-                        )
-                        return Response(
-                            {"detail": "Failed to send verification email."},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        )
-
+                    otp_sent = True
                 except Exception:
-                    # if create_request itself fails, log exception
-                    logger.exception(
-                        "[%s] Failed to create EmailChangeRequest for user=%s new_email=%s",
-                        req_id,
-                        getattr(target_user, "id", None),
-                        new_email,
-                    )
-                    return Response(
-                        {"detail": "Failed to process email change."},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    )
+                    # If email sending fails, we still don't want to leak too much; raise or return an error
+                    # You may log the exception in production.
+                    return Response({"detail": "Failed to send verification email."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
             else:
                 # verification not required -> update right away
                 if target_user.email != new_email:
-                    logger.info(
-                        "[%s] Updating target_user.email from %s -> %s for user=%s",
-                        req_id,
-                        getattr(target_user, "email", None),
-                        new_email,
-                        getattr(target_user, "id", None),
-                    )
                     target_user.email = new_email
                     email_changed = True
 
         target_user.is_generated = False
-
-        try:
-            target_user.save()
-            logger.info(
-                "[%s] target_user saved: user_id=%s email_changed=%s",
-                req_id,
-                getattr(target_user, "id", None),
-                email_changed,
-            )
-        except Exception:
-            logger.exception(
-                "[%s] Failed to save target_user=%s", req_id, getattr(target_user, "id", None)
-            )
-            return Response(
-                {"detail": "Failed to save user."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        target_user.save()
 
         resp = {
             "detail": "Password reset successfully.",
@@ -2885,20 +2785,14 @@ class ResetPasswordView(APIKeySessionViewSet):
         }
 
         if new_email and verification_required:
-            resp.update(
-                {
-                    "email_verification_required": True,
-                    "email_sent": True,
-                }
-            )
-
-        logger.info(
-            "[%s] ResetPasswordView POST finished successfully for target_user=%s",
-            req_id,
-            getattr(target_user, "id", None),
-        )
+            resp.update({
+                "email_verification_required": True,
+                "email_sent": True,
+                # Optionally don't reveal the code or too many details
+            })
 
         return Response(resp, status=status.HTTP_200_OK)
+
 
 # Confirm view to apply pending email change
 class ConfirmEmailChangeView(APIKeySessionViewSet):
