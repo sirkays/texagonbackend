@@ -324,3 +324,31 @@ if USE_CELERY:
     CELERY_TIMEZONE = TIME_ZONE
 
     INSTALLED_APPS += ["django_celery_results"]
+
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {
+            "format": "%(asctime)s [%(levelname)s] %(name)s %(message)s"
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",  # INFO so Render's basic logs show useful app messages
+    },
+    "loggers": {
+        # Keep django's default logs going to console too
+        "django": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        # Your app modules will inherit root logger, or configure here explicitly:
+        # "yourapp.views": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
+}
