@@ -2996,6 +2996,92 @@ def update_profile(request):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def fetch_profile(request):
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response(
+            {"detail": "Invalid or missing session token."},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    # GET uses query params instead of request.data
+    account_type = (request.query_params.get("account_type") or "").strip().lower() or None
+
+    # auto detect role if not provided
+    def detect_account_type(u):
+        if hasattr(u, "teacher_profile"):
+            return "teacher"
+        if hasattr(u, "student_profile"):
+            return "student"
+        if hasattr(u, "parent_profile"):
+            return "parent"
+        return None
+
+    if not account_type:
+        account_type = detect_account_type(user)
+
+    if account_type not in ("teacher", "student", "parent"):
+        return Response(
+            {"detail": "account_type must be one of: teacher, student, parent"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # COMMON USER DATA
+    user_data = {
+        "id": user.id,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "phone": user.phone
+    }
+
+    # TEACHER
+    if account_type == "teacher":
+        try:
+            teacher = user.teacher_profile
+        except ObjectDoesNotExist:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({
+            "account_type": "teacher",
+            "user": user_data,
+            "teacher_profile": {
+                "bio": teacher.bio,
+                "experience": teacher.experience
+            }
+        })
+
+    # STUDENT
+    if account_type == "student":
+        try:
+            student = user.student_profile
+        except ObjectDoesNotExist:
+            return Response({"detail": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({
+            "account_type": "student",
+            "user": user_data
+        })
+
+    # PARENT
+    if account_type == "parent":
+        try:
+            parent = user.parent_profile
+        except ObjectDoesNotExist:
+            return Response({"detail": "Parent profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({
+            "account_type": "parent",
+            "user": user_data,
+            "parent_profile": {
+                "address": parent.address
+            }
+        })
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
