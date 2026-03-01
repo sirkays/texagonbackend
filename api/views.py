@@ -218,7 +218,8 @@ def password_reset_request_view(request):
 
     # Issue short-lived reset token and email it
     st = _issue_password_reset_token(user, hours_valid=hours_valid, ip=request.META.get("REMOTE_ADDR"))
-    _send_password_reset_email(user, st, request, reset_path)
+    if "testtechxagonacademy.com" not in user.email:
+        _send_password_reset_email(user, st, request, reset_path)
 
     return Response({"detail": "If an account exists, a reset link has been sent."})
 

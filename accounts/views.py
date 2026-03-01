@@ -3065,7 +3065,7 @@ def fetch_profile(request):
         return Response({
             "account_type": "student",
             "user": user_data
-        })
+        },status=status.HTTP_200_OK)
 
     # PARENT
     if account_type == "parent":
@@ -3079,8 +3079,9 @@ def fetch_profile(request):
             "user": user_data,
             "parent_profile": {
                 "address": parent.address
-            }
-        })
+            },
+        }, status=status.HTTP_200_OK
+    )
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])

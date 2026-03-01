@@ -95,6 +95,9 @@ def dispatch(
             if not text_body and not html_body:
                 text_body = message.render_body(per_user_ctx)
 
+            if "testtechxagonacademy.com" in user_email:
+                return 
+                
             # ✅ staging: send inline, production: queue
             if getattr(settings, "USE_CELERY", False):
                 from .tasks import send_email_task

@@ -18,6 +18,7 @@ LOGO_URL = os.environ.get("LOGO_URL", "https://texagon.onrender.com/logo.png")
 TEST_KEY_SECRET = os.environ.get("TEST_KEY_SECRET", "CHANGE_ME")
 FLW_SECRET_KEY = os.environ.get("FLW_SECRET_KEY", "CHANGE_ME")
 
+KONNECT_LOGOUT_URL = os.environ.get("KONNECT_LOGOUT_URL", "https://learn.techxagonacademy.com/k-dashboard/")
 
 TAX_RATE = Decimal("0.08")
 FLAT_SHIPPING = Decimal("1000.99")
@@ -86,6 +87,7 @@ INSTALLED_APPS = [
     "billing",
     "notifications",
     "api",
+    "konnect",
     "rest_framework",
     "rest_framework_api_key",
     

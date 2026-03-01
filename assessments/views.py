@@ -1602,6 +1602,7 @@ def fetch_course_students(request):
         status=status.HTTP_200_OK,
     )
 
+
 @api_view(["DELETE"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
