@@ -19,7 +19,8 @@ TEST_KEY_SECRET = os.environ.get("TEST_KEY_SECRET", "CHANGE_ME")
 FLW_SECRET_KEY = os.environ.get("FLW_SECRET_KEY", "CHANGE_ME")
 
 KONNECT_LOGOUT_URL = os.environ.get("KONNECT_LOGOUT_URL", "https://learn.techxagonacademy.com/k-dashboard/")
-
+KONNECT_TOKEN = os.environ.get("KONNECT_TOKEN", "H9LBxlRkBWs2hb1mnZ0v2wzfhOqwfjCFaK73Jx99")
+KONNECT_MAX_ROOM = 20
 TAX_RATE = Decimal("0.08")
 FLAT_SHIPPING = Decimal("1000.99")
 

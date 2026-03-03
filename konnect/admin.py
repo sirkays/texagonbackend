@@ -1,7 +1,5 @@
 from django.contrib import admin
 from .models import KonnectRoom, KonnectRoomUser
-from accounts.models import User
-from learning.models import Course
 
 
 class KonnectRoomUserInline(admin.TabularInline):
@@ -10,6 +8,7 @@ class KonnectRoomUserInline(admin.TabularInline):
     autocomplete_fields = ["user"]
     readonly_fields = ["active", "created_at", "updated_at"]
     show_change_link = True
+
 
 @admin.register(KonnectRoom)
 class KonnectRoomAdmin(admin.ModelAdmin):
@@ -22,11 +21,13 @@ class KonnectRoomAdmin(admin.ModelAdmin):
         "courses_count",
         "users_count",
         "created_at",
+        "last_update",  # ✅ valid here
     )
 
     list_filter = (
         "status",
         "created_at",
+        "last_update",
     )
 
     search_fields = (
@@ -41,6 +42,7 @@ class KonnectRoomAdmin(admin.ModelAdmin):
         "room_id",
         "created_at",
         "updated_at",
+        "last_update",
     )
 
     autocomplete_fields = [
@@ -62,7 +64,7 @@ class KonnectRoomAdmin(admin.ModelAdmin):
             "fields": ("allowed_courses", "allowed_users")
         }),
         ("Timestamps", {
-            "fields": ("created_at", "updated_at"),
+            "fields": ("created_at", "updated_at", "last_update"),
             "classes": ("collapse",)
         }),
     )
@@ -74,6 +76,7 @@ class KonnectRoomAdmin(admin.ModelAdmin):
     def users_count(self, obj):
         return obj.allowed_users.count()
     users_count.short_description = "Users"
+
 
 @admin.register(KonnectRoomUser)
 class KonnectRoomUserAdmin(admin.ModelAdmin):
