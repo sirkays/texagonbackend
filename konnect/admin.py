@@ -42,7 +42,6 @@ class KonnectRoomAdmin(admin.ModelAdmin):
         "room_id",
         "created_at",
         "updated_at",
-        "last_update",
     )
 
     autocomplete_fields = [
