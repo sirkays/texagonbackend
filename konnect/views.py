@@ -25,7 +25,7 @@ from academics.models import StudentProfile, TeacherProfile  # adjust if import 
 from learning.models import Enrollment, Course
 from accounts.models import User
 from .serializers import KonnectRoomListSerializer
-from .utils import check_room_delete,save_last_update
+from .utils import check_room,save_last_update
 from texagonbackend.settings import KONNECT_TOKEN
 
 TOKEN = KONNECT_TOKEN
@@ -148,34 +148,36 @@ def start_konnect_room(request):
                     konnect_room.welcome_message = welcome_message
                 konnect_room.save()
             else:
-                data, res = check_room_delete(konn3ct)
+                data, res = check_room(konn3ct)
                 if res is False and data is None:
                     return Response({"detail": "You cannot start room now because the lobby is full."}, 
                                     status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-                room = konn3ct.create_room(
-                    name=name,
-                    logout_url=KONNECT_LOGOUT_URL,
-                    welcome_message=welcome_message,
-                )
-                if not (room.get("data") and room["data"].get("id")):
-                    return Response({"detail": "Cannot start meeting."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                room_id = room["data"]["id"]
                 if res:
-                    konnect_room.name = name
-                    konnect_room.creator = user
-                    konnect_room.room_id = room_id
-                    konnect_room.welcome_message = welcome_message
-                    konnect_room.allowed_courses = None
-                    konnect_room.allowed_users = None
-                    konnect_room.save()
-                else:
+                    room = konn3ct.create_room(
+                        name=name,
+                        logout_url=KONNECT_LOGOUT_URL,
+                        welcome_message=welcome_message,
+                    )
+                    if not (room.get("data") and room["data"].get("id")):
+                        return Response({"detail": "Cannot start meeting."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    room_id = room["data"]["id"]
                     konnect_room = KonnectRoom.objects.create(
                         name=name,
                         creator=user,
                         room_id=room_id,
                         welcome_message=welcome_message
                     )
+                else:
+                    konnect_room=data
+                    konnect_room.name = name
+                    konnect_room.creator = user
+                    konnect_room.welcome_message = welcome_message
+                    konnect_room.allowed_courses.clear()
+                    konnect_room.allowed_users.clear()
+                    konnect_room.save()
+                    room_id = konnect_room.room_id
+
                 save_last_update(konnect_room)
 
             # Apply add/remove operations (same semantics as before)
