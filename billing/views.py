@@ -518,7 +518,7 @@ def fetch_parent_invoices(request):
             if inv.user_subscription:
                 full_name = inv.user_subscription.user.get_full_name()
             else:
-                full_name =  "Student Name"
+                full_name =  inv.get_name_from_obj()
             return {
                 "student_name":full_name,
                 "id": inv.pk,

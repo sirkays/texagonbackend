@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.validators import MinValueValidator
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -16,7 +16,7 @@ from core.models import TimeStampedModel, NamedModel
 from orgs.models import OrganizationMembership, Organization
 from store.models import Product, Payment
 from live.models import TutoringBooking
-
+from django.core.exceptions import ObjectDoesNotExist
 
 class SubscriptionPlan(NamedModel):
     price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
@@ -108,7 +108,18 @@ class SubscriptionInvoice(TimeStampedModel):
         self.full_clean()
         super().save(*args, **kwargs)
 
+    def get_name_from_obj(self):
+        invoicetype = getattr(self, "invoicetype", None)
 
+        if invoicetype.invoice_type == 'tutor':
+            try:
+                obj = TutoringBooking.objects.get(pk=invoicetype.object_id)
+            except ObjectDoesNotExist:
+                return "Name not available"
+            if obj:
+                return obj.student.user.get_full_name()
+        else:
+            return "Store Payment (Name not available)"
 
 class SubscriptionPayment(TimeStampedModel):
     class Provider(models.TextChoices):
@@ -369,21 +380,16 @@ class Complaint(models.Model):  # or inherit your TimeStampedModel
         return self.responses.count()
 
     def save(self, *args, **kwargs):
-        # Generate the human-readable code once, atomically, with zero race conditions.
         if not self.code:
-            with transaction.atomic():
-                # pessimistic lock via a counter row would be ideal;
-                # for simplicity, derive from total count + 1 within a transaction
-                last_id = (
-                    Complaint.objects.select_for_update()
-                    .order_by("-created_at")
-                    .values_list("id", flat=True)
-                    .first()
-                )
-                seq = Complaint.objects.count() + 1
-                self.code = f"COMP-{seq:06d}"
-        super().save(*args, **kwargs)
-
+            for _ in range(5):
+                try:
+                    self.code = f"COMP-{generate(size=8).upper()}"
+                    return super().save(*args, **kwargs)
+                except IntegrityError:
+                    self.code = None
+            raise IntegrityError("Could not generate unique complaint code")
+        else:
+            super().save(*args, **kwargs)
 
 class ComplaintResponse(models.Model):
     class Role(models.TextChoices):

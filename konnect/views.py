@@ -262,7 +262,6 @@ def start_konnect_room(request):
 
             start = konn3ct.start_room(**start_payload)
             save_last_update(konnect_room)
-            print(start, " start")
             # If the external API returned an error, raise to rollback changes (optional)
             if start.get("success") is False:
                 # If you'd rather keep local changes even if external fails, change this behavior.
