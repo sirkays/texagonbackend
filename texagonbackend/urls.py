@@ -27,6 +27,12 @@ urlpatterns = [
     path('notifications/', include('notifications.urls')),
     path('api/attendance/', include('attendance.urls')),
     path('konnect/', include('konnect.urls')),
+
+    path('', include('corefrontend.urls')),
+    path('blog/', include('blog.urls')),
+    path('projects/', include('projects.urls')),
 ]
+
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

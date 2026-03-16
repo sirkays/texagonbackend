@@ -1,0 +1,897 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tutor Application | Techxagon Academy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+  {% include 'base/style.html' %}
+</head>
+
+<body class="font-body bg-tx-base text-tx-text min-h-screen">
+
+  <!-- ══════════════════════════════════════
+       SIDEBAR  (desktop: fixed left panel | mobile: top bar)
+  ══════════════════════════════════════ -->
+  <aside class="fixed top-0 left-0 z-50 bg-tx-dark overflow-hidden
+                w-full flex flex-row items-center px-5 py-4 h-[64px]
+                md:w-[340px] md:h-screen md:flex-col md:items-stretch md:px-9 md:py-11">
+    <div class="sidebar-orb-top"></div>
+    <div class="sidebar-orb-bottom"></div>
+
+    <!-- Logo -->
+    <div class="flex items-center gap-3 relative z-10 flex-1 md:flex-none md:mb-12">
+      <a href="{% url 'corefrontend:home_view' %}">
+        <img
+          src="{% static 'assets/logo_text.png' %}"
+          alt="Techxagon Academy"
+          class="h-9 md:h-10 w-auto shrink-0"
+        />
+      </a>
+    </div>
+
+    <!-- Mobile: step indicator pill -->
+    <div class="flex md:hidden items-center relative z-10">
+      <span id="mobileStepPill" class="text-[11px] font-bold text-white/70 bg-white/10 px-3 py-1 rounded-full">Step 1 of 5</span>
+    </div>
+
+    <!-- Desktop only content -->
+    <div class="relative z-10 mb-3 hidden md:block">
+      <h1 class="font-display text-[32px] font-black text-white leading-[1.15]">
+        Become a<br /><span class="grad-text">{{application.position}} Tutor.</span>
+      </h1>
+    </div>
+    <p class="relative z-10 text-[13px] text-white/45 leading-relaxed mb-12 hidden md:block">
+      Join our network of passionate educators shaping the next generation of African tech innovators.
+    </p>
+
+    <nav class="flex-col gap-0 flex-1 relative z-10 hidden md:flex" id="stepsNav"></nav>
+
+    <div class="mt-auto pt-8 border-t border-white/[0.08] relative z-10 hidden md:block">
+      <p class="text-[11px] text-white/25 leading-relaxed">
+        Training is free and performance-based employment follows. Your journey starts here.
+      </p>
+    </div>
+  </aside>
+
+  <!-- ══════════════════════════════════════
+       MAIN
+  ══════════════════════════════════════ -->
+  <main class="ml-0 pt-[80px] px-4 pb-24 min-h-screen md:ml-[340px] md:px-16 md:pt-16 md:pb-24">
+
+    <!-- Progress bar -->
+    <div class="flex gap-1.5 mb-7 md:mb-12" id="progressTrack">
+      <div class="h-1 flex-1 rounded-full bg-tx-border overflow-hidden"><div class="seg-inner rounded-full"></div></div>
+      <div class="h-1 flex-1 rounded-full bg-tx-border overflow-hidden"><div class="seg-inner rounded-full"></div></div>
+      <div class="h-1 flex-1 rounded-full bg-tx-border overflow-hidden"><div class="seg-inner rounded-full"></div></div>
+      <div class="h-1 flex-1 rounded-full bg-tx-border overflow-hidden"><div class="seg-inner rounded-full"></div></div>
+      <div class="h-1 flex-1 rounded-full bg-tx-border overflow-hidden"><div class="seg-inner rounded-full"></div></div>
+    </div>
+
+    <form id="applicationForm">
+
+      <!-- ═══════════════════════════════
+           STEP 1 · Personal Information
+      ═══════════════════════════════ -->
+      <section id="section-1" class="step-section">
+        <div class="mb-8 md:mb-10">
+          <span class="inline-flex items-center gap-1.5 bg-gradient-to-r from-tx-red/8 to-tx-orange/10 border border-tx-orange/20 text-tx-deep text-[11px] font-bold tracking-[0.12em] uppercase px-3 py-1.5 rounded-full mb-4">
+            <span class="w-1.5 h-1.5 rounded-full btn-grad inline-block"></span>Step 1 of 5
+          </span>
+          <h2 class="font-display text-[30px] md:text-[40px] font-black text-tx-dark leading-[1.1] mb-2">Personal<br />Information</h2>
+          <p class="text-[14px] md:text-[15px] text-tx-muted">Let's start with the basics. Fields marked * are required.</p>
+        </div>
+
+        <!-- Identity card -->
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 mb-4 md:mb-5 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Identity</div>
+          <div class="grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 md:gap-5 md:mb-5">
+            <div class="float-field">
+              <input class="field-input" type="text" id="fullName" name="fullName" placeholder=" " required />
+              <label for="fullName">Full Name *</label>
+            </div>
+            <div class="float-field">
+              <input class="field-input" type="date" id="dob" name="dob" placeholder=" " required />
+              <label for="dob">Date of Birth *</label>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 md:gap-5 md:mb-5">
+            <div class="float-field">
+              <select class="field-input" id="gender" name="gender" required>
+                <option value="" disabled selected></option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+              <label for="gender">Gender *</label>
+            </div>
+            <div class="float-field">
+              <input class="field-input" type="tel" id="phone" name="phone" placeholder=" " required />
+              <label for="phone">WhatsApp Number *</label>
+            </div>
+          </div>
+          <div class="float-field mb-4 md:mb-5">
+            <input class="field-input" type="email" id="email" name="email"
+              placeholder=" "
+              value="{{ application.email }}"
+              readonly />
+            <label for="email">Email Address *</label>
+          </div>
+          <div class="float-field">
+            <input class="field-input" type="text" id="address" name="address" placeholder=" " required />
+            <label for="address">Residential Address *</label>
+          </div>
+        </div>
+
+        <!-- Location card -->
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 mb-4 md:mb-5 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Location & Origin</div>
+          <div class="grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 md:gap-5 md:mb-5">
+            <div class="float-field">
+              <select class="field-input" id="stateResidence" name="stateResidence" required>
+                <option value="" disabled selected></option>
+                <option>Lagos</option><option>Ogun</option><option>Oyo</option>
+                <option>Abia</option><option>Akwa Ibom</option><option>Cross River</option>
+                <option>Ebonyi</option><option>Enugu</option><option>Imo</option>
+                <option>Rivers</option><option>Bayelsa</option><option>Delta</option>
+                <option>Edo</option><option>Kwara</option><option>Kogi</option>
+                <option>Osun</option><option>Ondo</option><option>Ekiti</option>
+                <option>Kaduna</option><option>Kano</option><option>Katsina</option>
+                <option>Kebbi</option><option>Niger</option><option>Nasarawa</option>
+                <option>Plateau</option><option>FCT Abuja</option>
+              </select>
+              <label for="stateResidence">State of Residence *</label>
+            </div>
+            <div class="float-field">
+              <select class="field-input" id="stateOrigin" name="stateOrigin" required>
+                <option value="" disabled selected></option>
+                <option>Lagos</option><option>Ogun</option><option>Oyo</option>
+                <option>Abia</option><option>Akwa Ibom</option><option>Cross River</option>
+                <option>Ebonyi</option><option>Enugu</option><option>Imo</option>
+                <option>Rivers</option><option>Bayelsa</option><option>Delta</option>
+                <option>Edo</option><option>Kwara</option><option>Kogi</option>
+                <option>Osun</option><option>Ondo</option><option>Ekiti</option>
+                <option>Kaduna</option><option>Kano</option><option>Katsina</option>
+                <option>Kebbi</option><option>Niger</option><option>Nasarawa</option>
+                <option>Plateau</option><option>FCT Abuja</option>
+              </select>
+              <label for="stateOrigin">State of Origin *</label>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
+            <div class="float-field">
+              <input class="field-input" type="text" id="nationality" name="nationality" placeholder=" " required />
+              <label for="nationality">Nationality *</label>
+            </div>
+            <div class="float-field">
+              <select class="field-input" id="identification" name="identification" required>
+                <option value="" disabled selected></option>
+                <option value="nin">NIN</option>
+                <option value="passport">Passport</option>
+                <option value="voter">Voter's Card</option>
+                <option value="drivers">Driver's License</option>
+              </select>
+              <label for="identification">Valid ID Type *</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Upload ID card -->
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Upload Valid ID</div>
+          <label class="relative block border-2 border-dashed border-[#D5C8C0] rounded-[14px] p-5 md:p-7 text-center cursor-pointer transition-all hover:border-tx-orange hover:bg-tx-orange/[0.02]">
+            <!-- required REMOVED — handled by JS validation -->
+            <input type="file" id="idUpload" name="idUpload" accept=".jpg,.jpeg,.png,.pdf" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+            <div class="w-10 h-10 md:w-11 md:h-11 mx-auto mb-3 rounded-[10px] bg-gradient-to-br from-tx-red/10 to-tx-orange/15 flex items-center justify-center text-tx-deep">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <div class="text-[13px] md:text-[14px] font-semibold text-tx-dark mb-1"><span class="text-tx-deep">Click to upload</span> your valid ID</div>
+            <div class="text-[12px] text-tx-muted">JPG, PNG or PDF · Max 2MB</div>
+            <div class="text-[12px] font-semibold text-tx-deep mt-2" id="idFileName"></div>
+          </label>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════════
+           STEP 2 · Education
+      ═══════════════════════════════ -->
+      <section id="section-2" class="step-section hidden">
+        <div class="mb-8 md:mb-10">
+          <span class="inline-flex items-center gap-1.5 bg-gradient-to-r from-tx-red/8 to-tx-orange/10 border border-tx-orange/20 text-tx-deep text-[11px] font-bold tracking-[0.12em] uppercase px-3 py-1.5 rounded-full mb-4">
+            <span class="w-1.5 h-1.5 rounded-full btn-grad inline-block"></span>Step 2 of 5
+          </span>
+          <h2 class="font-display text-[30px] md:text-[40px] font-black text-tx-dark leading-[1.1] mb-2">Educational<br />Background</h2>
+          <p class="text-[14px] md:text-[15px] text-tx-muted">Tell us about your academic journey and qualifications.</p>
+        </div>
+
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 mb-4 md:mb-5 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Qualifications</div>
+          <div class="grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 md:gap-5 md:mb-5">
+            <div class="float-field">
+              <select class="field-input" id="education" name="education" required>
+                <option value="" disabled selected></option>
+                <option value="ssce">SSCE</option><option value="ond">OND</option>
+                <option value="hnd">HND</option><option value="bsc">BSc</option>
+                <option value="btech">B.Tech</option><option value="msc">MSc</option>
+                <option value="other">Other</option>
+              </select>
+              <label for="education">Highest Education Level *</label>
+            </div>
+            <div class="float-field">
+              <input class="field-input" type="text" id="courseStudy" name="courseStudy" placeholder=" " required />
+              <label for="courseStudy">Course of Study *</label>
+            </div>
+          </div>
+          <div class="float-field mb-4 md:mb-5">
+            <input class="field-input" type="text" id="institution" name="institution" placeholder=" " required />
+            <label for="institution">Institution Attended *</label>
+          </div>
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
+            <div class="float-field">
+              <input class="field-input" type="number" id="graduation" name="graduation" min="1990" max="2030" placeholder=" " required />
+              <label for="graduation">Year of Graduation *</label>
+            </div>
+            <div class="float-field">
+              <select class="field-input" id="nyscStatus" name="nyscStatus" required>
+                <option value="" disabled selected></option>
+                <option value="completed">Completed</option>
+                <option value="serving">Currently Serving</option>
+                <option value="not-applicable">Not Applicable</option>
+              </select>
+              <label for="nyscStatus">NYSC Status *</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 mb-4 md:mb-5 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Field of Degree</div>
+          <p class="text-[13px] text-tx-muted font-medium mb-4">Select all that apply</p>
+          <div class="grid grid-cols-1 gap-2 mb-4 md:grid-cols-2 md:gap-2.5">
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]">
+              <input type="checkbox" class="check-box" name="degree" value="engineering" /><span class="text-[13px] text-[#5A4F47] font-medium">Engineering</span>
+            </label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]">
+              <input type="checkbox" class="check-box" name="degree" value="cs" /><span class="text-[13px] text-[#5A4F47] font-medium">Computer Science</span>
+            </label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]">
+              <input type="checkbox" class="check-box" name="degree" value="mechatronics" /><span class="text-[13px] text-[#5A4F47] font-medium">Mechatronics</span>
+            </label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]">
+              <input type="checkbox" class="check-box" name="degree" value="physics" /><span class="text-[13px] text-[#5A4F47] font-medium">Physics</span>
+            </label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]">
+              <input type="checkbox" class="check-box" name="degree" value="mathematics" /><span class="text-[13px] text-[#5A4F47] font-medium">Mathematics</span>
+            </label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]">
+              <input type="checkbox" class="check-box" name="degree" value="education" /><span class="text-[13px] text-[#5A4F47] font-medium">Education</span>
+            </label>
+            <label class="col-span-1 md:col-span-2 flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]">
+              <input type="checkbox" class="check-box" name="degree" value="other" /><span class="text-[13px] text-[#5A4F47] font-medium">Other (specify below)</span>
+            </label>
+          </div>
+          <div class="float-field">
+            <input class="field-input" type="text" id="otherDegree" name="otherDegree" placeholder=" " />
+            <label for="otherDegree">Other Field of Study</label>
+          </div>
+        </div>
+
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Upload CV</div>
+          <label class="relative block border-2 border-dashed border-[#D5C8C0] rounded-[14px] p-5 md:p-7 text-center cursor-pointer transition-all hover:border-tx-orange hover:bg-tx-orange/[0.02]">
+            <!-- required REMOVED — handled by JS validation -->
+            <input type="file" id="cvUpload" name="cvUpload" accept=".pdf" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+            <div class="w-10 h-10 md:w-11 md:h-11 mx-auto mb-3 rounded-[10px] bg-gradient-to-br from-tx-red/10 to-tx-orange/15 flex items-center justify-center text-tx-deep">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            </div>
+            <div class="text-[13px] md:text-[14px] font-semibold text-tx-dark mb-1"><span class="text-tx-deep">Click to upload</span> your CV</div>
+            <div class="text-[12px] text-tx-muted">PDF only · Max 10MB</div>
+            <div class="text-[12px] font-semibold text-tx-deep mt-2" id="cvFileName"></div>
+          </label>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════════
+           STEP 3 · Skills
+      ═══════════════════════════════ -->
+      <section id="section-3" class="step-section hidden">
+        <div class="mb-8 md:mb-10">
+          <span class="inline-flex items-center gap-1.5 bg-gradient-to-r from-tx-red/8 to-tx-orange/10 border border-tx-orange/20 text-tx-deep text-[11px] font-bold tracking-[0.12em] uppercase px-3 py-1.5 rounded-full mb-4">
+            <span class="w-1.5 h-1.5 rounded-full btn-grad inline-block"></span>Step 3 of 5
+          </span>
+          <h2 class="font-display text-[30px] md:text-[40px] font-black text-tx-dark leading-[1.1] mb-2">Technical Skills<br />&amp; Experience</h2>
+          <p class="text-[14px] md:text-[15px] text-tx-muted">What can you bring to the classroom? Select everything that applies.</p>
+        </div>
+
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 mb-4 md:mb-5 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Areas of Expertise</div>
+          <div class="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-2.5">
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="skills" value="coding" /><span class="text-[13px] text-[#5A4F47] font-medium">Coding (Python, Scratch, Arduino)</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="skills" value="robotics" /><span class="text-[13px] text-[#5A4F47] font-medium">Robotics Kits</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="skills" value="microcontroller" /><span class="text-[13px] text-[#5A4F47] font-medium">Microcontrollers (Arduino, ESP32)</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="skills" value="aiml" /><span class="text-[13px] text-[#5A4F47] font-medium">AI / Machine Learning</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="skills" value="iot" /><span class="text-[13px] text-[#5A4F47] font-medium">IoT Systems</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="skills" value="3dprinting" /><span class="text-[13px] text-[#5A4F47] font-medium">3D Printing</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="skills" value="drone" /><span class="text-[13px] text-[#5A4F47] font-medium">Drone Assembly / Programming</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="skills" value="electronics" /><span class="text-[13px] text-[#5A4F47] font-medium">Electronics &amp; Circuit Design</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="skills" value="teaching" /><span class="text-[13px] text-[#5A4F47] font-medium">Teaching STEM Subjects</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="skills" value="beginner" /><span class="text-[13px] text-[#5A4F47] font-medium">Beginner – Willing to Learn</span></label>
+          </div>
+        </div>
+
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Experience Details</div>
+          <div class="float-field mb-4 md:mb-5">
+            <select class="field-input" id="yearsExp" name="yearsExp" required>
+              <option value="" disabled selected></option>
+              <option value="0-1">0–1 years</option>
+              <option value="1-3">1–3 years</option>
+              <option value="3+">3+ years</option>
+            </select>
+            <label for="yearsExp">Years of Experience *</label>
+          </div>
+          <div class="grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 md:gap-5 md:mb-5">
+            <div class="float-field">
+              <select class="field-input" id="hasTaught" name="hasTaught" required>
+                <option value="" disabled selected></option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+              <label for="hasTaught">Have you taught before? *</label>
+            </div>
+            <div class="float-field">
+              <input class="field-input" type="text" id="teachingLocation" name="teachingLocation" placeholder=" " />
+              <label for="teachingLocation">If yes, where?</label>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
+            <div class="float-field">
+              <select class="field-input" id="laptop" name="laptop" required>
+                <option value="" disabled selected></option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+              <label for="laptop">Do you own a laptop? *</label>
+            </div>
+            <div class="float-field">
+              <select class="field-input" id="internet" name="internet" required>
+                <option value="" disabled selected></option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+              <label for="internet">Stable internet access? *</label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════════
+           STEP 4 · Availability
+      ═══════════════════════════════ -->
+      <section id="section-4" class="step-section hidden">
+        <div class="mb-8 md:mb-10">
+          <span class="inline-flex items-center gap-1.5 bg-gradient-to-r from-tx-red/8 to-tx-orange/10 border border-tx-orange/20 text-tx-deep text-[11px] font-bold tracking-[0.12em] uppercase px-3 py-1.5 rounded-full mb-4">
+            <span class="w-1.5 h-1.5 rounded-full btn-grad inline-block"></span>Step 4 of 5
+          </span>
+          <h2 class="font-display text-[30px] md:text-[40px] font-black text-tx-dark leading-[1.1] mb-2">Availability &amp;<br />Commitment</h2>
+          <p class="text-[14px] md:text-[15px] text-tx-muted">Help us understand your schedule and where you'd like to serve.</p>
+        </div>
+
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 mb-4 md:mb-5 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Commitment</div>
+          <div class="grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 md:gap-5 md:mb-5">
+            <div class="float-field">
+              <select class="field-input" id="training" name="training" required>
+                <option value="" disabled selected></option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+              <label for="training">Attend 3-month training? *</label>
+            </div>
+            <div class="float-field">
+              <select class="field-input" id="relocation" name="relocation" required>
+                <option value="" disabled selected></option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+              <label for="relocation">Willing to relocate? *</label>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
+            <div class="float-field">
+              <select class="field-input" id="fulltime" name="fulltime" required>
+                <option value="" disabled selected></option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+              <label for="fulltime">Work full-time after training? *</label>
+            </div>
+            <div class="float-field">
+              <input class="field-input" type="date" id="startDate" name="startDate" placeholder=" " required />
+              <label for="startDate">Earliest start date *</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Preferred Deployment</div>
+          <p class="text-[13px] text-tx-muted font-medium mb-4">Select all states you're open to</p>
+          <div class="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-2.5">
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="preferredStates" value="lagos" /><span class="text-[13px] text-[#5A4F47] font-medium">Lagos</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="preferredStates" value="ogun" /><span class="text-[13px] text-[#5A4F47] font-medium">Ogun</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="preferredStates" value="abuja" /><span class="text-[13px] text-[#5A4F47] font-medium">FCT Abuja</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="preferredStates" value="kano" /><span class="text-[13px] text-[#5A4F47] font-medium">Kano</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="preferredStates" value="rivers" /><span class="text-[13px] text-[#5A4F47] font-medium">Rivers</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="preferredStates" value="enugu" /><span class="text-[13px] text-[#5A4F47] font-medium">Enugu</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="preferredStates" value="imo" /><span class="text-[13px] text-[#5A4F47] font-medium">Imo</span></label>
+            <label class="flex items-center gap-2.5 px-4 py-3 border-[1.5px] border-tx-border rounded-xl cursor-pointer bg-white transition-all hover:border-tx-orange/40 has-[:checked]:border-tx-orange/50 has-[:checked]:bg-tx-orange/[0.04]"><input type="checkbox" class="check-box" name="preferredStates" value="kaduna" /><span class="text-[13px] text-[#5A4F47] font-medium">Kaduna</span></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════════
+           STEP 5 · Screening
+      ═══════════════════════════════ -->
+      <section id="section-5" class="step-section hidden">
+        <div class="mb-8 md:mb-10">
+          <span class="inline-flex items-center gap-1.5 bg-gradient-to-r from-tx-red/8 to-tx-orange/10 border border-tx-orange/20 text-tx-deep text-[11px] font-bold tracking-[0.12em] uppercase px-3 py-1.5 rounded-full mb-4">
+            <span class="w-1.5 h-1.5 rounded-full btn-grad inline-block"></span>Step 5 of 5
+          </span>
+          <h2 class="font-display text-[30px] md:text-[40px] font-black text-tx-dark leading-[1.1] mb-2">Screening<br />Questions</h2>
+          <p class="text-[14px] md:text-[15px] text-tx-muted">The final stretch — tell us about your motivation and vision.</p>
+        </div>
+
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 mb-4 md:mb-5 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Your Story</div>
+          <div class="float-field textarea-field mb-4 md:mb-5">
+            <textarea class="field-input" id="whyTechxagon" name="whyTechxagon" rows="4" placeholder=" " required></textarea>
+            <label for="whyTechxagon">Why do you want to join Techxagon Academy? *</label>
+          </div>
+          <div class="float-field textarea-field mb-4 md:mb-5">
+            <textarea class="field-input" id="whySelect" name="whySelect" rows="4" placeholder=" " required></textarea>
+            <label for="whySelect">Why should we select you? *</label>
+          </div>
+          <div class="float-field textarea-field">
+            <textarea class="field-input" id="futureRobotics" name="futureRobotics" rows="4" placeholder=" " required></textarea>
+            <label for="futureRobotics">What does the future of Robotics &amp; AI in Africa mean to you? *</label>
+          </div>
+        </div>
+
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 mb-4 md:mb-5 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Service Agreement</div>
+          <div class="float-field mb-6 md:mb-8">
+            <select class="field-input" id="serviceAgreement" name="serviceAgreement" required>
+              <option value="" disabled selected></option>
+              <option value="yes">Yes, I agree</option>
+              <option value="no">No</option>
+            </select>
+            <label for="serviceAgreement">Willing to sign a minimum service agreement? *</label>
+          </div>
+          <div class="section-divider">Intro Video (Optional)</div>
+          <label class="relative block border-2 border-dashed border-[#D5C8C0] rounded-[14px] p-5 md:p-7 text-center cursor-pointer transition-all hover:border-tx-orange hover:bg-tx-orange/[0.02]">
+            <input type="file" id="videoUpload" name="videoUpload" accept="video/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+            <div class="w-10 h-10 md:w-11 md:h-11 mx-auto mb-3 rounded-[10px] bg-gradient-to-br from-tx-red/10 to-tx-orange/15 flex items-center justify-center text-tx-deep">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+            </div>
+            <div class="text-[13px] md:text-[14px] font-semibold text-tx-dark mb-1"><span class="text-tx-deep">Upload a 1-minute</span> intro video</div>
+            <div class="text-[12px] text-tx-muted">MP4 or WebM · Max 20MB · Optional</div>
+            <div class="text-[12px] font-semibold text-tx-deep mt-2" id="videoFileName"></div>
+          </label>
+        </div>
+
+        <div class="bg-tx-card border border-tx-border rounded-2xl md:rounded-3xl p-5 md:p-9 shadow-[0_2px_20px_rgba(13,10,8,0.04)]">
+          <div class="section-divider">Declaration</div>
+          <div class="flex flex-col gap-3">
+            <label class="flex items-start gap-3 p-4 border-[1.5px] border-tx-border rounded-[14px] bg-white cursor-pointer transition-all has-[:checked]:border-tx-orange/40 has-[:checked]:bg-tx-orange/[0.04]">
+              <input type="checkbox" class="agree-box mt-0.5 shrink-0" id="accurate" name="accurate" required />
+              <span class="text-[13px] md:text-[13.5px] text-tx-muted leading-relaxed font-medium">I confirm that all information provided is accurate and truthful to the best of my knowledge.</span>
+            </label>
+            <label class="flex items-start gap-3 p-4 border-[1.5px] border-tx-border rounded-[14px] bg-white cursor-pointer transition-all has-[:checked]:border-tx-orange/40 has-[:checked]:bg-tx-orange/[0.04]">
+              <input type="checkbox" class="agree-box mt-0.5 shrink-0" id="understand" name="understand" required />
+              <span class="text-[13px] md:text-[13.5px] text-tx-muted leading-relaxed font-medium">I understand that training is free, and employment is subject to performance and assessment.</span>
+            </label>
+            <label class="flex items-start gap-3 p-4 border-[1.5px] border-tx-border rounded-[14px] bg-white cursor-pointer transition-all has-[:checked]:border-tx-orange/40 has-[:checked]:bg-tx-orange/[0.04]">
+              <input type="checkbox" class="agree-box mt-0.5 shrink-0" id="posted" name="posted" required />
+              <span class="text-[13px] md:text-[13.5px] text-tx-muted leading-relaxed font-medium">I am willing to be deployed to any Techxagon partner school across Nigeria.</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Navigation ── -->
+      <div class="flex flex-col-reverse gap-3 mt-8 pt-8 border-t border-tx-border md:flex-row md:items-center md:justify-between">
+        <button type="button" id="prevBtn"
+          class="hidden w-full justify-center md:w-auto items-center gap-2 px-6 py-3.5 rounded-[14px] border-[1.5px] border-[#D5C8C0] bg-white text-[14px] font-semibold text-tx-muted cursor-pointer transition-all hover:border-tx-orange hover:text-tx-deep">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          Previous
+        </button>
+        <span class="text-[13px] text-tx-muted font-semibold text-center hidden md:block" id="stepCount">Step 1 of 5</span>
+        <button type="button" id="nextBtn"
+          class="flex w-full justify-center md:w-auto items-center gap-2.5 px-8 py-3.5 rounded-[14px] btn-grad text-[14px] font-bold text-white cursor-pointer transition-all shadow-[0_4px_20px_rgba(220,48,5,0.3)] hover:shadow-[0_6px_28px_rgba(220,48,5,0.4)] hover:-translate-y-px active:translate-y-0">
+          Continue
+          <span class="w-5 h-5 rounded-full bg-white/25 flex items-center justify-center">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </span>
+        </button>
+        <button type="submit" id="submitBtn"
+          class="hidden w-full justify-center md:w-auto items-center gap-2.5 px-8 py-3.5 rounded-[14px] btn-grad text-[14px] font-bold text-white cursor-pointer transition-all shadow-[0_4px_20px_rgba(220,48,5,0.3)] hover:shadow-[0_6px_28px_rgba(220,48,5,0.4)] hover:-translate-y-px active:translate-y-0">
+          Submit Application
+          <span class="w-5 h-5 rounded-full bg-white/25 flex items-center justify-center">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </span>
+        </button>
+      </div>
+    </form>
+  </main>
+
+  <!-- ── Toast ── -->
+  <div id="toast" class="fixed bottom-6 right-4 left-4 md:left-auto md:right-8 md:bottom-8 z-[999] bg-tx-dark text-white px-5 py-3.5 rounded-[14px] text-[13px] font-semibold flex items-center gap-2.5 shadow-[0_8px_32px_rgba(0,0,0,0.3)] md:max-w-sm opacity-0 translate-y-5 transition-all duration-300 pointer-events-none">
+    <div id="toastIcon" class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 bg-tx-red/25">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </div>
+    <span id="toastMsg">Please fill in all required fields.</span>
+  </div>
+
+<script>
+  // ── Data injected by Django ───────────────────────────────────────────────
+  const APP_DATA   = {{ application_data|safe }};
+  const SUBMITTED  = {{ submitted|yesno:"true,false" }};
+  const SAVE_URL   = "{% url 'corefrontend:save_application_step' %}";
+  const SUBMIT_URL = "{% url 'corefrontend:submit_application' %}";
+
+  // ── CSRF helper ───────────────────────────────────────────────────────────
+  function getCsrf() {
+    const fromCookie = document.cookie.split('; ')
+      .find(r => r.startsWith('csrftoken='))?.split('=')[1];
+    if (fromCookie) return fromCookie;
+    return document.querySelector('[name=csrfmiddlewaretoken]')?.value ?? '';
+  }
+
+  // ── Steps config ─────────────────────────────────────────────────────────
+  const STEPS = ['Personal', 'Education', 'Skills', 'Availability', 'Screening'];
+  let current = 1;
+  const total = 5;
+
+  // ── Build sidebar nav (desktop only) ────────────────────────────────────
+  const nav = document.getElementById('stepsNav');
+  STEPS.forEach((label, i) => {
+    if (i > 0) {
+      const conn = document.createElement('div');
+      conn.id = `conn-${i}`;
+      conn.className = 'w-0.5 h-5 ml-[29px] bg-white/[0.07] rounded-sm transition-all duration-300';
+      nav.appendChild(conn);
+    }
+    const item = document.createElement('div');
+    item.id = `step-nav-${i + 1}`;
+    item.className = 'flex items-center gap-3.5 px-3.5 py-3 rounded-xl transition-all';
+    item.innerHTML = `
+      <div id="circle-${i+1}" class="w-8 h-8 rounded-full border-2 border-white/12 flex items-center justify-center text-[12px] font-bold text-white/30 shrink-0 transition-all duration-300">${i+1}</div>
+      <div id="label-${i+1}" class="text-[13px] font-medium text-white/30 transition-all duration-250">${label}</div>
+    `;
+    nav.appendChild(item);
+  });
+
+  // ── UI updater ───────────────────────────────────────────────────────────
+  function updateUI(n) {
+    document.querySelectorAll('.step-section').forEach(s => s.classList.add('hidden'));
+    const sec = document.getElementById(`section-${n}`);
+    sec.classList.remove('hidden');
+    sec.style.animation = 'none'; sec.offsetHeight; sec.style.animation = '';
+
+    // Progress bar
+    document.querySelectorAll('#progressTrack > div').forEach((seg, i) => {
+      seg.classList.remove('seg-done', 'seg-active');
+      if (i + 1 < n)  seg.classList.add('seg-done');
+      if (i + 1 === n) seg.classList.add('seg-active');
+    });
+
+    // Sidebar step nav
+    for (let i = 1; i <= total; i++) {
+      const circle  = document.getElementById(`circle-${i}`);
+      const lbl     = document.getElementById(`label-${i}`);
+      const navItem = document.getElementById(`step-nav-${i}`);
+      navItem.classList.remove('bg-white/[0.07]');
+      circle.className = 'w-8 h-8 rounded-full border-2 flex items-center justify-center text-[12px] font-bold shrink-0 transition-all duration-300';
+
+      if (i < n) {
+        circle.classList.add('step-circle-done');
+        circle.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+        lbl.className = 'text-[13px] font-medium text-white/55 transition-all duration-250';
+      } else if (i === n) {
+        circle.classList.add('step-circle-active');
+        circle.innerHTML = String(i);
+        lbl.className = 'text-[13px] font-bold text-white transition-all duration-250';
+        navItem.classList.add('bg-white/[0.07]');
+      } else {
+        circle.classList.add('border-white/12', 'text-white/30');
+        circle.innerHTML = String(i);
+        lbl.className = 'text-[13px] font-medium text-white/30 transition-all duration-250';
+      }
+    }
+
+    for (let i = 1; i < total; i++) {
+      const conn = document.getElementById(`conn-${i}`);
+      if (conn) conn.className = `w-0.5 h-5 ml-[29px] rounded-sm transition-all duration-300 ${i < n ? 'conn-fill' : 'bg-white/[0.07]'}`;
+    }
+
+    // Nav buttons
+    const prevBtn   = document.getElementById('prevBtn');
+    const nextBtn   = document.getElementById('nextBtn');
+    const submitBtn = document.getElementById('submitBtn');
+
+    prevBtn.classList.toggle('hidden', n === 1);
+    prevBtn.classList.toggle('flex',   n !== 1);
+    nextBtn.classList.toggle('hidden', n === total);
+    nextBtn.classList.toggle('flex',   n !== total);
+    submitBtn.classList.toggle('hidden', n !== total);
+    submitBtn.classList.toggle('flex',   n === total);
+
+    // Step counters (desktop label + mobile pill)
+    document.getElementById('stepCount').textContent = `Step ${n} of ${total}`;
+    const pill = document.getElementById('mobileStepPill');
+    if (pill) pill.textContent = `Step ${n} of ${total}`;
+
+    current = n;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  function showToast(msg, type = 'error') {
+    const toast = document.getElementById('toast');
+    const icon  = document.getElementById('toastIcon');
+    document.getElementById('toastMsg').textContent = msg;
+    icon.className = `w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${type === 'success' ? 'bg-tx-orange/25' : 'bg-tx-red/25'}`;
+    toast.classList.remove('opacity-0', 'translate-y-5', 'pointer-events-none');
+    toast.classList.add('opacity-100', 'translate-y-0');
+    setTimeout(() => {
+      toast.classList.add('opacity-0', 'translate-y-5', 'pointer-events-none');
+      toast.classList.remove('opacity-100', 'translate-y-0');
+    }, 3500);
+  }
+
+  // ── Track previously uploaded files ──────────────────────────────────────
+  const previouslyUploaded = new Set();
+
+  // ── Validation ───────────────────────────────────────────────────────────
+  function validateStep(n) {
+    const section = document.getElementById(`section-${n}`);
+    const fields  = section.querySelectorAll('input[required], select[required], textarea[required]');
+    for (const el of fields) {
+      // File inputs: pass if a new file chosen OR previously uploaded
+      if (el.type === 'file') {
+        if (el.files.length === 0 && !previouslyUploaded.has(el.id)) {
+          showToast('Please complete all required fields before continuing.');
+          return false;
+        }
+        continue;
+      }
+      const val = el.type === 'checkbox' ? el.checked : el.value.trim();
+      if (!val) {
+        el.focus();
+        el.classList.add('error');
+        el.addEventListener('input', () => el.classList.remove('error'), { once: true });
+        showToast('Please complete all required fields before continuing.');
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // ── Save step ────────────────────────────────────────────────────────────
+  async function saveStep(step) {
+    const section  = document.getElementById(`section-${step}`);
+    const formData = new FormData();
+    formData.append('step', step);
+    formData.append('csrfmiddlewaretoken', getCsrf());
+
+    section.querySelectorAll('input, select, textarea').forEach(el => {
+      if (!el.name) return;
+      if (el.type === 'file') {
+        if (el.files[0]) formData.append(el.name, el.files[0]);
+      } else if (el.type === 'checkbox') {
+        if (el.checked) formData.append(el.name, el.value);
+      } else {
+        formData.append(el.name, el.value);
+      }
+    });
+
+    try {
+      const res  = await fetch(SAVE_URL, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!data.success) showToast('Could not save progress. Please try again.');
+      return data.success;
+    } catch {
+      showToast('Network error — progress may not have been saved.');
+      return false;
+    }
+  }
+
+  // ── Populate form from saved data ─────────────────────────────────────────
+  function populateForm(d) {
+    const fieldMap = {
+      fullName: d.fullName, dob: d.dob, gender: d.gender,
+      phone: d.phone, address: d.address, stateResidence: d.stateResidence,
+      stateOrigin: d.stateOrigin, nationality: d.nationality,
+      identification: d.identification, education: d.education,
+      courseStudy: d.courseStudy, institution: d.institution,
+      graduation: d.graduation, nyscStatus: d.nyscStatus,
+      otherDegree: d.otherDegree, yearsExp: d.yearsExp,
+      hasTaught: d.hasTaught, teachingLocation: d.teachingLocation,
+      laptop: d.laptop, internet: d.internet, training: d.training,
+      relocation: d.relocation, fulltime: d.fulltime, startDate: d.startDate,
+      whyTechxagon: d.whyTechxagon, whySelect: d.whySelect,
+      futureRobotics: d.futureRobotics, serviceAgreement: d.serviceAgreement,
+      accurate: d.accurate, understand: d.understand, posted: d.posted,
+    };
+
+    Object.entries(fieldMap).forEach(([id, val]) => {
+      const el = document.getElementById(id);
+      if (!el || val === undefined || val === null || val === '') return;
+      if (el.type === 'checkbox') {
+        el.checked = (val === true || val === 'on' || val === id);
+      } else {
+        el.value = val;
+        if (el.tagName === 'SELECT') el.classList.add('chosen');
+      }
+    });
+
+    // Multi-value checkboxes
+    [['degree', d.degree], ['skills', d.skills], ['preferredStates', d.preferredStates]]
+      .forEach(([name, values]) => {
+        if (!Array.isArray(values)) return;
+        document.querySelectorAll(`input[name="${name}"]`).forEach(cb => {
+          cb.checked = values.includes(cb.value);
+        });
+      });
+
+    // Previously uploaded files
+    [['idUpload', 'idFileName', d.hasIdUpload],
+     ['cvUpload', 'cvFileName', d.hasCvUpload],
+     ['videoUpload', 'videoFileName', d.hasVideoUpload]].forEach(([inputId, dispId, has]) => {
+      const el = document.getElementById(dispId);
+      if (el && has) {
+        el.textContent = '✓ Previously uploaded file saved';
+        previouslyUploaded.add(inputId);
+      }
+    });
+  }
+
+  // ── Submitted state ───────────────────────────────────────────────────────
+  function showSubmittedState() {
+    document.getElementById('applicationForm').innerHTML = `
+      <div class="text-center py-16 md:py-20 px-4">
+        <div class="w-16 h-16 md:w-20 md:h-20 mx-auto mb-6 btn-grad rounded-3xl flex items-center justify-center shadow-[0_8px_32px_rgba(220,48,5,0.35)]">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <h2 class="font-display text-[26px] md:text-[36px] font-black text-tx-dark mb-3">Application Already Submitted!</h2>
+        <p class="text-[14px] md:text-[15px] text-tx-muted leading-relaxed max-w-sm mx-auto">
+          We've received your application and will be in touch within 5–7 business days.
+        </p>
+      </div>`;
+    document.querySelectorAll('#progressTrack > div').forEach(s => s.classList.add('seg-done'));
+  }
+
+  // ── Button helpers ────────────────────────────────────────────────────────
+  const ARROW_SVG = `<span class="w-5 h-5 rounded-full bg-white/25 flex items-center justify-center"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>`;
+
+  // ── Events ────────────────────────────────────────────────────────────────
+  document.getElementById('nextBtn').addEventListener('click', async () => {
+    if (!validateStep(current)) return;
+    const btn = document.getElementById('nextBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    await saveStep(current);
+    btn.disabled = false;
+    btn.innerHTML = `Continue ${ARROW_SVG}`;
+    updateUI(current + 1);
+  });
+
+  document.getElementById('prevBtn').addEventListener('click', async () => {
+    await saveStep(current);
+    updateUI(current - 1);
+  });
+
+  document.getElementById('applicationForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    console.log('[submit] triggered, step:', current);
+
+    if (!validateStep(total)) {
+      console.log('[submit] validation failed');
+      return;
+    }
+    console.log('[submit] validation passed');
+
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.innerHTML = `Submitting… ${ARROW_SVG}`;
+
+    const resetBtn = () => {
+      btn.disabled = false;
+      btn.innerHTML = `Submit Application ${ARROW_SVG}`;
+    };
+
+    try { await saveStep(total); } catch (err) { console.warn('[submit] saveStep non-fatal:', err); }
+
+    try {
+      const csrf = getCsrf();
+      console.log('[submit] CSRF present:', !!csrf);
+      const fd = new FormData();
+      fd.append('csrfmiddlewaretoken', csrf);
+
+      const res = await fetch(SUBMIT_URL, { method: 'POST', body: fd });
+      console.log('[submit] status:', res.status);
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('[submit] error body:', text);
+        showToast(`Server error (${res.status}) — please try again.`);
+        resetBtn();
+        return;
+      }
+
+      const data = await res.json();
+      console.log('[submit] response:', data);
+
+      if (data.success) {
+        document.getElementById('applicationForm').innerHTML = `
+          <div class="text-center py-16 md:py-20 px-4">
+            <div class="w-16 h-16 md:w-20 md:h-20 mx-auto mb-6 btn-grad rounded-3xl flex items-center justify-center shadow-[0_8px_32px_rgba(220,48,5,0.35)]">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <h2 class="font-display text-[26px] md:text-[36px] font-black text-tx-dark mb-3">Application Submitted!</h2>
+            <p class="text-[14px] md:text-[15px] text-tx-muted leading-relaxed max-w-sm mx-auto">
+              Thank you for applying. We'll review your application and reach out within 5–7 business days.
+            </p>
+          </div>`;
+        document.querySelectorAll('#progressTrack > div').forEach(s => s.classList.add('seg-done'));
+        showToast('Application submitted successfully!', 'success');
+      } else {
+        showToast(data.error || 'Submission failed — please try again.');
+        resetBtn();
+      }
+    } catch (err) {
+      console.error('[submit] unexpected error:', err);
+      showToast('Network error — check your connection and try again.');
+      resetBtn();
+    }
+  });
+
+  // ── File upload size validation & display ─────────────────────────────────
+  const FILE_LIMITS = { idUpload: 2, cvUpload: 10, videoUpload: 20 };
+
+  [['idUpload','idFileName'], ['cvUpload','cvFileName'], ['videoUpload','videoFileName']]
+    .forEach(([inp, disp]) => {
+      document.getElementById(inp)?.addEventListener('change', function () {
+        const el    = document.getElementById(disp);
+        const file  = this.files[0];
+        const maxMB = FILE_LIMITS[inp];
+        if (!file) return;
+        if (file.size > maxMB * 1024 * 1024) {
+          showToast(`File too large — maximum allowed is ${maxMB}MB.`);
+          this.value = '';
+          if (el) el.textContent = '';
+          return;
+        }
+        if (el) el.textContent = `✓ ${file.name}`;
+        previouslyUploaded.delete(this.id);
+      });
+    });
+
+  // ── Select floating label fix ─────────────────────────────────────────────
+  document.querySelectorAll('select.field-input').forEach(sel => {
+    sel.addEventListener('change', () => sel.classList.toggle('chosen', !!sel.value));
+  });
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  if (SUBMITTED) {
+    showSubmittedState();
+  } else {
+    populateForm(APP_DATA);
+    updateUI(APP_DATA.current_step || 1);
+  }
+</script>
+</body>
+</html>

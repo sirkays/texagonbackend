@@ -1,0 +1,358 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block content %}
+  <main id="main">
+    <section class="relative overflow-hidden bg-white">
+      <div class="absolute inset-0 bg-grid opacity-40"></div>
+      <div class="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-gradient-to-r from-techxagon-red/25 to-techxagon-orange/25 blur-2xl"></div>
+      <div class="absolute -bottom-28 -left-28 h-80 w-80 rounded-full bg-gradient-to-r from-techxagon-orange/25 to-techxagon-red/25 blur-2xl"></div>
+
+      <div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14 sm:py-20">
+        <div class="grid lg:grid-cols-12 gap-10 items-center">
+          <div class="lg:col-span-7">
+            <div class="inline-flex items-center gap-2 rounded-full border border-techxagon-dark/10 bg-white px-3 py-1 text-xs sm:text-sm shadow-soft">
+              <span class="inline-block h-2 w-2 rounded-full bg-techxagon-orange"></span>
+              <span class="font-medium">Programs designed for secondary school learners</span>
+            </div>
+
+            <h1 class="mt-5 text-4xl sm:text-5xl font-extrabold tracking-tight">
+              Explore Techxagon’s <span class="text-transparent bg-clip-text bg-gradient-to-r from-techxagon-red to-techxagon-orange">corefrontend programs</span>
+            </h1>
+
+            <p class="mt-4 text-base sm:text-lg text-techxagon-dark/75 max-w-2xl">
+              Six practical tracks built around projects, problem-solving, and real-world outcomes—so students graduate with confidence and portfolios.
+            </p>
+
+            <div class="mt-7 flex flex-col sm:flex-row gap-3">
+              <a href="#programs"
+                 class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange shadow-soft hover:opacity-95">
+                View Programs
+              </a>
+              <a href="{% url 'corefrontend:contact' %}#contact-form"
+                 class="inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                Partner with Techxagon
+              </a>
+            </div>
+
+            <div class="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-xl">
+              <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft">
+                <p class="text-sm font-semibold">Hands-on delivery</p>
+                <p class="text-xs text-techxagon-dark/60 mt-1">Project-based learning</p>
+              </div>
+              <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft">
+                <p class="text-sm font-semibold">Skill progression</p>
+                <p class="text-xs text-techxagon-dark/60 mt-1">Beginner → Advanced</p>
+              </div>
+              <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft col-span-2 sm:col-span-1">
+                <p class="text-sm font-semibold">Portfolio outcomes</p>
+                <p class="text-xs text-techxagon-dark/60 mt-1">Showcase real projects</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="lg:col-span-5">
+            <div class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden">
+              <div class="p-6 sm:p-8">
+                <p class="text-sm font-semibold">What a student can build</p>
+                <div class="mt-5 grid gap-3">
+                  <div class="rounded-2xl bg-techxagon-dark/5 p-4">
+                    <p class="font-semibold">A personal portfolio website</p>
+                    <p class="text-sm text-techxagon-dark/70 mt-1">Projects, certificates, and a profile they can share.</p>
+                  </div>
+                  <div class="rounded-2xl bg-techxagon-dark/5 p-4">
+                    <p class="font-semibold">A simple robot / automation demo</p>
+                    <p class="text-sm text-techxagon-dark/70 mt-1">Sensors, logic, and real-world building blocks.</p>
+                  </div>
+                  <div class="rounded-2xl bg-techxagon-dark/5 p-4">
+                    <p class="font-semibold">A mini dashboard from real data</p>
+                    <p class="text-sm text-techxagon-dark/70 mt-1">Charts, insights, and storytelling with data.</p>
+                  </div>
+                </div>
+
+                <div class="mt-6 rounded-2xl bg-gradient-to-r from-techxagon-red to-techxagon-orange p-[1px]">
+                  <div class="rounded-2xl bg-white p-4 flex items-center justify-between gap-3">
+                    <p class="text-sm font-semibold">Need a custom program for your school?</p>
+                    <a href="/contact" class="text-sm font-semibold text-techxagon-red hover:opacity-80">Talk to us →</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <section id="programs" class="py-16 sm:py-20">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+          <div class="max-w-2xl">
+            <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Our programs</h2>
+            <p class="mt-3 text-techxagon-dark/70">
+              Each program is delivered with practical projects, check-ins, and outcomes learners can present with confidence.
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button class="filterBtn rounded-full border border-techxagon-dark/15 bg-white px-4 py-2 text-sm font-semibold hover:bg-techxagon-dark/5" data-filter="all">
+              All
+            </button>
+            <button class="filterBtn rounded-full border border-techxagon-dark/15 bg-white px-4 py-2 text-sm font-semibold hover:bg-techxagon-dark/5" data-filter="build">
+              Build
+            </button>
+            <button class="filterBtn rounded-full border border-techxagon-dark/15 bg-white px-4 py-2 text-sm font-semibold hover:bg-techxagon-dark/5" data-filter="design">
+              Design
+            </button>
+            <button class="filterBtn rounded-full border border-techxagon-dark/15 bg-white px-4 py-2 text-sm font-semibold hover:bg-techxagon-dark/5" data-filter="security">
+              Security
+            </button>
+            <button class="filterBtn rounded-full border border-techxagon-dark/15 bg-white px-4 py-2 text-sm font-semibold hover:bg-techxagon-dark/5" data-filter="data">
+              Data
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <article class="programCard group rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden hover:shadow-md transition"
+                   data-tags="build">
+            <div class="relative h-44">
+              <img src="{% static 'assets/prog.png' %}" alt="Programming and Coding" class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent"></div>
+              <span class="absolute top-4 left-4 inline-flex items-center rounded-full bg-white/85 px-3 py-1 text-xs font-semibold text-techxagon-dark shadow-soft">
+                Programming / Coding
+              </span>
+            </div>
+            <div class="p-6">
+              <p class="text-xs font-semibold text-techxagon-dark/60">Beginner → Advanced</p>
+              <h3 class="mt-2 text-xl font-bold">Programming / Coding</h3>
+              <p class="mt-2 text-sm text-techxagon-dark/70">
+                Logic, problem-solving, and coding foundations with practical mini-projects.
+              </p>
+              <ul class="mt-4 space-y-2 text-sm text-techxagon-dark/70">
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-red shrink-0"></span>Build a personal portfolio</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-orange shrink-0"></span>Write clean, readable code</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-deep shrink-0"></span>Basic algorithms & debugging</li>
+              </ul>
+              <!-- <a href="/contact" class="mt-5 inline-flex items-center text-sm font-semibold text-techxagon-red hover:opacity-80">
+                Request curriculum → 
+              </a> -->
+            </div>
+          </article>
+
+          <article class="programCard group rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden hover:shadow-md transition"
+                   data-tags="build">
+            <div class="relative h-44">
+              <img src="{% static 'assets/robotics.png' %}" alt="Robotics" class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent"></div>
+              <span class="absolute top-4 left-4 inline-flex items-center rounded-full bg-white/85 px-3 py-1 text-xs font-semibold text-techxagon-dark shadow-soft">
+                Robotics
+              </span>
+            </div>
+            <div class="p-6">
+              <p class="text-xs font-semibold text-techxagon-dark/60">Hands-on builds</p>
+              <h3 class="mt-2 text-xl font-bold">Robotics</h3>
+              <p class="mt-2 text-sm text-techxagon-dark/70">
+                Learn sensors, circuits, logic, and automation through guided builds and challenges.
+              </p>
+              <ul class="mt-4 space-y-2 text-sm text-techxagon-dark/70">
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-red shrink-0"></span>Basic electronics & sensors</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-orange shrink-0"></span>Automation challenges</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-deep shrink-0"></span>Team collaboration projects</li>
+              </ul>
+              <!-- <a href="/contact" class="mt-5 inline-flex items-center text-sm font-semibold text-techxagon-red hover:opacity-80">
+                Request curriculum → 
+              </a> -->
+            </div>
+          </article>
+
+          <article class="programCard group rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden hover:shadow-md transition"
+                   data-tags="security">
+            <div class="relative h-44">
+              <img src="{% static 'assets/cyber.png' %}" alt="Cybersecurity" class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent"></div>
+              <span class="absolute top-4 left-4 inline-flex items-center rounded-full bg-white/85 px-3 py-1 text-xs font-semibold text-techxagon-dark shadow-soft">
+                Cybersecurity
+              </span>
+            </div>
+            <div class="p-6">
+              <p class="text-xs font-semibold text-techxagon-dark/60">Safe digital habits</p>
+              <h3 class="mt-2 text-xl font-bold">Cybersecurity</h3>
+              <p class="mt-2 text-sm text-techxagon-dark/70">
+                Learn online safety, passwords, phishing awareness, and security fundamentals in a practical way.
+              </p>
+              <ul class="mt-4 space-y-2 text-sm text-techxagon-dark/70">
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-red shrink-0"></span>Phishing & scam awareness</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-orange shrink-0"></span>Security basics & hygiene</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-deep shrink-0"></span>Privacy & responsible use</li>
+              </ul>
+              <!-- <a href="/contact" class="mt-5 inline-flex items-center text-sm font-semibold text-techxagon-red hover:opacity-80">
+                Request curriculum → 
+              </a> -->
+            </div>
+          </article>
+
+          <article class="programCard group rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden hover:shadow-md transition"
+                   data-tags="design">
+            <div class="relative h-44">
+              <img src="{% static 'assets/uiux.png' %}" alt="UI/UX Design" class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent"></div>
+              <span class="absolute top-4 left-4 inline-flex items-center rounded-full bg-white/85 px-3 py-1 text-xs font-semibold text-techxagon-dark shadow-soft">
+                UI/UX Design
+              </span>
+            </div>
+            <div class="p-6">
+              <p class="text-xs font-semibold text-techxagon-dark/60">Design thinking</p>
+              <h3 class="mt-2 text-xl font-bold">UI/UX Design</h3>
+              <p class="mt-2 text-sm text-techxagon-dark/70">
+                Learn user-centered design: wireframes, layouts, colors, and prototypes that make sense.
+              </p>
+              <ul class="mt-4 space-y-2 text-sm text-techxagon-dark/70">
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-red shrink-0"></span>Wireframes & user flows</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-orange shrink-0"></span>UI components & style</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-deep shrink-0"></span>Prototype & feedback</li>
+              </ul>
+              <!-- <a href="/contact" class="mt-5 inline-flex items-center text-sm font-semibold text-techxagon-red hover:opacity-80">
+                Request curriculum → 
+              </a> -->
+            </div>
+          </article>
+
+          <article class="programCard group rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden hover:shadow-md transition"
+                   data-tags="build">
+            <div class="relative h-44">
+              <img src="{% static 'assets/webdev.jpg' %}" alt="Web Development" class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent"></div>
+              <span class="absolute top-4 left-4 inline-flex items-center rounded-full bg-white/85 px-3 py-1 text-xs font-semibold text-techxagon-dark shadow-soft">
+                Web Development
+              </span>
+            </div>
+            <div class="p-6">
+              <p class="text-xs font-semibold text-techxagon-dark/60">Build websites</p>
+              <h3 class="mt-2 text-xl font-bold">Web Development</h3>
+              <p class="mt-2 text-sm text-techxagon-dark/70">
+                Create responsive websites and simple web apps with deployment practice.
+              </p>
+              <ul class="mt-4 space-y-2 text-sm text-techxagon-dark/70">
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-red shrink-0"></span>HTML/CSS layout skills</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-orange shrink-0"></span>Basics of interactivity</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-deep shrink-0"></span>Deploy a project</li>
+              </ul>
+              <!-- <a href="/contact" class="mt-5 inline-flex items-center text-sm font-semibold text-techxagon-red hover:opacity-80">
+                Request curriculum → 
+              </a> -->
+            </div>
+          </article>
+
+          <article class="programCard group rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden hover:shadow-md transition"
+                   data-tags="data">
+            <div class="relative h-44">
+              <img src="{% static 'assets/data.jpg' %}" alt="Data Analysis and Data Science" class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+              <div class="absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent"></div>
+              <span class="absolute top-4 left-4 inline-flex items-center rounded-full bg-white/85 px-3 py-1 text-xs font-semibold text-techxagon-dark shadow-soft">
+                Data Science
+              </span>
+            </div>
+            <div class="p-6">
+              <p class="text-xs font-semibold text-techxagon-dark/60">Data to insight</p>
+              <h3 class="mt-2 text-xl font-bold">Data Analysis & Data Science</h3>
+              <p class="mt-2 text-sm text-techxagon-dark/70">
+                Turn raw data into charts, insights, and simple dashboards students can explain.
+              </p>
+              <ul class="mt-4 space-y-2 text-sm text-techxagon-dark/70">
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-red shrink-0"></span>Charts & storytelling</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-orange shrink-0"></span>Clean & organize data</li>
+                <li class="flex gap-2"><span class="mt-2 h-1.5 w-1.5 rounded-full bg-techxagon-deep shrink-0"></span>Build a mini dashboard</li>
+              </ul>
+              <!-- <a href="/contact" class="mt-5 inline-flex items-center text-sm font-semibold text-techxagon-red hover:opacity-80">
+                Request curriculum → 
+              </a> -->
+            </div>
+          </article>
+        </div>
+
+        <div class="mt-10 rounded-3xl border border-techxagon-dark/10 bg-white p-6 sm:p-8 shadow-soft">
+          <div class="grid md:grid-cols-3 gap-6 items-center">
+            <div>
+              <p class="text-sm font-semibold text-techxagon-dark/70">For schools</p>
+              <p class="mt-2 text-lg font-bold">We can deliver these programs in your timetable.</p>
+              <p class="mt-2 text-sm text-techxagon-dark/70">Curriculum + tutors + assessment + reporting.</p>
+            </div>
+            <div class="md:col-span-2 flex flex-col sm:flex-row gap-3 sm:justify-end">
+              <a href="/for-school"
+                 class="inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                For Schools: How it works
+              </a>
+              <a href="/apply-partner"
+                 class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95 shadow-soft">
+                Apply / Partner
+              </a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="py-16 sm:py-20 bg-white border-y border-techxagon-dark/10">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="rounded-3xl bg-gradient-to-r from-techxagon-red to-techxagon-orange p-[1px] shadow-soft">
+          <div class="rounded-3xl bg-white p-8 sm:p-12">
+            <div class="grid lg:grid-cols-12 gap-8 items-center">
+              <div class="lg:col-span-8">
+                <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">
+                  Want to teach and inspire the next generation?
+                </h2>
+                <p class="mt-3 text-techxagon-dark/70 max-w-2xl">
+                  Join our tutor network and help learners build real skills through hands-on projects and mentorship.
+                </p>
+              </div>
+              <div class="lg:col-span-4 flex flex-col sm:flex-row lg:flex-col gap-3 lg:items-stretch">
+                <a href="/become-a-tutor"
+                   class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-techxagon-dark hover:bg-techxagon-dark/90 shadow-soft">
+                  Become a Tutor
+                </a>
+                <a href="/contact"
+                   class="inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                  Ask a question
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+{% endblock content %}
+
+
+{% block extra_js %}
+  <script>
+
+    // Program filter
+    const filterBtns = Array.from(document.querySelectorAll(".filterBtn"));
+    const cards = Array.from(document.querySelectorAll(".programCard"));
+
+    function setActive(btn){
+      filterBtns.forEach(b => b.classList.remove("bg-techxagon-dark/5","font-extrabold"));
+      btn.classList.add("bg-techxagon-dark/5","font-extrabold");
+    }
+
+    function applyFilter(tag){
+      cards.forEach(c => {
+        const tags = (c.getAttribute("data-tags") || "").split(",").map(s => s.trim());
+        const show = (tag === "all") || tags.includes(tag);
+        c.style.display = show ? "block" : "none";
+      });
+    }
+
+    // Event listeners for filter buttons
+    filterBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        setActive(btn);
+        applyFilter(btn.getAttribute("data-filter"));
+      });
+    });
+  </script>
+{% endblock extra_js %}
+</body>
+</html>

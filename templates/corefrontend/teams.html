@@ -1,0 +1,71 @@
+{% extends "base/base.html" %}
+{% load static %}
+
+{% block content %}
+
+<section class="py-20 bg-techxagon-dark/[0.02]">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        <div class="text-center max-w-3xl mx-auto">
+            <h1 class="text-4xl font-bold tracking-tight">Meet Our Team</h1>
+            <p class="mt-4 text-techxagon-dark/70">
+                Meet the leaders driving Techxagon Academy’s vision, operations, product, and technology.
+            </p>
+        </div>
+
+        <div class="mt-16 grid gap-8 sm:grid-cols-2 xl:grid-cols-4">
+
+            <div class="rounded-3xl bg-white border border-techxagon-dark/10 shadow-soft overflow-hidden">
+                <div class="h-[420px] bg-techxagon-dark/5 flex items-center justify-center p-4">
+                    <img src="{% static 'assets/team/cecil_team.jpg' %}"
+                         alt="Cecil Ezeja"
+                         class="max-h-full max-w-full object-contain rounded-2xl">
+                </div>
+                <div class="px-6 py-5 text-center">
+                    <h3 class="text-2xl font-semibold text-[#0E2A66]">Cecil Ezeja</h3>
+                    <p class="mt-2 text-lg text-techxagon-dark/50">CoFounder/CEO</p>
+                </div>
+            </div>
+
+            <div class="rounded-3xl bg-white border border-techxagon-dark/10 shadow-soft overflow-hidden">
+                <div class="h-[420px] bg-techxagon-dark/5 flex items-center justify-center p-4">
+                    <img src="{% static 'assets/team/jude_team.jpg' %}"
+                         alt="Jude Nzube Akonam"
+                         class="max-h-full max-w-full object-contain rounded-2xl">
+                </div>
+                <div class="px-6 py-5 text-center">
+                    <h3 class="text-2xl font-semibold text-[#0E2A66]">Jude Nzube Akonam</h3>
+                    <p class="mt-2 text-lg text-techxagon-dark/50">Cofounder/COO</p>
+                </div>
+            </div>
+
+            <div class="rounded-3xl bg-white border border-techxagon-dark/10 shadow-soft overflow-hidden">
+                <div class="h-[420px] bg-techxagon-dark/5 flex items-center justify-center p-4">
+                    <img src="{% static 'assets/team/chris_team.jpg' %}"
+                         alt="Ekoja Chris Idakwo"
+                         class="max-h-full max-w-full object-contain rounded-2xl">
+                </div>
+                <div class="px-6 py-5 text-center">
+                    <h3 class="text-2xl font-semibold text-[#0E2A66]">Ekoja Chris Idakwo</h3>
+                    <p class="mt-2 text-lg text-techxagon-dark/50">CTO</p>
+                </div>
+            </div>
+
+            <div class="rounded-3xl bg-white border border-techxagon-dark/10 shadow-soft overflow-hidden">
+                <div class="h-[420px] bg-techxagon-dark/5 flex items-center justify-center p-4">
+                    <img src="{% static 'assets/team/ruhullahi_team.jpg' %}"
+                         alt="Ruhullahi Muhammad"
+                         class="max-h-full max-w-full object-contain rounded-2xl">
+                </div>
+                <div class="px-6 py-5 text-center">
+                    <h3 class="text-2xl font-semibold text-[#0E2A66]">Ruhullahi Muhammad</h3>
+                    <p class="mt-2 text-lg text-techxagon-dark/50">CPO</p>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+</section>
+
+{% endblock %}

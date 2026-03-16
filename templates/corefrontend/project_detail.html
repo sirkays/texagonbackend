@@ -1,0 +1,881 @@
+{% extends 'base/base.html' %}
+{% load static %}
+
+{% block content %}
+
+<!-- ═══════════════════════════════════════════════════════════
+     FONTS
+═══════════════════════════════════════════════════════════ -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap" rel="stylesheet">
+
+<style>
+/* ─── RESET / BASE ─────────────────────────────────────────── */
+:root {
+  --red:    #dc3005;
+  --orange: #ef8916;
+  --deep:   #e65f0c;
+  --dark:   #020100;
+  --fire:   linear-gradient(135deg, #dc3005, #ef8916);
+  --fire-r: linear-gradient(135deg, #ef8916, #dc3005);
+}
+*, *::before, *::after { box-sizing: border-box; }
+
+
+/* ─── UTILITIES ────────────────────────────────────────────── */
+.grad-text {
+  background: var(--fire);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.grad-bg  { background: var(--fire); }
+.grad-bg-r{ background: var(--fire-r); }
+
+/* ─── NOISE OVERLAY ────────────────────────────────────────── */
+.noise::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* ─── GRID PATTERN ─────────────────────────────────────────── */
+.dot-grid {
+  background-image: radial-gradient(circle, rgba(2,1,0,0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.line-grid {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ─── REVEAL ANIMATIONS ────────────────────────────────────── */
+.reveal       { opacity: 0; transform: translateY(32px); transition: opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1); }
+.reveal.in    { opacity: 1; transform: none; }
+.reveal-l     { opacity: 0; transform: translateX(-40px); transition: opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1); }
+.reveal-l.in  { opacity: 1; transform: none; }
+.reveal-r     { opacity: 0; transform: translateX(40px); transition: opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1); }
+.reveal-r.in  { opacity: 1; transform: none; }
+.delay-1 { transition-delay: .1s; }
+.delay-2 { transition-delay: .2s; }
+.delay-3 { transition-delay: .3s; }
+.delay-4 { transition-delay: .4s; }
+.delay-5 { transition-delay: .5s; }
+.delay-6 { transition-delay: .6s; }
+
+/* ─── FLIP COUNTDOWN ───────────────────────────────────────── */
+.flip-unit {
+  perspective: 400px;
+  position: relative;
+}
+.flip-card {
+  background: #fff;
+  border: 1px solid rgba(220,48,5,0.12);
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(220,48,5,0.1), 0 1px 4px rgba(0,0,0,0.06);
+  padding: 16px 12px 10px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  transition: transform .15s ease;
+}
+.flip-card::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: 1px;
+  background: rgba(220,48,5,0.08);
+  z-index: 2;
+}
+.flip-card.flipping {
+  animation: flipAnim .3s ease;
+}
+@keyframes flipAnim {
+  0%   { transform: rotateX(0deg); }
+  50%  { transform: rotateX(-20deg) scale(0.97); }
+  100% { transform: rotateX(0deg); }
+}
+.flip-num {
+  font-size: 2.5rem;
+  font-weight: 900;
+  line-height: 1;
+  background: var(--fire);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.flip-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: rgba(2,1,0,0.4);
+  margin-top: 6px;
+  display: block;
+}
+
+/* ─── PROGRESS BAR ─────────────────────────────────────────── */
+@keyframes fillBar { from { width:0 } to { width:61.4% } }
+.prog-bar { animation: fillBar 2s cubic-bezier(.22,1,.36,1) 1s both; }
+
+/* ─── PULSE RING ───────────────────────────────────────────── */
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(239,137,22,.5); }
+  50%     { box-shadow: 0 0 0 8px rgba(239,137,22,0); }
+}
+.pulse { animation: pulse 2s infinite; }
+
+/* ─── MAGNETIC CARD ────────────────────────────────────────── */
+.mag-card {
+  transition: transform .25s cubic-bezier(.16,1,.3,1), box-shadow .25s ease;
+  will-change: transform;
+}
+.mag-card:hover { box-shadow: 0 20px 60px rgba(0,0,0,.1); }
+
+/* ─── STEP CONNECTOR ───────────────────────────────────────── */
+.step-connector {
+  position: relative;
+}
+.step-connector::after {
+  content: '';
+  position: absolute;
+  top: 28px;
+  left: calc(50% + 56px);
+  width: calc(100% - 112px);
+  height: 2px;
+  background: linear-gradient(90deg, rgba(220,48,5,.3), rgba(239,137,22,.3));
+}
+@media (max-width: 1024px) { .step-connector::after { display:none; } }
+
+/* ─── CURRICULUM HOVER ─────────────────────────────────────── */
+.module-cell {
+  position: relative;
+  overflow: hidden;
+  transition: background .3s ease;
+}
+.module-cell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(220,48,5,.05), rgba(239,137,22,.05));
+  opacity: 0;
+  transition: opacity .3s ease;
+}
+.module-cell:hover::before { opacity: 1; }
+.module-cell:hover .module-icon { transform: scale(1.2) rotate(-8deg); }
+.module-icon { transition: transform .4s cubic-bezier(.34,1.56,.64,1); display: inline-block; }
+
+/* ─── FAQ DETAILS ──────────────────────────────────────────── */
+details summary::-webkit-details-marker { display: none; }
+details[open] .faq-icon { transform: rotate(180deg); }
+.faq-icon { transition: transform .3s cubic-bezier(.16,1,.3,1); }
+details[open] .faq-body {
+  animation: faqOpen .35s cubic-bezier(.16,1,.3,1) both;
+}
+@keyframes faqOpen {
+  from { opacity:0; transform:translateY(-8px); }
+  to   { opacity:1; transform:none; }
+}
+
+/* ─── HERO IMAGE FLOAT ─────────────────────────────────────── */
+@keyframes floatY {
+  0%,100% { transform: translateY(0px) rotate(0deg); }
+  50%     { transform: translateY(-10px) rotate(.5deg); }
+}
+.float-img { animation: floatY 6s ease-in-out infinite; }
+
+/* ─── STAT COUNTER ─────────────────────────────────────────── */
+.stat-num { font-variant-numeric: tabular-nums; }
+
+/* ─── SCROLL INDICATOR ─────────────────────────────────────── */
+@keyframes scrollBounce {
+  0%,100% { transform: translateY(0); opacity:.7; }
+  50%     { transform: translateY(6px); opacity:1; }
+}
+.scroll-indicator { animation: scrollBounce 1.8s ease-in-out infinite; }
+
+/* ─── GLOW ─────────────────────────────────────────────────── */
+.orange-glow { filter: drop-shadow(0 0 40px rgba(239,137,22,.35)); }
+
+/* ─── NUMBER TICKER ────────────────────────────────────────── */
+@keyframes tickUp {
+  from { transform: translateY(100%); opacity:0; }
+  to   { transform: translateY(0); opacity:1; }
+}
+.tick-in { animation: tickUp .4s cubic-bezier(.16,1,.3,1) both; }
+
+/* ─── MARQUE STRIP ─────────────────────────────────────────── */
+@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.marquee-track { animation: marquee 22s linear infinite; white-space: nowrap; display: flex; }
+.marquee-track:hover { animation-play-state: paused; }
+</style>
+
+
+<!-- ─── BACK LINK ──────────────────────────────────────────── -->
+<div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-2 pt-4">
+  <a href="/projects"
+     class="inline-flex items-center gap-2 text-sm font-semibold text-[#020100]/50 hover:text-[color:var(--orange)] transition-colors group">
+    <span class="inline-flex items-center justify-center h-7 w-7 rounded-full border border-current group-hover:border-[color:var(--orange)] transition-colors">
+      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+      </svg>
+    </span>
+    Back to Projects
+  </a>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════
+     HERO — SPLIT SCREEN
+════════════════════════════════════════════════════════════ -->
+<section class="relative overflow-hidden bg-white mt-6" style="min-height:92vh;">
+
+  <!-- Atmospheric blobs -->
+  <div class="absolute -top-32 -right-32 h-[600px] w-[600px] rounded-full pointer-events-none"
+       style="background:radial-gradient(circle, rgba(239,137,22,.18) 0%, transparent 70%);"></div>
+  <div class="absolute -bottom-40 -left-20 h-[500px] w-[500px] rounded-full pointer-events-none"
+       style="background:radial-gradient(circle, rgba(220,48,5,.12) 0%, transparent 70%);"></div>
+  <div class="dot-grid absolute inset-0 opacity-50 pointer-events-none"></div>
+
+  <div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 lg:py-16">
+    <div class="grid lg:grid-cols-2 gap-14 lg:gap-20 items-center">
+
+      <!-- ── LEFT COPY ── -->
+      <div>
+
+        <!-- Eyebrow badge -->
+        <div class="reveal inline-flex items-center gap-2.5 rounded-full px-4 py-2 text-xs font-bold tracking-wide border"
+             style="background:rgba(239,137,22,.08); border-color:rgba(239,137,22,.25); color:#e65f0c;">
+          <span class="h-2 w-2 rounded-full pulse" style="background:#ef8916; display:inline-block;"></span>
+          Community · Open Applications
+        </div>
+
+        <!-- Headline -->
+        <div class="reveal delay-1 mt-6 overflow-hidden">
+          <h1 class="d-font text-5xl sm:text-6xl lg:text-7xl font-black tracking-tight leading-[.95]">
+            Robotics<br>
+            <span class="grad-text">Tutor</span><br>
+            <span style="color:#020100;">Training</span>
+          </h1>
+        </div>
+
+        <!-- Sub-headline rule + text -->
+        <div class="reveal delay-2 mt-7 flex items-start gap-4">
+          <div class="mt-1.5 h-12 w-[3px] rounded-full flex-shrink-0" style="background:var(--fire)"></div>
+          <p class="text-[#020100]/65 text-base sm:text-lg leading-relaxed">
+            We are training <strong class="text-[#020100]">70 tutors</strong> in hands-on robotics —
+            completely <strong style="color:var(--orange)">free of charge.</strong>
+            Certified graduates are deployed to partner schools and earn a
+            <strong class="text-[#020100]">competitive monthly stipend.</strong>
+          </p>
+        </div>
+
+        <!-- Stat row -->
+        <div class="reveal delay-3 mt-9 flex flex-wrap gap-6">
+          <div class="text-center">
+            <p class="d-font text-4xl font-black grad-text stat-num" data-target="70" data-suffix="">0</p>
+            <p class="mt-1 text-xs font-semibold text-[#020100]/50 tracking-wide uppercase">Tutor Slots</p>
+          </div>
+          <div class="w-px self-stretch" style="background:rgba(2,1,0,.1)"></div>
+          <div class="text-center">
+            <p class="d-font text-4xl font-black grad-text">₦0</p>
+            <p class="mt-1 text-xs font-semibold text-[#020100]/50 tracking-wide uppercase">Training Cost</p>
+          </div>
+          <div class="w-px self-stretch" style="background:rgba(2,1,0,.1)"></div>
+          <div class="text-center">
+            <p class="d-font text-4xl font-black grad-text stat-num" data-target="6" data-suffix="+">0</p>
+            <p class="mt-1 text-xs font-semibold text-[#020100]/50 tracking-wide uppercase">Modules</p>
+          </div>
+        </div>
+
+        <!-- CTA buttons -->
+        <div class="reveal delay-4 mt-10 flex flex-wrap gap-3">
+          <a href="/apply-tutor"
+             class="group inline-flex items-center gap-2.5 px-8 py-4 rounded-2xl text-white font-bold text-sm grad-bg shadow-lg hover:opacity-95 transition-all hover:shadow-xl hover:-translate-y-0.5">
+            <svg class="h-4 w-4 transition-transform group-hover:rotate-90" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+            </svg>
+            Apply Now — It's Free
+          </a>
+          <a href="#about"
+             class="inline-flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-sm border transition-all hover:bg-[#020100]/5"
+             style="border-color:rgba(2,1,0,.15); color:#020100;">
+            Learn More
+            <svg class="h-4 w-4 scroll-indicator" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </a>
+        </div>
+
+        <!-- Trust strip -->
+        <div class="reveal delay-5 mt-10 flex items-center gap-3 text-xs text-[#020100]/40 font-medium">
+          <svg class="h-4 w-4 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+          </svg>
+          No fees · No prior experience required · Paid placement upon graduation
+        </div>
+      </div>
+
+      <!-- ── RIGHT — IMAGE + COUNTDOWN ── -->
+      <div class="reveal-r delay-1 relative flex flex-col gap-6">
+
+        <!-- Main image card -->
+        <div class="relative rounded-3xl overflow-hidden shadow-2xl orange-glow" style="aspect-ratio:4/3;">
+          <img src="{% static 'assets/robotics-tutor-reduct.jpg' %}"
+               alt="Robotics Tutor Training"
+               class="float-img h-full w-full object-cover"
+               onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=800&q=80';" />
+
+          <!-- Overlay gradient -->
+          <div class="absolute inset-0" style="background:linear-gradient(to top, rgba(2,1,0,.55) 0%, transparent 50%)"></div>
+
+          <!-- Badge over image -->
+          <div class="absolute top-4 left-4 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold text-white backdrop-blur-sm"
+               style="background:rgba(220,48,5,.85);">
+            <span class="h-1.5 w-1.5 rounded-full bg-white pulse inline-block"></span>
+            Applications Open
+          </div>
+
+          <!-- Bottom overlay text -->
+          <div class="absolute bottom-0 left-0 right-0 p-6">
+            <p class="d-font text-white text-2xl font-black leading-tight">Become a Certified<br>Robotics Educator</p>
+            <p class="text-white/70 text-sm mt-1">Techxagon Academy · Cohort 1</p>
+          </div>
+        </div>
+
+        <!-- Countdown + spots — floating card -->
+        <div class="relative rounded-3xl border bg-white overflow-hidden"
+             style="border-color:rgba(2,1,0,.08); box-shadow:0 20px 60px rgba(0,0,0,.08);">
+
+          <!-- Card header -->
+          <div class="noise relative grad-bg px-6 py-5 flex items-center justify-between overflow-hidden">
+            <div class="line-grid absolute inset-0 pointer-events-none"></div>
+            <div class="relative">
+              <p class="d-font text-white/90 text-xs font-bold tracking-widest uppercase">Applications close in</p>
+              <p class="text-white/60 text-[11px] mt-0.5">Don't miss your spot</p>
+            </div>
+            <div class="text-3xl relative">🤖</div>
+          </div>
+
+          <!-- Flip countdown -->
+          <div class="px-6 pt-5 pb-2">
+            <div class="grid grid-cols-4 gap-2.5" id="countdown">
+              <div class="flip-unit">
+                <div class="flip-card" id="fc-days">
+                  <div class="flip-num" id="cd-days">--</div>
+                  <span class="flip-label">Days</span>
+                </div>
+              </div>
+              <div class="flip-unit">
+                <div class="flip-card" id="fc-hours">
+                  <div class="flip-num" id="cd-hours">--</div>
+                  <span class="flip-label">Hours</span>
+                </div>
+              </div>
+              <div class="flip-unit">
+                <div class="flip-card" id="fc-mins">
+                  <div class="flip-num" id="cd-mins">--</div>
+                  <span class="flip-label">Mins</span>
+                </div>
+              </div>
+              <div class="flip-unit">
+                <div class="flip-card" id="fc-secs">
+                  <div class="flip-num" id="cd-secs">--</div>
+                  <span class="flip-label">Secs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Spots bar -->
+          <div class="px-6 pt-4 pb-5">
+            <div class="flex justify-between mb-2">
+              <span class="text-xs font-semibold text-[#020100]/55">Spots filled</span>
+              <span class="text-xs font-black" style="color:var(--orange);">43 / 70</span>
+            </div>
+            <div class="h-2 w-full rounded-full overflow-hidden" style="background:rgba(2,1,0,.07);">
+              <div class="prog-bar h-full rounded-full grad-bg"></div>
+            </div>
+            <div class="flex items-center justify-between mt-2.5">
+              <span class="text-[10px] text-[#020100]/40">27 spots remaining</span>
+              <span class="text-[10px] font-bold text-red-500">⚡ Filling fast</span>
+            </div>
+          </div>
+
+          <div class="px-6 pb-6">
+            <a href="/apply-tutor"
+               class="flex w-full items-center justify-center gap-2 py-3.5 rounded-xl text-white text-sm font-bold grad-bg hover:opacity-95 transition-all hover:-translate-y-0.5 shadow-md">
+              Secure Your Spot Now →
+            </a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     MARQUEE STRIP
+═══════════════════════════════════════════════════════════ -->
+<div class="relative overflow-hidden py-4 border-y" style="border-color:rgba(2,1,0,.08); background:rgba(239,137,22,.04);">
+  <div class="marquee-track">
+    {% for item in "1234567812345678" %}
+    <span class="inline-flex items-center gap-3 px-8 text-sm font-semibold text-[#020100]/50">
+      {% cycle '🤖 Fully Funded Training' '📜 Official Certificate' '💰 Paid School Placement' '🎯 70 Tutor Slots' '⚡ No Fees Ever' '🏫 Partner Schools Network' '🛠️ Hands-on Robotics' '🌍 Real-World Impact' %}
+      <span class="text-[color:var(--orange)] opacity-40">✦</span>
+    </span>
+    {% endfor %}
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     ABOUT THE PROGRAMME
+═══════════════════════════════════════════════════════════ -->
+<section class="py-20 sm:py-28 bg-white" id="about">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+
+    <div class="grid lg:grid-cols-12 gap-16 items-start">
+
+      <!-- LEFT NARRATIVE -->
+      <div class="lg:col-span-7">
+
+        <div class="reveal inline-flex items-center gap-2 text-xs font-black tracking-[.15em] uppercase mb-5"
+             style="color:var(--orange);">
+          <span class="h-px w-8 inline-block" style="background:var(--orange)"></span>
+          About the Programme
+        </div>
+
+        <h2 class="reveal delay-1 d-font text-4xl sm:text-5xl font-black tracking-tight leading-[1.05]">
+          Build a Career in<br>
+          <span class="grad-text">Robotics Education</span><br>
+          — We Train You First
+        </h2>
+
+        <div class="reveal delay-2 mt-8 space-y-5 text-[#020100]/68 leading-relaxed text-[15px]">
+          <p>
+            Techxagon Academy's <strong class="text-[#020100]">Robotics Tutor Training Programme</strong> is a structured
+            initiative designed to solve two problems at once: the shortage of qualified robotics educators in schools,
+            and the unemployment gap among tech-enthusiastic youth and graduates.
+          </p>
+          <p>
+            We recruit <strong class="text-[#020100]">70 prospective tutors</strong> — no prior teaching degree required
+            — and put them through a rigorous, fully-funded robotics training curriculum covering hardware, programming,
+            pedagogy, and classroom management.
+          </p>
+          <p>
+            Once certified, tutors are <strong class="text-[#020100]">placed at partner schools</strong> and receive a
+            monthly salary for the duration of their deployment. Schools gain access to qualified robotics instructors.
+            Tutors gain skills, a professional certification, and a paying job.
+            <strong style="color:var(--orange)">Everyone wins.</strong>
+          </p>
+        </div>
+
+        <!-- Pull quote -->
+        <div class="reveal delay-3 relative mt-10 rounded-3xl p-8 overflow-hidden"
+             style="background:linear-gradient(135deg, rgba(220,48,5,.06), rgba(239,137,22,.06)); border:1px solid rgba(239,137,22,.2);">
+          <div class="absolute -top-4 -left-2 d-font text-[8rem] leading-none select-none pointer-events-none"
+               style="color:rgba(239,137,22,.12);">"</div>
+          <p class="relative d-font text-xl font-bold text-[#020100]/85 leading-snug">
+            "We don't just train tutors. We create a generation of robotics educators who carry that knowledge
+            into every school they walk into."
+          </p>
+          <div class="mt-5 flex items-center gap-3">
+            <div class="h-8 w-8 rounded-full grad-bg flex items-center justify-center text-white text-sm font-bold">T</div>
+            <p class="text-sm font-bold" style="color:var(--orange)">— Techxagon Academy Team</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT CARDS -->
+      <div class="lg:col-span-5 space-y-4">
+
+        <!-- Who can apply -->
+        <div class="reveal-r delay-1 mag-card rounded-3xl border bg-white p-7"
+             style="border-color:rgba(2,1,0,.09); box-shadow:0 4px 24px rgba(0,0,0,.05);">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="h-11 w-11 rounded-2xl grad-bg flex items-center justify-center text-xl shadow-md">🎯</div>
+            <h3 class="d-font text-lg font-black">Who Can Apply?</h3>
+          </div>
+          <ul class="space-y-3.5">
+            {% for item in "1234" %}
+            <li class="flex items-start gap-3 text-sm text-[#020100]/68">
+              <span class="mt-0.5 h-5 w-5 shrink-0 rounded-full flex items-center justify-center text-[10px] font-black text-white grad-bg">✓</span>
+              {% cycle 'NYSC members or recent STEM graduates' 'OND / HND / BSc holders with tech passion' 'Anyone curious about robotics — prior experience is a bonus' 'People who enjoy working with children and young learners' %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        <!-- What you'll receive -->
+        <div class="reveal-r delay-2 mag-card rounded-3xl border bg-white p-7"
+             style="border-color:rgba(2,1,0,.09); box-shadow:0 4px 24px rgba(0,0,0,.05);">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="h-11 w-11 rounded-2xl grad-bg-r flex items-center justify-center text-xl shadow-md">🎁</div>
+            <h3 class="d-font text-lg font-black">What You'll Receive</h3>
+          </div>
+          <ul class="space-y-3.5">
+            {% for item in "12345" %}
+            <li class="flex items-start gap-3 text-sm text-[#020100]/68">
+              <span class="mt-0.5 h-5 w-5 shrink-0 rounded-full flex items-center justify-center text-[10px] font-black text-white" style="background:var(--red);">✓</span>
+              {% cycle '<strong class="text-[#020100]">Free</strong> full robotics training (hardware, coding & pedagogy)' 'Official Techxagon Robotics Tutor <strong class="text-[#020100]">Certificate</strong>' '<strong class="text-[#020100]">Paid placement</strong> at partner schools upon graduation' 'Access to the Techxagon educator network & resources' 'Ongoing mentorship and professional development support' %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     HOW IT WORKS — CINEMATIC STEPS
+═══════════════════════════════════════════════════════════ -->
+<section class="py-20 sm:py-28 relative overflow-hidden"
+         style="background:linear-gradient(160deg, #fff 0%, #fff7f0 50%, #fff 100%);">
+
+  <!-- Decorative orb -->
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[600px] w-[600px] rounded-full pointer-events-none"
+       style="background:radial-gradient(circle, rgba(239,137,22,.07) 0%, transparent 70%);"></div>
+
+  <div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+
+    <div class="reveal text-center mb-16">
+      <div class="inline-flex items-center gap-2 text-xs font-black tracking-[.15em] uppercase mb-4"
+           style="color:var(--orange);">
+        <span class="h-px w-8 inline-block" style="background:var(--orange)"></span>
+        The Journey
+        <span class="h-px w-8 inline-block" style="background:var(--orange)"></span>
+      </div>
+      <h2 class="d-font text-4xl sm:text-5xl font-black tracking-tight">How It Works</h2>
+      <p class="mt-4 text-[#020100]/55 max-w-lg mx-auto text-[15px]">
+        From application to first paycheque — four clear steps.
+      </p>
+    </div>
+
+    <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 relative">
+
+      <!-- Connector line (desktop) -->
+      <div class="hidden lg:block absolute top-12 left-0 right-0 h-px pointer-events-none"
+           style="background:linear-gradient(90deg, transparent 8%, rgba(220,48,5,.2) 20%, rgba(239,137,22,.4) 50%, rgba(220,48,5,.2) 80%, transparent 92%); margin: 0 12.5%;"></div>
+
+      {% for step in "1234" %}
+      <div class="reveal mag-card delay-{{ forloop.counter }} relative rounded-3xl border bg-white p-7 overflow-hidden"
+           style="border-color:rgba(2,1,0,.09); box-shadow:0 4px 24px rgba(0,0,0,.05);">
+
+        <!-- Step number -->
+        <div class="h-14 w-14 rounded-2xl grad-bg flex items-center justify-center shadow-lg mb-6">
+          <span class="d-font text-white font-black text-xl">0{{ forloop.counter }}</span>
+        </div>
+
+        <!-- Emoji -->
+        <div class="absolute top-6 right-6 text-3xl">
+          {% cycle '📝' '🤝' '🔧' '💰' %}
+        </div>
+
+        <h3 class="d-font font-black text-lg mb-3">
+          {% cycle 'Apply Online' 'Selection & Onboarding' 'Free Robotics Training' 'Get Deployed & Paid' %}
+        </h3>
+        <p class="text-sm text-[#020100]/60 leading-relaxed">
+          {% cycle 'Submit your form with your background and motivation. Takes under 5 minutes — no CV required.' 'Shortlisted applicants attend a brief orientation before the training cohort kicks off.' 'Intensive sessions: hardware, Arduino, lesson delivery, and classroom management.' 'Certified tutors are placed at partner schools, teach students, and earn monthly.' %}
+        </p>
+
+        <!-- Subtle bottom accent -->
+        <div class="absolute bottom-0 left-0 right-0 h-1 grad-bg opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+             style="transition: opacity .3s;"></div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     CURRICULUM GRID
+═══════════════════════════════════════════════════════════ -->
+<section class="py-20 sm:py-28 bg-white">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+
+    <div class="reveal rounded-[2.5rem] overflow-hidden border"
+         style="border-color:rgba(2,1,0,.09); box-shadow:0 20px 80px rgba(0,0,0,.07);">
+
+      <!-- Header -->
+      <div class="border-b px-8 py-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+           style="border-color:rgba(2,1,0,.08);">
+        <div>
+          <div class="inline-flex items-center gap-2 text-xs font-black tracking-[.15em] uppercase mb-2"
+               style="color:var(--orange);">What you'll learn</div>
+          <h2 class="d-font text-2xl sm:text-3xl font-black">Training Curriculum Overview</h2>
+        </div>
+        <div class="inline-flex items-center gap-2.5 rounded-full px-5 py-2.5 text-sm font-bold"
+             style="background:rgba(239,137,22,.1); color:var(--deep);">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2"/>
+          </svg>
+          Fully Funded · 0 Fees
+        </div>
+      </div>
+
+      <!-- Modules -->
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 divide-y sm:divide-y-0"
+           style="divide-color:rgba(2,1,0,.07);">
+        {% for m in "123456" %}
+        <div class="module-cell reveal delay-{{ forloop.counter }} p-8 border-b lg:border-b-0 sm:border-r last:border-r-0"
+             style="border-color:rgba(2,1,0,.07);">
+          <div class="module-icon text-4xl mb-5">
+            {% cycle '⚙️' '💻' '🏗️' '🎓' '🧒' '📊' %}
+          </div>
+          <h4 class="d-font font-black text-base mb-2.5">
+            {% cycle 'Robotics Foundations' 'Programming & Arduino' 'Build Sessions' 'Pedagogy & Lesson Design' 'Child-Centred Teaching' 'Assessment & Reporting' %}
+          </h4>
+          <p class="text-sm text-[#020100]/60 leading-relaxed">
+            {% cycle 'Mechanics, sensors, actuators, circuit basics, and how robots think and move.' 'Hands-on coding using Arduino IDE, Scratch-based logic, and block programming for beginners.' 'Assemble and program real robots: line followers, obstacle avoiders, and programmable arms.' 'How to structure robotics lessons, communicate concepts clearly, and keep students engaged.' 'Age-appropriate methods, classroom safety, inclusive instruction, and managing diverse learners.' 'Practical and observational assessment tools, student progress tracking, and school reporting.' %}
+          </p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     IMPACT NUMBERS BANNER
+═══════════════════════════════════════════════════════════ -->
+<div class="relative overflow-hidden noise"
+     style="background:linear-gradient(135deg, #dc3005, #e65f0c, #ef8916);">
+  <div class="line-grid absolute inset-0 pointer-events-none"></div>
+  <div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14 sm:py-16">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-8 text-center text-white">
+      {% for s in "1234" %}
+      <div class="reveal delay-{{ forloop.counter }}">
+        <p class="d-font text-5xl font-black stat-num"
+           data-target="{% cycle '70' '6' '100' '27' %}"
+           data-suffix="{% cycle '' '+' '%' ' left' %}">
+           {% cycle '70' '6' '100' '27' %}
+        </p>
+        <p class="mt-2 text-white/70 text-sm font-semibold tracking-wide">
+          {% cycle 'Tutor Cohort Size' 'Curriculum Modules' 'Free Training' 'Spots Remaining' %}
+        </p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     FAQ
+═══════════════════════════════════════════════════════════ -->
+<section class="py-20 sm:py-28" style="background:linear-gradient(180deg, #fff 0%, #fff8f4 100%);">
+  <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+
+    <div class="reveal text-center mb-12">
+      <div class="inline-flex items-center gap-2 text-xs font-black tracking-[.15em] uppercase mb-4"
+           style="color:var(--orange);">
+        <span class="h-px w-8 inline-block" style="background:var(--orange)"></span>
+        Got Questions?
+        <span class="h-px w-8 inline-block" style="background:var(--orange)"></span>
+      </div>
+      <h2 class="d-font text-4xl sm:text-5xl font-black tracking-tight">FAQs</h2>
+    </div>
+
+    <div class="space-y-3">
+
+      {% for q in "12345" %}
+      <details class="reveal delay-{{ forloop.counter }} group rounded-2xl border bg-white overflow-hidden transition-all"
+               style="border-color:rgba(2,1,0,.09); box-shadow:0 2px 12px rgba(0,0,0,.04);">
+        <summary class="flex cursor-pointer items-center justify-between px-7 py-5 font-bold text-[15px] select-none list-none gap-4">
+          <span>{% cycle 'Is the training really free?' 'Do I need a robotics background to apply?' 'What happens after I complete the training?' 'How long does the training take?' 'Can I apply if I already have a teaching job?' %}</span>
+          <span class="faq-icon h-8 w-8 rounded-full flex-shrink-0 flex items-center justify-center transition-transform"
+                style="background:rgba(239,137,22,.1);">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5"
+                 style="color:var(--orange);" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </span>
+        </summary>
+        <div class="faq-body px-7 pb-6 text-sm text-[#020100]/65 leading-relaxed border-t pt-5"
+             style="border-color:rgba(2,1,0,.07);">
+          {% cycle 'Yes, 100%. No registration fees, no hidden charges, no material costs. Techxagon Academy fully funds the training for all 70 cohort members.' 'No prior robotics experience required. We train you from the ground up. A passion for technology and interest in teaching children matter far more than existing skills.' 'Certified tutors are matched with partner schools and deployed to teach robotics as part of the school programme, receiving a monthly salary throughout placement.' 'Training runs over several weeks with intensive hands-on sessions, theory, and assessed teach-back exercises. Exact schedule shared with selected candidates.' 'Yes! Serving teachers who want to upskill in robotics education are welcome. Deployment arrangements can be discussed on a case-by-case basis.' %}
+        </div>
+      </details>
+      {% endfor %}
+
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     FINAL CTA
+═══════════════════════════════════════════════════════════ -->
+<section class="py-20 sm:py-24 bg-white">
+  <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+
+    <div class="reveal relative rounded-[2.5rem] overflow-hidden noise"
+         style="background:linear-gradient(135deg, #020100 0%, #1a0800 100%); box-shadow:0 40px 120px rgba(0,0,0,.2);">
+
+      <!-- Background effects -->
+      <div class="line-grid absolute inset-0 pointer-events-none opacity-60"></div>
+      <div class="absolute -top-20 -right-20 h-64 w-64 rounded-full pointer-events-none"
+           style="background:radial-gradient(circle, rgba(239,137,22,.25) 0%, transparent 70%);"></div>
+      <div class="absolute -bottom-20 -left-20 h-64 w-64 rounded-full pointer-events-none"
+           style="background:radial-gradient(circle, rgba(220,48,5,.2) 0%, transparent 70%);"></div>
+
+      <div class="relative px-8 sm:px-16 py-16 sm:py-20 text-center">
+
+        <div class="inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold mb-8 border"
+             style="border-color:rgba(239,137,22,.3); background:rgba(239,137,22,.1); color:#ef8916;">
+          <span class="h-2 w-2 rounded-full pulse inline-block" style="background:#ef8916;"></span>
+          27 Spots Remaining — Act Fast
+        </div>
+
+        <h2 class="d-font text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white leading-tight">
+          Ready to Become a<br>
+          <span class="grad-text">Techxagon</span> Tutor?
+        </h2>
+
+        <p class="mt-6 text-white/55 max-w-xl mx-auto text-base leading-relaxed">
+          Training is free. Placement is paid. Spots are capped at 70. The countdown is ticking — apply today before applications close.
+        </p>
+
+        <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
+          <a href="/apply-tutor"
+             class="group inline-flex items-center justify-center gap-2.5 px-10 py-4.5 rounded-2xl text-white font-black text-base grad-bg shadow-xl hover:opacity-95 transition-all hover:-translate-y-1 hover:shadow-2xl"
+             style="padding-top:1.1rem; padding-bottom:1.1rem;">
+            Apply Now — It's Free
+            <svg class="h-5 w-5 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+            </svg>
+          </a>
+          <a href="/contact"
+             class="inline-flex items-center justify-center gap-2 px-10 py-4.5 rounded-2xl font-bold text-base border transition-all hover:-translate-y-1"
+             style="border-color:rgba(255,255,255,.2); color:rgba(255,255,255,.8); background:rgba(255,255,255,.06); padding-top:1.1rem; padding-bottom:1.1rem;">
+            Ask a Question
+          </a>
+        </div>
+
+        <p class="mt-8 text-xs text-white/25">
+          Applications reviewed on a rolling basis · Early applicants are prioritised
+        </p>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock content %}
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     SCRIPTS
+═══════════════════════════════════════════════════════════ -->
+{% block extra_js %}
+<script>
+/* ─── INTERSECTION OBSERVER — REVEAL ───────────────────────── */
+const revealEls = document.querySelectorAll('.reveal, .reveal-l, .reveal-r');
+const io = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+revealEls.forEach(el => io.observe(el));
+
+
+/* ─── FLIP COUNTDOWN ───────────────────────────────────────── */
+const deadline = new Date();
+deadline.setMonth(deadline.getMonth() + 3);
+
+const pad = n => String(n).padStart(2, '0');
+const prevVals = { days: null, hours: null, mins: null, secs: null };
+
+function flip(cardId, numId, val) {
+  const padded = pad(val);
+  const numEl  = document.getElementById(numId);
+  const card   = document.getElementById(cardId);
+  if (numEl.textContent !== padded) {
+    card.classList.remove('flipping');
+    void card.offsetWidth; // reflow
+    card.classList.add('flipping');
+    numEl.textContent = padded;
+  }
+}
+
+function tick() {
+  const diff = deadline - Date.now();
+  if (diff <= 0) { ['days','hours','mins','secs'].forEach(k => document.getElementById('cd-'+k).textContent = '00'); return; }
+  flip('fc-days',  'cd-days',  Math.floor(diff / 86400000));
+  flip('fc-hours', 'cd-hours', Math.floor((diff % 86400000) / 3600000));
+  flip('fc-mins',  'cd-mins',  Math.floor((diff % 3600000)  / 60000));
+  flip('fc-secs',  'cd-secs',  Math.floor((diff % 60000)    / 1000));
+}
+tick();
+setInterval(tick, 1000);
+
+
+/* ─── ANIMATED COUNTERS ────────────────────────────────────── */
+function animateCounter(el) {
+  const target = parseInt(el.dataset.target);
+  const suffix = el.dataset.suffix || '';
+  const duration = 1800;
+  const start = performance.now();
+  const from = 0;
+
+  function step(now) {
+    const elapsed = now - start;
+    const progress = Math.min(elapsed / duration, 1);
+    const ease = 1 - Math.pow(1 - progress, 4);
+    const current = Math.round(from + (target - from) * ease);
+    el.textContent = current + suffix;
+    if (progress < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+const counterIo = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting && e.target.dataset.target) {
+      animateCounter(e.target);
+      counterIo.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.5 });
+document.querySelectorAll('[data-target]').forEach(el => counterIo.observe(el));
+
+
+/* ─── MAGNETIC CARD EFFECT ─────────────────────────────────── */
+document.querySelectorAll('.mag-card').forEach(card => {
+  card.addEventListener('mousemove', e => {
+    const r = card.getBoundingClientRect();
+    const x = (e.clientX - r.left - r.width  / 2) / r.width  * 8;
+    const y = (e.clientY - r.top  - r.height / 2) / r.height * 8;
+    card.style.transform = `perspective(600px) rotateY(${x}deg) rotateX(${-y}deg) translateY(-4px)`;
+  });
+  card.addEventListener('mouseleave', () => {
+    card.style.transform = 'perspective(600px) rotateY(0deg) rotateX(0deg) translateY(0px)';
+    card.style.transition = 'transform .5s cubic-bezier(.16,1,.3,1)';
+  });
+  card.addEventListener('mouseenter', () => {
+    card.style.transition = 'transform .1s ease';
+  });
+});
+
+
+/* ─── STEP CARD BOTTOM ACCENT ON HOVER ─────────────────────── */
+document.querySelectorAll('[class*="rounded-3xl"]').forEach(card => {
+  const accent = card.querySelector('[style*="opacity: 0"]');
+  if (!accent) return;
+  card.addEventListener('mouseenter', () => accent.style.opacity = '1');
+  card.addEventListener('mouseleave', () => accent.style.opacity = '0');
+});
+</script>
+{% endblock extra_js %}

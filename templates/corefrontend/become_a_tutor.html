@@ -1,0 +1,586 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block content %}
+<main id="main">
+    <!-- Hero Section -->
+    <section class="relative overflow-hidden bg-white">
+        <div class="absolute inset-0 bg-grid opacity-40"></div>
+        <div
+            class="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-gradient-to-r from-techxagon-red/25 to-techxagon-orange/25 blur-2xl">
+        </div>
+        <div
+            class="absolute -bottom-28 -left-28 h-80 w-80 rounded-full bg-gradient-to-r from-techxagon-orange/25 to-techxagon-red/25 blur-2xl">
+        </div>
+
+        <div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14 sm:py-20">
+            <div class="grid lg:grid-cols-12 gap-10 items-center">
+                <div class="lg:col-span-7">
+                    <div
+                        class="inline-flex items-center gap-2 rounded-full border border-techxagon-dark/10 bg-white px-3 py-1 text-xs sm:text-sm shadow-soft">
+                        <span class="inline-block h-2 w-2 rounded-full bg-techxagon-orange"></span>
+                        <span class="font-medium">Shape the future of tech education</span>
+                    </div>
+
+                    <h1 class="mt-5 text-4xl sm:text-5xl font-extrabold tracking-tight">
+                        Become a
+                        <span
+                            class="text-transparent bg-clip-text bg-gradient-to-r from-techxagon-red to-techxagon-orange">
+                            Tech Tutor
+                        </span>
+                        at Techxagon
+                    </h1>
+
+                    <p class="mt-4 text-base sm:text-lg text-techxagon-dark/75 max-w-2xl">
+                        Share your expertise with passionate secondary school students across Africa. Make an impact
+                        through hands-on teaching in coding, robotics, cybersecurity, UI/UX, web development, and
+                        data science.
+                    </p>
+
+                    <div class="mt-7 flex flex-col sm:flex-row gap-3">
+                        <a href="#application"
+                            class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange shadow-soft hover:opacity-95">
+                            Apply Now
+                        </a>
+                        <a href="#benefits"
+                            class="inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                            Learn More
+                        </a>
+                    </div>
+
+                    <!-- Quick stats -->
+                    <div class="mt-8 grid grid-cols-2 gap-4 max-w-md">
+                        <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft">
+                            <p class="text-xl sm:text-2xl font-bold text-techxagon-red">500+</p>
+                            <p class="text-xs text-techxagon-dark/60 mt-1">Active Students</p>
+                        </div>
+                        <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft">
+                            <p class="text-xl sm:text-2xl font-bold text-techxagon-orange">20+</p>
+                            <p class="text-xs text-techxagon-dark/60 mt-1">Schools Partnered</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hero visual -->
+                <div class="lg:col-span-5 relative flex items-center justify-center">
+                    <img src="{% static 'assets/tutor-hero2.png' %}" alt="Techxagon tutor teaching students"
+                        class="w-full max-w-lg object-contain" />
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Why Join Section -->
+    <section id="benefits" class="py-16 sm:py-20 bg-white">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-12">
+                <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Why Join Our Tutor Community</h2>
+                <p class="mt-4 text-lg text-techxagon-dark/70">
+                    Enjoy flexibility, competitive compensation, and the satisfaction of directly impacting students'
+                    futures.
+                </p>
+            </div>
+
+            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Benefit 1 -->
+                <article
+                    class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition">
+                    <div class="w-12 h-12 rounded-2xl bg-techxagon-red/10 flex items-center justify-center mb-4">
+                        <svg class="w-6 h-6 text-techxagon-red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold">Flexible Schedule</h3>
+                    <p class="mt-2 text-sm text-techxagon-dark/70">
+                        Choose your own hours and teach at your own pace. Work full-time or part-time.
+                    </p>
+                </article>
+
+                <!-- Benefit 2 -->
+                <article
+                    class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition">
+                    <div class="w-12 h-12 rounded-2xl bg-techxagon-orange/10 flex items-center justify-center mb-4">
+                        <svg class="w-6 h-6 text-techxagon-orange" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold">Competitive Pay</h3>
+                    <p class="mt-2 text-sm text-techxagon-dark/70">
+                        Earn based on experience and expertise. Bonus opportunities for exceptional performance.
+                    </p>
+                </article>
+
+                <!-- Benefit 3 -->
+                <article
+                    class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition">
+                    <div class="w-12 h-12 rounded-2xl bg-techxagon-red/10 flex items-center justify-center mb-4">
+                        <svg class="w-6 h-6 text-techxagon-red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold">Make an Impact</h3>
+                    <p class="mt-2 text-sm text-techxagon-dark/70">
+                        Shape students' futures through hands-on, real-world tech education and mentorship.
+                    </p>
+                </article>
+
+                <!-- Benefit 4 -->
+                <article
+                    class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition">
+                    <div class="w-12 h-12 rounded-2xl bg-techxagon-orange/10 flex items-center justify-center mb-4">
+                        <svg class="w-6 h-6 text-techxagon-orange" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold">Professional Growth</h3>
+                    <p class="mt-2 text-sm text-techxagon-dark/70">
+                        Access training resources, collaborate with other tutors, and develop your teaching skills.
+                    </p>
+                </article>
+
+                <!-- Benefit 5 -->
+                <article
+                    class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition">
+                    <div class="w-12 h-12 rounded-2xl bg-techxagon-red/10 flex items-center justify-center mb-4">
+                        <svg class="w-6 h-6 text-techxagon-red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 4.354a4 4 0 110 5.292M15 12H9m6 0H9m6 0H9m6 0H9M9 8h6m0 0h6m-6 0H3" />
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold">Proven Curriculum</h3>
+                    <p class="mt-2 text-sm text-techxagon-dark/70">
+                        Use our vetted, project-based curriculum across coding, robotics, cybersecurity, and more.
+                    </p>
+                </article>
+
+                <!-- Benefit 6 -->
+                <article
+                    class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition">
+                    <div class="w-12 h-12 rounded-2xl bg-techxagon-orange/10 flex items-center justify-center mb-4">
+                        <svg class="w-6 h-6 text-techxagon-orange" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.172l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5-4a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold">Global Community</h3>
+                    <p class="mt-2 text-sm text-techxagon-dark/70">
+                        Connect with educators across Africa and contribute to transforming tech education.
+                    </p>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <!-- Requirements Section -->
+    <section class="py-16 sm:py-20 bg-techxagon-dark/5">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="grid lg:grid-cols-2 gap-12 items-center">
+                <!-- Content -->
+                <div>
+                    <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">What We're Looking For</h2>
+                    <p class="mt-4 text-lg text-techxagon-dark/70">
+                        You don't need formal teaching credentials—just passion for tech and the ability to explain
+                        concepts clearly.
+                    </p>
+
+                    <div class="mt-8 space-y-4">
+                        <!-- Requirement 1 -->
+                        <div class="flex gap-4">
+                            <div
+                                class="flex-shrink-0 w-6 h-6 rounded-full bg-techxagon-orange text-white flex items-center justify-center font-bold text-sm">
+                                ✓
+                            </div>
+                            <div>
+                                <h3 class="font-semibold">Tech Expertise</h3>
+                                <p class="text-sm text-techxagon-dark/70">Strong knowledge in at least one of our focus
+                                    areas: coding, robotics, cybersecurity, UI/UX, web dev, or data science.</p>
+                            </div>
+                        </div>
+
+                        <!-- Requirement 2 -->
+                        <div class="flex gap-4">
+                            <div
+                                class="flex-shrink-0 w-6 h-6 rounded-full bg-techxagon-orange text-white flex items-center justify-center font-bold text-sm">
+                                ✓
+                            </div>
+                            <div>
+                                <h3 class="font-semibold">Communication Skills</h3>
+                                <p class="text-sm text-techxagon-dark/70">Ability to explain complex concepts in simple,
+                                    engaging ways suited for secondary school students.</p>
+                            </div>
+                        </div>
+
+                        <!-- Requirement 3 -->
+                        <div class="flex gap-4">
+                            <div
+                                class="flex-shrink-0 w-6 h-6 rounded-full bg-techxagon-orange text-white flex items-center justify-center font-bold text-sm">
+                                ✓
+                            </div>
+                            <div>
+                                <h3 class="font-semibold">Passion for Teaching</h3>
+                                <p class="text-sm text-techxagon-dark/70">Genuine enthusiasm for mentoring and inspiring
+                                    students to learn and grow.</p>
+                            </div>
+                        </div>
+
+                        <!-- Requirement 4 -->
+                        <div class="flex gap-4">
+                            <div
+                                class="flex-shrink-0 w-6 h-6 rounded-full bg-techxagon-orange text-white flex items-center justify-center font-bold text-sm">
+                                ✓
+                            </div>
+                            <div>
+                                <h3 class="font-semibold">Reliability & Accountability</h3>
+                                <p class="text-sm text-techxagon-dark/70">Consistent attendance and commitment to
+                                    student learning outcomes.</p>
+                            </div>
+                        </div>
+
+                        <!-- Requirement 5 -->
+                        <div class="flex gap-4">
+                            <div
+                                class="flex-shrink-0 w-6 h-6 rounded-full bg-techxagon-orange text-white flex items-center justify-center font-bold text-sm">
+                                ✓
+                            </div>
+                            <div>
+                                <h3 class="font-semibold">Adaptability</h3>
+                                <p class="text-sm text-techxagon-dark/70">Willingness to use our curriculum framework
+                                    while bringing your unique teaching style.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visual -->
+                <div class="flex items-center justify-center">
+                    <img src="{% static 'assets/tech-tutor.jpg' %}" alt="Ready to Teach at Techxagon Academy"
+                        class="w-full max-w-lg object-contain" />
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Application Process -->
+    <section class="py-16 sm:py-20 bg-white">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-12">
+                <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Our Application Process</h2>
+                <p class="mt-4 text-lg text-techxagon-dark/70">
+                    Simple, straightforward, and quick. Get started in just a few steps.
+                </p>
+            </div>
+
+            <div class="grid md:grid-cols-4 gap-6">
+                <!-- Step 1 -->
+                <div class="relative">
+                    <div class="rounded-2xl border border-techxagon-dark/10 bg-white shadow-soft p-6 text-center">
+                        <div
+                            class="w-12 h-12 rounded-full bg-gradient-to-r from-techxagon-red to-techxagon-orange text-white flex items-center justify-center font-bold text-lg mx-auto mb-4">
+                            1
+                        </div>
+                        <h3 class="font-bold text-lg">Submit Application</h3>
+                        <p class="text-sm text-techxagon-dark/70 mt-2">Complete our brief tutor application form with
+                            your background and expertise.</p>
+                    </div>
+                    <div
+                        class="hidden md:block absolute top-1/2 -right-3 transform -translate-y-1/2 w-6 h-0.5 bg-techxagon-orange/30">
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="relative">
+                    <div class="rounded-2xl border border-techxagon-dark/10 bg-white shadow-soft p-6 text-center">
+                        <div
+                            class="w-12 h-12 rounded-full bg-gradient-to-r from-techxagon-red to-techxagon-orange text-white flex items-center justify-center font-bold text-lg mx-auto mb-4">
+                            2
+                        </div>
+                        <h3 class="font-bold text-lg">Initial Review</h3>
+                        <p class="text-sm text-techxagon-dark/70 mt-2">Our team reviews your application and verifies
+                            your qualifications and background.</p>
+                    </div>
+                    <div
+                        class="hidden md:block absolute top-1/2 -right-3 transform -translate-y-1/2 w-6 h-0.5 bg-techxagon-orange/30">
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="relative">
+                    <div class="rounded-2xl border border-techxagon-dark/10 bg-white shadow-soft p-6 text-center">
+                        <div
+                            class="w-12 h-12 rounded-full bg-gradient-to-r from-techxagon-red to-techxagon-orange text-white flex items-center justify-center font-bold text-lg mx-auto mb-4">
+                            3
+                        </div>
+                        <h3 class="font-bold text-lg">Interview</h3>
+                        <p class="text-sm text-techxagon-dark/70 mt-2">Quick conversation with our team to discuss your
+                            teaching approach and goals.</p>
+                    </div>
+                    <div
+                        class="hidden md:block absolute top-1/2 -right-3 transform -translate-y-1/2 w-6 h-0.5 bg-techxagon-orange/30">
+                    </div>
+                </div>
+
+                <!-- Step 4 -->
+                <div class="relative">
+                    <div class="rounded-2xl border border-techxagon-dark/10 bg-white shadow-soft p-6 text-center">
+                        <div
+                            class="w-12 h-12 rounded-full bg-gradient-to-r from-techxagon-red to-techxagon-orange text-white flex items-center justify-center font-bold text-lg mx-auto mb-4">
+                            4
+                        </div>
+                        <h3 class="font-bold text-lg">Onboarding</h3>
+                        <p class="text-sm text-techxagon-dark/70 mt-2">Join our team, access curriculum, and start
+                            teaching with full support.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-12 text-center">
+                <p class="text-techxagon-dark/70">
+                    Typical timeline: <span class="font-semibold">1-2 weeks</span> from application to starting
+                    teaching.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Application Form Section -->
+    <section id="application" class="py-16 sm:py-20 bg-techxagon-dark/5">
+        <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+            <div class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft p-8 sm:p-12">
+                <h2 class="text-3xl font-extrabold mb-2">Apply as a Tutor</h2>
+                <p class="text-techxagon-dark/70 mb-8">Fill out the form below to get started on your journey with
+                    Techxagon Academy.</p>
+                <form id="tutorForm" class="space-y-6" action="{% url 'corefrontend:become_a_tutor' %}" method="POST">
+                    {% csrf_token %}
+
+                    {% if error %}
+                    <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-medium">
+                        {{ error }}
+                    </div>
+                    {% endif %}
+
+                    <!-- Email -->
+                    <div>
+                        <label for="email" class="block text-sm font-semibold mb-2">Email Address *</label>
+                        <input type="email" id="email" name="email" required value="{{ prev_email|default:'' }}"
+                            class="w-full px-4 py-3 rounded-xl border border-techxagon-dark/15 focus:border-techxagon-orange focus:outline-none focus:ring-1 focus:ring-techxagon-orange/50"
+                            placeholder="your@email.com" />
+                    </div>
+
+                    <!-- Position Dropdown — only Robotics is open -->
+                    <div>
+                        <label for="position" class="block text-sm font-semibold mb-2">Position Applying For *</label>
+                        <select id="position" name="position" required
+                            class="w-full px-4 py-3 rounded-xl border border-techxagon-dark/15 focus:border-techxagon-orange focus:outline-none focus:ring-1 focus:ring-techxagon-orange/50">
+                            <option value="">Select a position...</option>
+                            <option value="robotics" {% if prev_position == 'robotics' %}selected{% endif %}>
+                                Robotics &amp; AI Tutor
+                            </option>
+                            <option disabled>── Coming Soon ──</option>
+                            <option disabled>Coding &amp; Programming Tutor</option>
+                            <option disabled>Cybersecurity Tutor</option>
+                            <option disabled>UI/UX Design Tutor</option>
+                            <option disabled>Web Development Tutor</option>
+                            <option disabled>Data Science Tutor</option>
+                            <option disabled>STEM Education Tutor</option>
+                        </select>
+                        <p class="mt-1.5 text-xs text-techxagon-dark/50">
+                            Only <span class="font-semibold text-techxagon-orange">Robotics &amp; AI</span> applications
+                            are open at this time.
+                        </p>
+                    </div>
+
+                    <!-- Checkbox for Terms -->
+                    <div class="flex items-start gap-3">
+                        <input type="checkbox" id="terms" name="terms" required
+                            class="mt-1 w-4 h-4 rounded border border-techxagon-dark/15 text-techxagon-orange focus:ring-1 focus:ring-techxagon-orange/50" />
+                        <label for="terms" class="text-sm text-techxagon-dark/70">
+                            I agree to the <a href="#" class="text-techxagon-orange font-semibold hover:underline">terms
+                                and conditions</a> and <a href="#"
+                                class="text-techxagon-orange font-semibold hover:underline">privacy policy</a>
+                        </label>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit"
+                        class="w-full py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95 shadow-soft transition">
+                        Start Application
+                    </button>
+                </form>
+
+                <p class="text-xs text-techxagon-dark/60 text-center mt-6">
+                    We're excited to review your application. You'll hear from us within 2-3 business days.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ Section -->
+    <section class="py-16 sm:py-20 bg-white">
+        <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Frequently Asked Questions</h2>
+            </div>
+
+            <div class="space-y-4">
+                <!-- FAQ 1 -->
+                <details
+                    class="group rounded-2xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition cursor-pointer">
+                    <summary class="flex items-center justify-between font-semibold text-lg">
+                        <span>Do I need formal teaching credentials?</span>
+                        <svg class="w-5 h-5 transition group-open:rotate-180" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                        </svg>
+                    </summary>
+                    <p class="text-techxagon-dark/70 mt-4">
+                        No, formal teaching credentials are not required. What matters is your expertise in your chosen
+                        field and your ability to communicate complex concepts clearly to secondary school students.
+                    </p>
+                </details>
+
+                <!-- FAQ 2 -->
+                <details
+                    class="group rounded-2xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition cursor-pointer">
+                    <summary class="flex items-center justify-between font-semibold text-lg">
+                        <span>How much does a tutor earn?</span>
+                        <svg class="w-5 h-5 transition group-open:rotate-180" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                        </svg>
+                    </summary>
+                    <p class="text-techxagon-dark/70 mt-4">
+                        Compensation is based on your experience level, expertise, and availability. Full-time tutors
+                        earn competitive rates with opportunities for bonuses based on student performance. Contact us
+                        for detailed compensation information.
+                    </p>
+                </details>
+
+                <!-- FAQ 3 -->
+                <details
+                    class="group rounded-2xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition cursor-pointer">
+                    <summary class="flex items-center justify-between font-semibold text-lg">
+                        <span>Can I teach multiple specializations?</span>
+                        <svg class="w-5 h-5 transition group-open:rotate-180" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                        </svg>
+                    </summary>
+                    <p class="text-techxagon-dark/70 mt-4">
+                        Absolutely! If you have expertise in multiple areas, you can specialize in all of them. This
+                        gives you more teaching opportunities and helps us better serve our student population.
+                    </p>
+                </details>
+
+                <!-- FAQ 4 -->
+                <details
+                    class="group rounded-2xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition cursor-pointer">
+                    <summary class="flex items-center justify-between font-semibold text-lg">
+                        <span>What kind of support do tutors receive?</span>
+                        <svg class="w-5 h-5 transition group-open:rotate-180" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                        </svg>
+                    </summary>
+                    <p class="text-techxagon-dark/70 mt-4">
+                        We provide comprehensive support including curriculum resources, training materials, a dedicated
+                        support team, access to other tutors, and regular feedback on your teaching performance.
+                    </p>
+                </details>
+
+                <!-- FAQ 5 -->
+                <details
+                    class="group rounded-2xl border border-techxagon-dark/10 bg-white shadow-soft p-6 hover:shadow-md transition cursor-pointer">
+                    <summary class="flex items-center justify-between font-semibold text-lg">
+                        <span>What's the selection process timeline?</span>
+                        <svg class="w-5 h-5 transition group-open:rotate-180" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                        </svg>
+                    </summary>
+                    <p class="text-techxagon-dark/70 mt-4">
+                        Our selection process typically takes 1-2 weeks from initial application to onboarding. We
+                        review applications regularly and aim to get back to candidates within 2-3 business days.
+                    </p>
+                </details>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="py-16 sm:py-20 bg-white">
+        <div class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+            <div
+                class="rounded-3xl border border-techxagon-dark/10 bg-gradient-to-br from-techxagon-red/5 to-techxagon-orange/5 shadow-soft p-8 sm:p-12 text-center">
+                <h2 class="text-3xl font-extrabold mb-4">Ready to Make a Difference?</h2>
+                <p class="text-lg text-techxagon-dark/70 mb-8 max-w-2xl mx-auto">
+                    Join Techxagon Academy and become part of a movement transforming tech education across Africa.
+                    Apply now and start your journey as a tutor.
+                </p>
+                <a href="#application"
+                    class="inline-flex items-center justify-center px-8 py-4 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95 shadow-soft">
+                    Start Your Application
+                </a>
+            </div>
+        </div>
+    </section>
+</main>
+
+
+
+
+{% endblock content %}
+
+
+{% block extra_js %}
+<script>
+    // Mobile menu toggle
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const mobileMenu = document.getElementById('mobileMenu');
+
+    mobileMenuBtn.addEventListener('click', () => {
+        mobileMenu.classList.toggle('hidden');
+        mobileMenuBtn.setAttribute('aria-expanded',
+            mobileMenuBtn.getAttribute('aria-expanded') === 'false' ? 'true' : 'false');
+    });
+
+    // Close menu when a link is clicked
+    document.querySelectorAll('#mobileMenu a').forEach(link => {
+        link.addEventListener('click', () => {
+            mobileMenu.classList.add('hidden');
+            mobileMenuBtn.setAttribute('aria-expanded', 'false');
+        });
+    });
+
+    // Form submission
+    const tutorForm = document.getElementById('tutorForm');
+    tutorForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const formData = new FormData(tutorForm);
+        console.log('Form submitted with data:', Object.fromEntries(formData));
+        alert('Thank you for your application! We\'ll be in touch within 2-3 business days.');
+        tutorForm.reset();
+    });
+
+    // Smooth scroll to application section
+    document.querySelectorAll('a[href="#application"]').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            document.getElementById('application').scrollIntoView({ behavior: 'smooth' });
+        });
+    });
+</script>
+{% endblock extra_js %}
+</body>
+
+</html>

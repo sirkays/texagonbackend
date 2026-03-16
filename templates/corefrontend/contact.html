@@ -1,0 +1,522 @@
+{% extends 'base/base.html' %}
+{% load static %}
+
+{% block content %}
+<main id="main">
+    <!-- Hero -->
+    <section class="relative overflow-hidden bg-white">
+        <div class="absolute inset-0 bg-grid opacity-40"></div>
+        <div
+            class="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-gradient-to-r from-techxagon-red/25 to-techxagon-orange/25 blur-2xl">
+        </div>
+        <div
+            class="absolute -bottom-28 -left-28 h-80 w-80 rounded-full bg-gradient-to-r from-techxagon-orange/25 to-techxagon-red/25 blur-2xl">
+        </div>
+
+        <div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14 sm:py-20">
+            <div class="grid lg:grid-cols-12 gap-10 items-center">
+                <div class="lg:col-span-7">
+                    <div
+                        class="inline-flex items-center gap-2 rounded-full border border-techxagon-dark/10 bg-white px-3 py-1 text-xs sm:text-sm shadow-soft">
+                        <span class="inline-block h-2 w-2 rounded-full bg-techxagon-orange"></span>
+                        <span class="font-medium">We’d love to hear from you</span>
+                    </div>
+
+                    <h1 class="mt-5 text-4xl sm:text-5xl font-extrabold tracking-tight">
+                        Let’s start a
+                        <span
+                            class="text-transparent bg-clip-text bg-gradient-to-r from-techxagon-red to-techxagon-orange">
+                            conversation
+                        </span>
+                    </h1>
+
+                    <p class="mt-4 text-base sm:text-lg text-techxagon-dark/75 max-w-2xl">
+                        Whether you want to partner with Techxagon Academy, enroll a school, become a tutor,
+                        or ask about our programs, our team is ready to help.
+                    </p>
+
+                    <div class="mt-7 flex flex-col sm:flex-row gap-3">
+                        <a href="#contact-form"
+                            class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange shadow-soft hover:opacity-95">
+                            Send us a message
+                        </a>
+                    </div>
+
+                    <div class="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-xl">
+                        <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft">
+                            <p class="text-sm font-semibold">Quick Response</p>
+                            <p class="text-xs text-techxagon-dark/60 mt-1">Fast support from our team</p>
+                        </div>
+                        <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft">
+                            <p class="text-sm font-semibold">School Support</p>
+                            <p class="text-xs text-techxagon-dark/60 mt-1">Programs, partnerships & rollout</p>
+                        </div>
+                        <div
+                            class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft col-span-2 sm:col-span-1">
+                            <p class="text-sm font-semibold">Tutor Enquiries</p>
+                            <p class="text-xs text-techxagon-dark/60 mt-1">Join our growing network</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-5">
+                    <div
+                        class="rounded-3xl border border-techxagon-dark/10 bg-gradient-to-r from-techxagon-red to-techxagon-orange p-[1px] shadow-soft">
+                        <div class="rounded-3xl bg-white p-6 sm:p-8">
+                            <p class="text-sm font-semibold">Contact information</p>
+
+                            <div class="mt-6 space-y-5">
+                                <div class="flex items-start gap-4">
+                                    <div class="h-11 w-11 rounded-2xl bg-techxagon-red/10 grid place-items-center">
+                                        <svg class="h-5 w-5 text-techxagon-red" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M4 4h16v16H4z"></path>
+                                            <path d="M4 7l8 6 8-6"></path>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p class="font-semibold">Email</p>
+                                        <p class="text-sm text-techxagon-dark/70">info@techxagonacademy.com</p>
+                                    </div>
+                                </div>
+
+                                <div class="flex items-start gap-4">
+                                    <div class="h-11 w-11 rounded-2xl bg-techxagon-orange/10 grid place-items-center">
+                                        <svg class="h-5 w-5 text-techxagon-orange" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path
+                                                d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.86 19.86 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.62a2 2 0 0 1-.45 2.11L8 9.91a16 16 0 0 0 6.09 6.09l1.46-1.28a2 2 0 0 1 2.11-.45c.84.29 1.72.5 2.62.62A2 2 0 0 1 22 16.92z">
+                                            </path>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p class="font-semibold">Phone</p>
+                                        <p class="text-sm text-techxagon-dark/70">+234-000-000-0000</p>
+                                    </div>
+                                </div>
+
+                                <div class="flex items-start gap-4">
+                                    <div class="h-11 w-11 rounded-2xl bg-techxagon-deep/10 grid place-items-center">
+                                        <svg class="h-5 w-5 text-techxagon-deep" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"></path>
+                                            <circle cx="12" cy="10" r="3"></circle>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p class="font-semibold">Office</p>
+                                        <p class="text-sm text-techxagon-dark/70">Lagos, Nigeria</p>
+                                    </div>
+                                </div>
+
+                                <div class="flex items-start gap-4">
+                                    <div class="h-11 w-11 rounded-2xl bg-techxagon-dark/10 grid place-items-center">
+                                        <svg class="h-5 w-5 text-techxagon-dark" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M8 2v4"></path>
+                                            <path d="M16 2v4"></path>
+                                            <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                                            <path d="M3 10h18"></path>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p class="font-semibold">Availability</p>
+                                        <p class="text-sm text-techxagon-dark/70">Monday – Friday • 9:00am – 5:00pm</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-6 rounded-2xl bg-techxagon-dark/5 p-5">
+                                <p class="font-semibold">Best for</p>
+                                <p class="text-sm text-techxagon-dark/70 mt-1">
+                                    School partnerships, program enquiries, tutor applications, community projects,
+                                    and collaboration discussions.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </section>
+
+    <!-- Contact Form + Enquiries -->
+    <section id="contact-form" class="py-16 sm:py-20">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="grid lg:grid-cols-12 gap-10 items-start">
+                <div class="lg:col-span-7">
+                    <div class="max-w-2xl">
+                        <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Send us a message</h2>
+                        <p class="mt-3 text-techxagon-dark/70">
+                            Fill out the form below and a member of our team will get back to you as soon as possible.
+                        </p>
+                    </div>
+
+                    <div class="mt-8 rounded-3xl border border-techxagon-dark/10 bg-white p-6 sm:p-8 shadow-soft">
+                        <form method="post" action="" class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                            {% csrf_token %}
+
+                            <div>
+                                <label for="full_name" class="block text-sm font-semibold mb-2">Full Name</label>
+                                <input id="full_name" name="full_name" type="text" placeholder="Your full name"
+                                    class="w-full rounded-xl border border-techxagon-dark/15 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-techxagon-orange" />
+                            </div>
+
+                            <div>
+                                <label for="email" class="block text-sm font-semibold mb-2">Email Address</label>
+                                <input id="email" name="email" type="email" placeholder="you@example.com"
+                                    class="w-full rounded-xl border border-techxagon-dark/15 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-techxagon-orange" />
+                            </div>
+
+                            <div>
+                                <label for="phone" class="block text-sm font-semibold mb-2">Phone Number</label>
+                                <input id="phone" name="phone" type="text" placeholder="+234..."
+                                    class="w-full rounded-xl border border-techxagon-dark/15 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-techxagon-orange" />
+                            </div>
+
+                            <div>
+                                <label for="enquiry_type" class="block text-sm font-semibold mb-2">Enquiry Type</label>
+                                <select id="enquiry_type" name="enquiry_type"
+                                    class="w-full rounded-xl border border-techxagon-dark/15 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-techxagon-orange">
+                                    <option value="">Select an option</option>
+                                    <option value="school-partnership">School Partnership</option>
+                                    <option value="program-enquiry">Program Enquiry</option>
+                                    <option value="become-a-tutor">Become a Tutor</option>
+                                    <option value="community-project">Community Project</option>
+                                    <option value="general-enquiry">General Enquiry</option>
+                                </select>
+                            </div>
+
+                            <div class="sm:col-span-2">
+                                <label for="school_name" class="block text-sm font-semibold mb-2">School / Organisation Name</label>
+                                <input id="school_name" name="school_name" type="text"
+                                    placeholder="School or organisation name"
+                                    class="w-full rounded-xl border border-techxagon-dark/15 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-techxagon-orange" />
+                            </div>
+
+                            <div class="sm:col-span-2">
+                                <label for="message" class="block text-sm font-semibold mb-2">Message</label>
+                                <textarea id="message" name="message" rows="6"
+                                    placeholder="Tell us about your enquiry..."
+                                    class="w-full rounded-xl border border-techxagon-dark/15 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-techxagon-orange"></textarea>
+                            </div>
+
+                            <div class="sm:col-span-2 flex flex-col sm:flex-row gap-3">
+                                <button type="submit"
+                                    class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange shadow-soft hover:opacity-95">
+                                    Send Message
+                                </button>
+                                <a href="mailto:info@techxagonacademy.com"
+                                    class="inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                                    Email Directly
+                                </a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-5">
+                    <div class="rounded-3xl border border-techxagon-dark/10 bg-white p-6 sm:p-8 shadow-soft">
+                        <p class="text-sm font-semibold">Common enquiries</p>
+
+                        <div class="mt-5 space-y-4">
+                            <div class="rounded-2xl bg-techxagon-dark/5 p-5">
+                                <p class="font-semibold">School Partnership</p>
+                                <p class="mt-1 text-sm text-techxagon-dark/70">
+                                    Want to bring Techxagon programs into your school timetable? Let’s discuss the best
+                                    partnership model.
+                                </p>
+                            </div>
+
+                            <div class="rounded-2xl bg-techxagon-dark/5 p-5">
+                                <p class="font-semibold">Become a Tutor</p>
+                                <p class="mt-1 text-sm text-techxagon-dark/70">
+                                    Interested in teaching coding, robotics, UI/UX, web development, cybersecurity or
+                                    data? Reach out to join our tutor network.
+                                </p>
+                            </div>
+
+                            <div class="rounded-2xl bg-techxagon-dark/5 p-5">
+                                <p class="font-semibold">Programs & Enrollment</p>
+                                <p class="mt-1 text-sm text-techxagon-dark/70">
+                                    Need more information on our learning tracks, student suitability, or program
+                                    delivery options? We’re happy to help.
+                                </p>
+                            </div>
+
+                            <div class="rounded-2xl bg-techxagon-dark/5 p-5">
+                                <p class="font-semibold">Community / Government Projects</p>
+                                <p class="mt-1 text-sm text-techxagon-dark/70">
+                                    We collaborate on innovation, education outreach, and strategic technology
+                                    initiatives. Let’s discuss your idea.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        class="mt-6 rounded-3xl border border-techxagon-dark/10 bg-gradient-to-r from-techxagon-red to-techxagon-orange p-[1px] shadow-soft">
+                        <div class="rounded-3xl bg-white p-6">
+                            <p class="text-sm font-semibold">Need a faster route?</p>
+                            <p class="mt-2 text-sm text-techxagon-dark/70">
+                                For urgent school or partnership enquiries, use the Apply / Partner page so our team can
+                                process your request faster.
+                            </p>
+                            <a href="/apply-partner"
+                                class="mt-4 inline-flex items-center text-sm font-semibold text-techxagon-red hover:opacity-80">
+                                Go to Apply / Partner →
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Map / Office / Social -->
+    <section class="py-16 sm:py-20 bg-white border-y border-techxagon-dark/10">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="grid lg:grid-cols-12 gap-10 items-start">
+                <div class="lg:col-span-6">
+                    <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Visit or connect with us</h2>
+                    <p class="mt-3 text-techxagon-dark/70">
+                        We are committed to making communication easy for schools, parents, students, and partners.
+                    </p>
+
+                    <div class="mt-8 grid sm:grid-cols-2 gap-4">
+                        <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-5 shadow-soft">
+                            <p class="font-semibold">Office Address</p>
+                            <p class="mt-2 text-sm text-techxagon-dark/70">
+                                Lagos, Nigeria
+                            </p>
+                        </div>
+
+                        <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-5 shadow-soft">
+                            <p class="font-semibold">Support Email</p>
+                            <p class="mt-2 text-sm text-techxagon-dark/70">
+                                info@techxagonacademy.com
+                            </p>
+                        </div>
+
+                        <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-5 shadow-soft">
+                            <p class="font-semibold">Phone Line</p>
+                            <p class="mt-2 text-sm text-techxagon-dark/70">
+                                +234-000-000-0000
+                            </p>
+                        </div>
+
+                        <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-5 shadow-soft">
+                            <p class="font-semibold">Working Hours</p>
+                            <p class="mt-2 text-sm text-techxagon-dark/70">
+                                Monday – Friday <br> 9:00am – 5:00pm
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="mt-8">
+                        <p class="text-sm font-semibold">Follow us</p>
+                        <div class="mt-3 flex flex-wrap gap-3">
+                            <a href="#" class="inline-flex items-center justify-center px-4 py-2 rounded-xl border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5 text-sm font-medium">Instagram</a>
+                            <a href="#" class="inline-flex items-center justify-center px-4 py-2 rounded-xl border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5 text-sm font-medium">Facebook</a>
+                            <a href="#" class="inline-flex items-center justify-center px-4 py-2 rounded-xl border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5 text-sm font-medium">X (Twitter)</a>
+                            <a href="#" class="inline-flex items-center justify-center px-4 py-2 rounded-xl border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5 text-sm font-medium">LinkedIn</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-6">
+                    <div class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden">
+                        <div class="h-[380px] bg-gradient-to-r from-techxagon-red/10 to-techxagon-orange/10 grid place-items-center">
+                            <div class="text-center px-6">
+                                <div class="mx-auto h-16 w-16 rounded-2xl bg-white shadow-soft grid place-items-center">
+                                    <svg class="h-8 w-8 text-techxagon-red" viewBox="0 0 24 24" fill="none"
+                                        stroke="currentColor" stroke-width="2">
+                                        <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 1 1 18 0z"></path>
+                                        <circle cx="12" cy="10" r="3"></circle>
+                                    </svg>
+                                </div>
+                                <p class="mt-4 text-lg font-bold">Map / Location Placeholder</p>
+                                <p class="mt-2 text-sm text-techxagon-dark/70 max-w-md">
+                                    Embed your Google Map or location iframe here when ready.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </section>
+
+    <!-- FAQ -->
+    <section class="py-16 sm:py-20">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="max-w-2xl">
+                <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Frequently asked questions</h2>
+                <p class="mt-3 text-techxagon-dark/70">Quick answers to common contact and enquiry questions.</p>
+            </div>
+
+            <div class="mt-10 grid lg:grid-cols-2 gap-6">
+                <div class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden">
+                    <button class="faqBtn w-full text-left p-6 flex items-start justify-between gap-4"
+                        aria-expanded="false">
+                        <div>
+                            <p class="font-bold">How soon will I get a response?</p>
+                            <p class="text-sm text-techxagon-dark/60 mt-1">We aim to respond promptly.</p>
+                        </div>
+                        <span
+                            class="faqIcon mt-1 h-6 w-6 rounded-lg border border-techxagon-dark/15 grid place-items-center shrink-0">
+                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M12 5v14M5 12h14"></path>
+                            </svg>
+                        </span>
+                    </button>
+                    <div class="faqPanel hidden px-6 pb-6">
+                        <p class="text-sm text-techxagon-dark/70">
+                            Most enquiries receive a response within 1–2 business days, depending on the nature of the
+                            request.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden">
+                    <button class="faqBtn w-full text-left p-6 flex items-start justify-between gap-4"
+                        aria-expanded="false">
+                        <div>
+                            <p class="font-bold">Can schools request custom program models?</p>
+                            <p class="text-sm text-techxagon-dark/60 mt-1">Yes, definitely.</p>
+                        </div>
+                        <span
+                            class="faqIcon mt-1 h-6 w-6 rounded-lg border border-techxagon-dark/15 grid place-items-center shrink-0">
+                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M12 5v14M5 12h14"></path>
+                            </svg>
+                        </span>
+                    </button>
+                    <div class="faqPanel hidden px-6 pb-6">
+                        <p class="text-sm text-techxagon-dark/70">
+                            Yes. We can discuss custom delivery models based on your timetable, budget, class levels,
+                            and school objectives.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden">
+                    <button class="faqBtn w-full text-left p-6 flex items-start justify-between gap-4"
+                        aria-expanded="false">
+                        <div>
+                            <p class="font-bold">Can I apply as a tutor through this page?</p>
+                            <p class="text-sm text-techxagon-dark/60 mt-1">Yes, you can.</p>
+                        </div>
+                        <span
+                            class="faqIcon mt-1 h-6 w-6 rounded-lg border border-techxagon-dark/15 grid place-items-center shrink-0">
+                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M12 5v14M5 12h14"></path>
+                            </svg>
+                        </span>
+                    </button>
+                    <div class="faqPanel hidden px-6 pb-6">
+                        <p class="text-sm text-techxagon-dark/70">
+                            Yes. Select “Become a Tutor” in the enquiry type field, and our team will guide you through
+                            the next steps.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden">
+                    <button class="faqBtn w-full text-left p-6 flex items-start justify-between gap-4"
+                        aria-expanded="false">
+                        <div>
+                            <p class="font-bold">Do you support community or institutional collaborations?</p>
+                            <p class="text-sm text-techxagon-dark/60 mt-1">Yes, we do.</p>
+                        </div>
+                        <span
+                            class="faqIcon mt-1 h-6 w-6 rounded-lg border border-techxagon-dark/15 grid place-items-center shrink-0">
+                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M12 5v14M5 12h14"></path>
+                            </svg>
+                        </span>
+                    </button>
+                    <div class="faqPanel hidden px-6 pb-6">
+                        <p class="text-sm text-techxagon-dark/70">
+                            Absolutely. We work with communities, schools, organizations, and public sector partners on
+                            technology education and innovation projects.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Final CTA -->
+    <section class="py-16 sm:py-20">
+        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div class="rounded-3xl bg-gradient-to-r from-techxagon-red to-techxagon-orange p-[1px] shadow-soft">
+                <div class="rounded-3xl bg-white p-8 sm:p-12">
+                    <div class="grid lg:grid-cols-12 gap-8 items-center">
+                        <div class="lg:col-span-7">
+                            <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">
+                                Ready to connect with Techxagon Academy?
+                            </h2>
+                            <p class="mt-3 text-techxagon-dark/70 max-w-2xl">
+                                Reach out today and let’s discuss how we can work together to empower students and
+                                schools with future-ready skills.
+                            </p>
+                        </div>
+                        <div class="lg:col-span-5 flex flex-col sm:flex-row lg:flex-col gap-3 lg:items-stretch">
+                            <a href="#contact-form"
+                                class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95">
+                                Send a Message
+                            </a>
+                            <a href="/apply-partner"
+                                class="inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                                Apply / Partner
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
+{% endblock content %}
+
+{% block extra_js %}
+<script>
+    const faqBtns = document.querySelectorAll(".faqBtn");
+    faqBtns.forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const card = btn.parentElement;
+            const panel = card.querySelector(".faqPanel");
+            const icon = card.querySelector(".faqIcon svg");
+            const expanded = btn.getAttribute("aria-expanded") === "true";
+
+            faqBtns.forEach((otherBtn) => {
+                if (otherBtn !== btn) {
+                    otherBtn.setAttribute("aria-expanded", "false");
+                    const otherCard = otherBtn.parentElement;
+                    otherCard.querySelector(".faqPanel")?.classList.add("hidden");
+                    const otherIcon = otherCard.querySelector(".faqIcon svg");
+                    if (otherIcon) {
+                        otherIcon.innerHTML = '<path d="M12 5v14M5 12h14"></path>';
+                    }
+                }
+            });
+
+            btn.setAttribute("aria-expanded", String(!expanded));
+            panel.classList.toggle("hidden");
+
+            if (icon) {
+                icon.innerHTML = !expanded
+                    ? '<path d="M5 12h14"></path>'
+                    : '<path d="M12 5v14M5 12h14"></path>';
+            }
+        });
+    });
+</script>
+{% endblock extra_js %}

@@ -1,0 +1,40 @@
+{% extends "base/base.html" %}
+{% load static %}
+
+{% block content %}
+
+<section class="py-20 bg-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        <!-- Heading -->
+        <div class="text-center max-w-2xl mx-auto">
+            <h1 class="text-4xl font-bold tracking-tight">
+                Our Gallery
+            </h1>
+
+            <p class="mt-4 text-techxagon-dark/70">
+                A glimpse into our hands-on programs, student projects, and school partnerships.
+            </p>
+        </div>
+
+        <!-- Gallery Grid -->
+        <div class="mt-16 grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+
+            <img src="{% static 'assets/gallery/children_on_learn.jpg' %}" 
+                 class="rounded-xl shadow-soft hover:scale-105 transition duration-300 cursor-pointer">
+
+            <img src="{% static 'assets/gallery/Kid-23.jpg' %}" 
+                 class="rounded-xl shadow-soft hover:scale-105 transition duration-300 cursor-pointer">
+
+            <img src="{% static 'assets/gallery/kid-24.jpg' %}" 
+                 class="rounded-xl shadow-soft hover:scale-105 transition duration-300 cursor-pointer">
+            <img src="{% static 'assets/gallery/kid-25.jpg' %}" 
+                 class="rounded-xl shadow-soft hover:scale-105 transition duration-300 cursor-pointer">
+
+
+        </div>
+
+    </div>
+</section>
+
+{% endblock %}

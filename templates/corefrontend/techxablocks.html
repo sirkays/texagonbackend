@@ -1,0 +1,135 @@
+{% extends 'base/base.html' %}
+{% load static %}
+    {% block extra_css %}
+    <style>
+.techxablocks-blend{
+    mask-image: radial-gradient(circle at center, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 100%);
+    -webkit-mask-image: radial-gradient(circle at center, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 100%);
+}
+    </style>
+    {% endblock extra_css %}
+{% block content %}
+
+<section class="relative overflow-hidden bg-white py-20 sm:py-24">
+    <div class="absolute inset-0 bg-gradient-to-br from-techxagon-red/5 via-white to-techxagon-orange/5"></div>
+
+    <div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="grid lg:grid-cols-12 gap-12 items-center">
+            <div class="lg:col-span-7">
+                <span class="inline-flex items-center rounded-full border border-techxagon-dark/10 bg-white px-4 py-2 text-xs font-bold uppercase tracking-wide text-techxagon-red shadow-soft">
+                    TechxaBlocks
+                </span>
+
+                <h1 class="mt-6 text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-tight">
+                    Modular learning blocks for
+                    <span class="text-transparent bg-clip-text bg-gradient-to-r from-techxagon-red to-techxagon-orange">
+                        coding, creativity and problem-solving
+                    </span>
+                </h1>
+
+                <p class="mt-5 max-w-2xl text-base sm:text-lg text-techxagon-dark/70 leading-relaxed">
+                    TechxaBlocks helps students learn technology through simple, visual, hands-on building experiences.
+                    It is designed to make coding and digital logic easy, <br>engaging, and practical for school environments.
+                </p>
+
+                <div class="mt-8 flex flex-col sm:flex-row gap-3">
+                    <a href="{% url 'corefrontend:apply_partner' %}"
+                        class="inline-flex items-center justify-center px-6 py-3.5 rounded-xl font-semibold text-white bg-gradient-to-r from-techxagon-red to-techxagon-orange shadow-soft">
+                        Partner with Techxagon
+                    </a>
+                </div>
+            </div>
+
+            <div class="lg:col-span-5 relative flex justify-end">
+
+                <!-- soft background glow -->
+                <div class="absolute right-0 top-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-techxagon-orange/10 blur-[100px] rounded-full"></div>
+
+                <img src="{% static 'assets/techxablocks-hero.png' %}"
+                    alt="TechxaBlocks coding blocks learning"
+                    class="relative w-[120%] max-w-none techxablocks-blend drop-shadow-[0_30px_60px_rgba(0,0,0,0.15)]">
+
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="py-20 bg-white">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="max-w-3xl">
+            <p class="text-sm font-bold uppercase tracking-widest text-techxagon-red">Why TechxaBlocks</p>
+            <h2 class="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight">Built for easy adoption in schools</h2>
+            <p class="mt-4 text-techxagon-dark/70">
+                TechxaBlocks is ideal for introducing students to technology in a way that feels practical, playful, and confidence-building.
+            </p>
+        </div>
+
+        <div class="mt-12 grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-6 shadow-soft">
+                <h3 class="font-bold text-lg">Visual learning</h3>
+                <p class="mt-2 text-sm text-techxagon-dark/65">Students understand faster using modular and structured activities.</p>
+            </div>
+            <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-6 shadow-soft">
+                <h3 class="font-bold text-lg">Beginner-friendly</h3>
+                <p class="mt-2 text-sm text-techxagon-dark/65">Perfect for entry-level learners starting their tech journey.</p>
+            </div>
+            <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-6 shadow-soft">
+                <h3 class="font-bold text-lg">School-ready</h3>
+                <p class="mt-2 text-sm text-techxagon-dark/65">Designed for classroom delivery with clear structure and tutor support.</p>
+            </div>
+            <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-6 shadow-soft">
+                <h3 class="font-bold text-lg">Project-based</h3>
+                <p class="mt-2 text-sm text-techxagon-dark/65">Students create outputs, not just complete theory lessons.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="py-20 bg-techxagon-dark/[0.02]">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="grid lg:grid-cols-2 gap-8">
+            <div class="rounded-3xl bg-white p-8 border border-techxagon-dark/10 shadow-soft">
+                <h2 class="text-2xl font-extrabold">What students learn</h2>
+                <ul class="mt-6 space-y-4 text-techxagon-dark/70">
+                    <li>• Coding logic and sequencing</li>
+                    <li>• Computational thinking</li>
+                    <li>• Interactive digital creation</li>
+                    <li>• Problem-solving through guided builds</li>
+                    <li>• Collaboration and presentation confidence</li>
+                </ul>
+            </div>
+
+            <div class="rounded-3xl bg-white p-8 border border-techxagon-dark/10 shadow-soft">
+                <h2 class="text-2xl font-extrabold">Best fit for</h2>
+                <ul class="mt-6 space-y-4 text-techxagon-dark/70">
+                    <li>• Schools introducing structured tech programs</li>
+                    <li>• Junior secondary and secondary learners</li>
+                    <li>• STEM clubs and after-school activities</li>
+                    <li>• Schools that want hands-on learning without complexity</li>
+                    <li>• Parents looking for practical tech exposure</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="py-20">
+    <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 text-center">
+        <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">Start with TechxaBlocks</h2>
+        <p class="mt-4 text-techxagon-dark/70 max-w-2xl mx-auto">
+            Give students a strong first step into future-ready technology learning with a model that is easy to adopt and exciting to deliver.
+        </p>
+        <div class="mt-8 flex flex-col sm:flex-row justify-center gap-3">
+            <a href="{% url 'corefrontend:apply_partner' %}"
+                class="inline-flex items-center justify-center px-6 py-3.5 rounded-xl font-semibold text-white bg-gradient-to-r from-techxagon-red to-techxagon-orange shadow-soft">
+                Apply as Partner School
+            </a>
+            <a href="{% url 'corefrontend:contact' %}"
+                class="inline-flex items-center justify-center px-6 py-3.5 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                Speak to Us
+            </a>
+        </div>
+    </div>
+</section>
+
+{% endblock content %}

@@ -1,0 +1,1330 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block content %}
+
+<style>
+  /* ─── FONTS ─── */
+  @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');
+
+  :root {
+    --red: #e8291c;
+    --orange: #f97316;
+    --dark: #0d0d0d;
+    --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  body { font-family: 'DM Sans', sans-serif; }
+  h1,h2,h3,h4 { font-family: 'Bricolage Grotesque', sans-serif; }
+
+  /* ─── SCROLL REVEAL ─── */
+  .reveal {
+    opacity: 0;
+    transform: translateY(36px);
+    transition: opacity 0.75s var(--ease-expo), transform 0.75s var(--ease-expo);
+  }
+  .reveal.revealed { opacity: 1; transform: translateY(0); }
+
+  .reveal-left  { opacity:0; transform: translateX(-40px); transition: opacity 0.75s var(--ease-expo), transform 0.75s var(--ease-expo); }
+  .reveal-right { opacity:0; transform: translateX(40px);  transition: opacity 0.75s var(--ease-expo), transform 0.75s var(--ease-expo); }
+  .reveal-left.revealed, .reveal-right.revealed { opacity:1; transform: translateX(0); }
+
+  .reveal-scale { opacity:0; transform: scale(0.88); transition: opacity 0.65s var(--ease-expo), transform 0.65s var(--ease-expo); }
+  .reveal-scale.revealed { opacity:1; transform: scale(1); }
+
+  /* stagger delays */
+  .delay-1 { transition-delay: 0.08s !important; }
+  .delay-2 { transition-delay: 0.16s !important; }
+  .delay-3 { transition-delay: 0.24s !important; }
+  .delay-4 { transition-delay: 0.32s !important; }
+  .delay-5 { transition-delay: 0.40s !important; }
+  .delay-6 { transition-delay: 0.48s !important; }
+
+  /* ─── HERO ─── */
+  #hero-section {
+    position: relative;
+    overflow: hidden;
+    background: #fff;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+  }
+
+  /* Animated mesh background */
+  .mesh-bg {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 70% 30%, rgba(232,41,28,.08) 0%, transparent 65%),
+      radial-gradient(ellipse 60% 50% at 20% 70%, rgba(249,115,22,.07) 0%, transparent 65%),
+      radial-gradient(ellipse 40% 40% at 50% 50%, rgba(232,41,28,.04) 0%, transparent 70%);
+    animation: meshShift 12s ease-in-out infinite alternate;
+  }
+  @keyframes meshShift {
+    0%   { background-position: 0% 0%, 100% 100%, 50% 50%; }
+    100% { background-position: 10% 10%, 90% 90%, 55% 45%; }
+  }
+
+  /* Grid dots */
+  .dot-grid {
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(13,13,13,.09) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%);
+  }
+
+  /* Floating orbs */
+  .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(70px);
+    animation: float 10s ease-in-out infinite;
+    pointer-events: none;
+  }
+  .orb-1 { width:380px; height:380px; top:-80px; right:-60px; background:radial-gradient(circle, rgba(232,41,28,.22), rgba(249,115,22,.12)); animation-duration:12s; }
+  .orb-2 { width:300px; height:300px; bottom:-100px; left:-80px; background:radial-gradient(circle, rgba(249,115,22,.2), rgba(232,41,28,.1)); animation-duration:9s; animation-delay:2s; }
+  .orb-3 { width:180px; height:180px; top:40%; left:40%; background:radial-gradient(circle, rgba(232,41,28,.1), transparent); animation-duration:7s; animation-delay:1s; }
+  @keyframes float {
+    0%,100% { transform: translateY(0) scale(1); }
+    50%      { transform: translateY(-25px) scale(1.05); }
+  }
+
+  /* Floating particles */
+  .particles { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+  .particle {
+    position:absolute;
+    width:4px; height:4px;
+    border-radius:50%;
+    background: var(--red);
+    opacity:0;
+    animation: particleFly linear infinite;
+  }
+  @keyframes particleFly {
+    0%   { transform:translateY(110vh) translateX(0) scale(0); opacity:0; }
+    10%  { opacity:.6; }
+    90%  { opacity:.3; }
+    100% { transform:translateY(-10vh) translateX(var(--drift,40px)) scale(1.5); opacity:0; }
+  }
+
+  /* Hero pill badge */
+  .hero-badge {
+    display:inline-flex; align-items:center; gap:8px;
+    border:1px solid rgba(13,13,13,.1);
+    background:#fff;
+    border-radius:999px;
+    padding:6px 14px;
+    font-size:.8rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06);
+    animation: badgePop 0.9s var(--ease-spring) 0.3s both;
+  }
+  @keyframes badgePop {
+    from { opacity:0; transform:scale(0.7) translateY(10px); }
+    to   { opacity:1; transform:scale(1) translateY(0); }
+  }
+  .badge-dot {
+    width:8px; height:8px; border-radius:50%;
+    background:var(--orange);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(249,115,22,.5)} 50%{box-shadow:0 0 0 7px rgba(249,115,22,0)} }
+
+  /* Hero title word reveal */
+  #heroTitle {
+    animation: titleReveal 1s var(--ease-expo) 0.5s both;
+  }
+  #heroDesc {
+    animation: titleReveal 1s var(--ease-expo) 0.75s both;
+  }
+  @keyframes titleReveal {
+    from { opacity:0; transform:translateY(24px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+
+  /* CTA buttons */
+  .btn-primary {
+    display:inline-flex; align-items:center; justify-content:center;
+    padding:13px 28px; border-radius:14px; font-weight:700;
+    background:linear-gradient(135deg, var(--red), var(--orange));
+    color:#fff; position:relative; overflow:hidden;
+    box-shadow: 0 4px 20px rgba(232,41,28,.35);
+    transition: transform 0.25s var(--ease-spring), box-shadow 0.25s ease;
+    animation: btnReveal 1s var(--ease-expo) 1s both;
+  }
+  .btn-primary::before {
+    content:''; position:absolute; inset:0;
+    background:linear-gradient(135deg, rgba(255,255,255,.25), transparent);
+    opacity:0; transition:opacity .3s;
+  }
+  .btn-primary:hover { transform:translateY(-3px) scale(1.02); box-shadow:0 8px 28px rgba(232,41,28,.45); }
+  .btn-primary:hover::before { opacity:1; }
+  .btn-primary:active { transform:translateY(0) scale(0.98); }
+
+  .btn-secondary {
+    display:inline-flex; align-items:center; justify-content:center;
+    padding:13px 28px; border-radius:14px; font-weight:700;
+    border:1.5px solid rgba(13,13,13,.13); background:#fff;
+    transition: transform 0.25s var(--ease-spring), background .2s, box-shadow .25s;
+    animation: btnReveal 1s var(--ease-expo) 1.1s both;
+  }
+  .btn-secondary:hover { transform:translateY(-3px) scale(1.02); background:#f8f8f8; box-shadow:0 6px 20px rgba(0,0,0,.08); }
+  @keyframes btnReveal {
+    from { opacity:0; transform:translateY(16px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+
+  /* Stat mini cards */
+  .hero-stat-card {
+    border-radius:16px; border:1px solid rgba(13,13,13,.1);
+    background:#fff; padding:16px;
+    box-shadow:0 2px 12px rgba(0,0,0,.05);
+    animation: cardFloat 6s ease-in-out infinite;
+    transition: transform 0.3s var(--ease-spring), box-shadow 0.3s;
+  }
+  .hero-stat-card:hover { transform:translateY(-4px); box-shadow:0 8px 24px rgba(0,0,0,.1); }
+  .hero-stat-card:nth-child(2) { animation-delay:2s; }
+  .hero-stat-card:nth-child(3) { animation-delay:4s; }
+  @keyframes cardFloat {
+    0%,100%{transform:translateY(0)}
+    50%{transform:translateY(-6px)}
+  }
+
+  /* Hero image with shine */
+  .hero-img-wrap {
+    position:relative;
+    animation: imgReveal 1.2s var(--ease-expo) 0.6s both;
+  }
+  @keyframes imgReveal {
+    from { opacity:0; transform:translateX(40px) scale(0.95); }
+    to   { opacity:1; transform:translateX(0) scale(1); }
+  }
+  .hero-img-wrap::before {
+    content:'';
+    position:absolute;
+    inset:-2px; border-radius:24px;
+    background:linear-gradient(135deg, rgba(232,41,28,.3), rgba(249,115,22,.2), transparent 60%);
+    z-index:-1; filter:blur(20px);
+    animation: glowPulse 4s ease-in-out infinite alternate;
+  }
+  @keyframes glowPulse { from{opacity:.5} to{opacity:1} }
+
+  /* ─── PROGRAM CARDS ─── */
+  .prog-card {
+    border-radius:24px; border:1px solid rgba(13,13,13,.08);
+    background:#fff; overflow:hidden;
+    box-shadow:0 2px 12px rgba(0,0,0,.04);
+    transition: transform 0.45s var(--ease-spring), box-shadow 0.45s ease;
+    cursor:default;
+  }
+  .prog-card:hover {
+    transform:translateY(-10px) scale(1.02);
+    box-shadow:0 20px 48px rgba(0,0,0,.12);
+  }
+  .prog-card:hover .prog-img { transform:scale(1.08); }
+  .prog-img { transition:transform 0.6s var(--ease-expo); }
+
+  .prog-card:hover .prog-badge {
+    background:linear-gradient(135deg, var(--red), var(--orange));
+    color:#fff;
+  }
+  .prog-badge { transition: background .3s, color .3s; }
+
+  /* Icon arrow slide */
+  .prog-link {
+    display:inline-flex; align-items:center; gap:4px;
+    font-size:.85rem; font-weight:700; color:var(--red);
+    transition:gap .3s var(--ease-spring);
+  }
+  .prog-link:hover { gap:10px; }
+
+  /* ─── PARTNERSHIP SECTION ─── */
+  .partner-list-item {
+    display:flex; gap:12px; align-items:flex-start;
+    transition: transform 0.3s var(--ease-spring);
+  }
+  .partner-list-item:hover { transform:translateX(6px); }
+
+  .partner-dot-ring {
+    margin-top:3px; min-width:24px; height:24px; border-radius:50%;
+    display:grid; place-items:center;
+    position:relative;
+    transition:transform 0.3s var(--ease-spring);
+  }
+  .partner-list-item:hover .partner-dot-ring { transform:scale(1.2); }
+
+  /* What schools get - animated border */
+  .schools-card {
+    border-radius:20px; border:1px solid rgba(13,13,13,.09);
+    padding:20px; position:relative; overflow:hidden;
+    transition:transform 0.35s var(--ease-spring), box-shadow 0.35s, border-color .3s;
+    background:#fff;
+  }
+  .schools-card::before {
+    content:''; position:absolute; inset:0;
+    background:linear-gradient(135deg, rgba(232,41,28,.06), rgba(249,115,22,.06));
+    opacity:0; transition:opacity .3s;
+  }
+  .schools-card:hover { transform:translateY(-4px); box-shadow:0 10px 30px rgba(232,41,28,.1); border-color:rgba(232,41,28,.2); }
+  .schools-card:hover::before { opacity:1; }
+
+  /* ─── STATS ─── */
+  .stat-card {
+    border-radius:24px; border:1px solid rgba(13,13,13,.08);
+    background:#fff; padding:28px;
+    box-shadow:0 2px 12px rgba(0,0,0,.04);
+    position:relative; overflow:hidden;
+    transition:transform 0.45s var(--ease-spring), box-shadow .45s;
+  }
+  .stat-card::after {
+    content:'';
+    position:absolute;
+    bottom:0; left:0; right:0; height:3px;
+    background:linear-gradient(90deg, var(--red), var(--orange));
+    transform:scaleX(0); transform-origin:left;
+    transition:transform .5s var(--ease-expo);
+  }
+  .stat-card:hover { transform:translateY(-8px); box-shadow:0 16px 40px rgba(0,0,0,.1); }
+  .stat-card:hover::after { transform:scaleX(1); }
+
+  .stat-number { font-family:'Bricolage Grotesque',sans-serif; font-weight:800; font-size:2.8rem; line-height:1; }
+  .stat-number .counter { display:inline; }
+
+  /* ─── TESTIMONIALS ─── */
+  .testimonial-track { border-radius:24px; overflow:hidden; }
+  .testimonial-slide {
+    border-radius:24px; border:1px solid rgba(13,13,13,.08);
+    background:#fff; padding:36px 40px;
+    box-shadow:0 4px 20px rgba(0,0,0,.06);
+    position:relative; overflow:hidden;
+  }
+  .testimonial-slide::before {
+    content:'"';
+    position:absolute; top:-20px; right:20px;
+    font-size:14rem; font-family:'Bricolage Grotesque',sans-serif;
+    color:rgba(232,41,28,.06); line-height:1; pointer-events:none;
+  }
+  .t-avatar {
+    width:52px; height:52px; border-radius:16px;
+    background:linear-gradient(135deg, var(--red), var(--orange));
+    display:grid; place-items:center; flex-shrink:0;
+    box-shadow:0 4px 14px rgba(232,41,28,.35);
+    font-size:1.5rem; color:#fff; font-weight:800;
+  }
+  .t-dot {
+    height:8px; border-radius:999px;
+    background:rgba(13,13,13,.1);
+    transition:width .4s var(--ease-spring), background .4s;
+    cursor:pointer; border:none;
+  }
+  .t-dot.active { width:28px; background:linear-gradient(90deg,var(--red),var(--orange)); }
+  .t-dot:not(.active) { width:8px; }
+
+  /* ─── PROJECT CARDS ─── */
+  .project-card {
+    border-radius:24px; border:1px solid rgba(13,13,13,.08);
+    background:#fff; overflow:hidden;
+    box-shadow:0 2px 12px rgba(0,0,0,.04);
+    transition:transform 0.45s var(--ease-spring), box-shadow .45s;
+    position:relative;
+  }
+  .project-card:hover { transform:translateY(-10px) rotate(-0.5deg); box-shadow:0 20px 50px rgba(0,0,0,.12); }
+  .project-thumb {
+    height:160px; position:relative; overflow:hidden;
+    transition:height .4s var(--ease-expo);
+  }
+  .project-card:hover .project-thumb { height:180px; }
+  .project-thumb-inner {
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    font-size:3rem;
+    transition:transform .5s var(--ease-expo);
+  }
+  .project-card:hover .project-thumb-inner { transform:scale(1.12) rotate(5deg); }
+
+  /* ─── BLOG CARDS ─── */
+  .blog-card {
+    border-radius:24px; border:1px solid rgba(13,13,13,.08);
+    background:#fff; padding:24px;
+    box-shadow:0 2px 12px rgba(0,0,0,.04);
+    transition:transform 0.4s var(--ease-spring), box-shadow .4s, border-color .3s;
+    position:relative; overflow:hidden;
+  }
+  .blog-card::after {
+    content:'';
+    position:absolute;
+    top:0;left:0;right:0;height:3px;
+    background:linear-gradient(90deg,var(--red),var(--orange));
+    transform:scaleX(0); transform-origin:left;
+    transition:transform .4s var(--ease-expo);
+    border-radius:3px 3px 0 0;
+  }
+  .blog-card:hover { transform:translateY(-6px); box-shadow:0 14px 40px rgba(0,0,0,.09); border-color:rgba(232,41,28,.15); }
+  .blog-card:hover::after { transform:scaleX(1); }
+
+  /* ─── FAQ ─── */
+  .faq-card {
+    border-radius:20px; border:1px solid rgba(13,13,13,.09);
+    background:#fff; overflow:hidden;
+    box-shadow:0 2px 8px rgba(0,0,0,.04);
+    transition:box-shadow .3s, border-color .3s;
+  }
+  .faq-card:focus-within, .faq-card.open {
+    border-color:rgba(232,41,28,.25);
+    box-shadow:0 4px 20px rgba(232,41,28,.1);
+  }
+  .faqBtn2 { width:100%; text-align:left; padding:22px 24px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; background:none; border:none; cursor:pointer; }
+  .faq-icon {
+    min-width:28px; height:28px; border-radius:10px;
+    border:1.5px solid rgba(13,13,13,.13);
+    display:grid; place-items:center; flex-shrink:0;
+    transition:background .3s, border-color .3s, transform .4s var(--ease-spring);
+  }
+  .faq-card.open .faq-icon { background:linear-gradient(135deg,var(--red),var(--orange)); border-color:transparent; transform:rotate(45deg); }
+  .faq-card.open .faq-icon svg { stroke:#fff; }
+  .faq-body {
+    max-height:0; overflow:hidden;
+    transition:max-height .45s var(--ease-expo), padding .45s;
+    padding:0 24px;
+  }
+  .faq-body.open { max-height:200px; padding:0 24px 20px; }
+
+  /* ─── CTA SECTION ─── */
+  .cta-wrap {
+    border-radius:28px; overflow:hidden; position:relative;
+    background:linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 100%);
+    padding:2px;
+  }
+  .cta-inner {
+    border-radius:26px;
+    background:linear-gradient(135deg,#111,#1c1c1c);
+    padding:52px 44px; position:relative; overflow:hidden;
+  }
+  .cta-inner::before {
+    content:'';
+    position:absolute; top:-60%; right:-20%; width:500px; height:500px;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(232,41,28,.18), rgba(249,115,22,.1), transparent 60%);
+    animation:float 8s ease-in-out infinite;
+  }
+  .cta-inner::after {
+    content:'';
+    position:absolute; bottom:-40%; left:-10%; width:350px; height:350px;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(249,115,22,.12), transparent 60%);
+    animation:float 11s ease-in-out infinite 3s;
+  }
+  .cta-grid-lines {
+    position:absolute; inset:0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+    background-size:48px 48px;
+  }
+
+  /* ─── SECTION LABELS ─── */
+  .section-label {
+    display:inline-flex; align-items:center; gap:8px;
+    font-size:.75rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--red); margin-bottom:12px;
+  }
+  .section-label::before {
+    content:''; display:block; width:20px; height:2px;
+    background:linear-gradient(90deg,var(--red),var(--orange));
+    border-radius:2px;
+  }
+
+  /* ─── MAGNETIC BUTTON ─── */
+  .magnetic { display:inline-block; transition:transform .2s ease; }
+
+  /* ─── SCROLL PROGRESS ─── */
+  .scroll-progress {
+    position:fixed; top:0; left:0; height:3px; z-index:9999;
+    background:linear-gradient(90deg,var(--red),var(--orange));
+    transform-origin:left; transform:scaleX(0);
+    transition:transform .1s linear;
+  }
+
+  /* ─── CURSOR GLOW ─── */
+  .cursor-glow {
+    position:fixed; width:300px; height:300px;
+    border-radius:50%; pointer-events:none; z-index:0;
+    background:radial-gradient(circle, rgba(232,41,28,.06), transparent 60%);
+    transform:translate(-50%,-50%);
+    transition:left .12s ease, top .12s ease;
+  }
+
+  /* ─── SECTION DIVIDER ─── */
+  .grad-line {
+    height:1px;
+    background:linear-gradient(90deg,transparent,rgba(232,41,28,.3),rgba(249,115,22,.3),transparent);
+  }
+
+  /* image slider transitions */
+  .lpSlideImg { transition:opacity .8s ease; }
+
+  /* responsive tweaks */
+  @media(max-width:640px) {
+    .cta-inner { padding:36px 24px; }
+    .testimonial-slide { padding:28px 24px; }
+  }
+
+  /* ─── COUNTER ANIMATION ─── */
+  @keyframes countUp {
+    from { opacity:0; transform:translateY(8px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+
+  /* partnership gradient card */
+  .partner-box {
+    border-radius:24px;
+    background:linear-gradient(135deg,var(--red),var(--orange));
+    padding:2px;
+    box-shadow:0 8px 32px rgba(232,41,28,.2);
+  }
+  .partner-box-inner {
+    border-radius:22px;
+    background:#fff;
+    padding:32px;
+  }
+</style>
+
+<main id="main">
+
+  <!-- Scroll progress bar -->
+  <div class="scroll-progress" id="scrollProgress"></div>
+
+  <!-- Cursor glow (desktop only) -->
+  <div class="cursor-glow" id="cursorGlow"></div>
+
+  <!-- ════════════════════════════════════════════════════════
+       HERO
+  ════════════════════════════════════════════════════════ -->
+  <section id="hero-section">
+    <div class="mesh-bg"></div>
+    <div class="dot-grid"></div>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    <div class="particles" id="particles"></div>
+
+    <div class="relative mx-auto max-w-7xl w-full px-4 sm:px-6 lg:px-8 py-20 sm:py-24 z-10">
+      <div class="grid lg:grid-cols-12 gap-12 items-center">
+
+        <div class="lg:col-span-7">
+          <div class="hero-badge">
+            <span class="badge-dot"></span>
+            <span style="font-weight:600">Hands-on 4IR learning for secondary schools across Africa</span>
+          </div>
+
+          <h1 id="heroTitle" class="mt-5 text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.1]">
+            Transform students into
+            <span class="text-transparent bg-clip-text bg-gradient-to-r from-techxagon-red to-techxagon-orange">
+              future-ready creators
+            </span>
+            — not just consumers.
+          </h1>
+
+          <p id="heroDesc" class="mt-5 text-base sm:text-lg text-techxagon-dark/70 max-w-2xl leading-relaxed">
+            Techxagon Academy bridges the gap between classroom learning and real-world tech
+            skills—through practical projects in coding, robotics, cybersecurity, design, and data.
+          </p>
+
+          <div class="mt-8 flex flex-col sm:flex-row gap-3">
+            <a href="{% url 'corefrontend:apply_partner' %}" class="btn-primary magnetic">
+              Partner with Us
+              <svg class="ml-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </a>
+            <a href="{% url 'corefrontend:programs' %}" class="btn-secondary magnetic">Explore Programs</a>
+          </div>
+
+          <div class="mt-10 grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-xl" style="animation:titleReveal 1s var(--ease-expo) 1.25s both">
+            <div class="hero-stat-card"><p class="text-sm font-semibold">Project-Based Learning</p><p class="text-xs text-techxagon-dark/55 mt-1">Hands-on, portfolio outcomes</p></div>
+            <div class="hero-stat-card"><p class="text-sm font-semibold">School Partnerships</p><p class="text-xs text-techxagon-dark/55 mt-1">Curriculum + tutors + support</p></div>
+            <div class="hero-stat-card col-span-2 sm:col-span-1"><p class="text-sm font-semibold">4IR Curriculum</p><p class="text-xs text-techxagon-dark/55 mt-1">Future-ready tech tracks</p></div>
+          </div>
+        </div>
+
+        <div class="lg:col-span-5">
+          <div class="hero-img-wrap">
+            <figure class="relative">
+              <img class="lpSlideImg w-full h-auto select-none pointer-events-none drop-shadow-2xl rounded-2xl opacity-100"
+                   src="{% static 'assets/slider1.png' %}" alt="Techxagon learning" />
+              <img class="lpSlideImg absolute inset-0 w-full h-auto select-none pointer-events-none drop-shadow-2xl rounded-2xl opacity-0"
+                   src="{% static 'assets/slider2.png' %}" alt="Learning Path 2" />
+              <img class="lpSlideImg absolute inset-0 w-full h-auto select-none pointer-events-none drop-shadow-2xl rounded-2xl opacity-0"
+                   src="{% static 'assets/slider3.png' %}" alt="Learning Path 3" />
+
+              <!-- Floating badge overlays -->
+              <div style="position:absolute;bottom:-18px;left:-18px;background:#fff;border-radius:16px;padding:12px 16px;box-shadow:0 8px 30px rgba(0,0,0,.12);border:1px solid rgba(13,13,13,.08);animation:float 6s ease-in-out infinite">
+                <p style="font-size:.7rem;font-weight:600;color:#999">Students taught</p>
+                <p style="font-size:1.4rem;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;line-height:1.1">25,000<span style="color:var(--red)">+</span></p>
+              </div>
+              <div style="position:absolute;top:-18px;right:-18px;background:linear-gradient(135deg,var(--red),var(--orange));border-radius:16px;padding:12px 16px;box-shadow:0 8px 30px rgba(232,41,28,.3);animation:float 6s ease-in-out infinite 3s">
+                <p style="font-size:.7rem;font-weight:600;color:rgba(255,255,255,.8)">Partner schools</p>
+                <p style="font-size:1.4rem;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;line-height:1.1;color:#fff">86<span>+</span></p>
+              </div>
+            </figure>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grad-line"></div>
+
+  <!-- ════════════════════════════════════════════════════════
+       PROGRAMS
+  ════════════════════════════════════════════════════════ -->
+  <section class="py-20 sm:py-24">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+        <div class="max-w-2xl">
+          <div class="section-label reveal">Our Programs</div>
+          <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight reveal delay-1">Empowering students with the right skills</h2>
+          <p class="mt-3 text-techxagon-dark/70 reveal delay-2">Six practical tracks designed for secondary school learners—built around real-world problem-solving and projects.</p>
+        </div>
+        <div class="reveal delay-2">
+          <a href="/programs" class="btn-secondary magnetic">View all programs</a>
+        </div>
+      </div>
+
+      <div class="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <article class="prog-card reveal delay-1">
+          <div class="relative h-44 overflow-hidden">
+            <img src="{% static 'assets/prog.png' %}" alt="Programming" class="prog-img h-full w-full object-cover" />
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 via-black/5 to-transparent"></div>
+            <span class="prog-badge absolute top-4 left-4 inline-flex items-center rounded-full bg-white/90 px-3 py-1 text-xs font-bold shadow-sm">💻 Programming</span>
+          </div>
+          <div class="p-6">
+            <h3 class="text-xl font-bold">Programming / Coding</h3>
+            <p class="mt-2 text-sm text-techxagon-dark/65">Build strong foundations in logic, coding, and real project development.</p>
+            <!-- <a href="/programs" class="prog-link mt-4">Learn more <span>→</span></a> -->
+          </div>
+        </article>
+
+        <article class="prog-card reveal delay-2">
+          <div class="relative h-44 overflow-hidden">
+            <img src="{% static 'assets/robotics.png' %}" alt="Robotics" class="prog-img h-full w-full object-cover" />
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 via-black/5 to-transparent"></div>
+            <span class="prog-badge absolute top-4 left-4 inline-flex items-center rounded-full bg-white/90 px-3 py-1 text-xs font-bold shadow-sm">🤖 Robotics</span>
+          </div>
+          <div class="p-6">
+            <h3 class="text-xl font-bold">Robotics</h3>
+            <p class="mt-2 text-sm text-techxagon-dark/65">Hands-on building, sensors, and automation—learn by doing.</p>
+            <!-- <a href="/programs" class="prog-link mt-4">Learn more <span>→</span></a> -->
+          </div>
+        </article>
+
+        <article class="prog-card reveal delay-3">
+          <div class="relative h-44 overflow-hidden">
+            <img src="{% static 'assets/cyber.png' %}" alt="Cybersecurity" class="prog-img h-full w-full object-cover" />
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 via-black/5 to-transparent"></div>
+            <span class="prog-badge absolute top-4 left-4 inline-flex items-center rounded-full bg-white/90 px-3 py-1 text-xs font-bold shadow-sm">🔐 Cybersecurity</span>
+          </div>
+          <div class="p-6">
+            <h3 class="text-xl font-bold">Cybersecurity</h3>
+            <p class="mt-2 text-sm text-techxagon-dark/65">Learn digital safety, online hygiene, and security fundamentals.</p>
+            <!-- <a href="/programs" class="prog-link mt-4">Learn more <span>→</span></a> -->
+          </div>
+        </article>
+
+        <article class="prog-card reveal delay-4">
+          <div class="relative h-44 overflow-hidden">
+            <img src="{% static 'assets/techxablocks.png' %}" alt="TechxaBlocks" class="prog-img h-full w-full object-cover" />
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 via-black/5 to-transparent"></div>
+            <span class="prog-badge absolute top-4 left-4 inline-flex items-center rounded-full bg-white/90 px-3 py-1 text-xs font-bold shadow-sm">🧩 TechxaBlocks</span>
+          </div>
+          <div class="p-6">
+            <h3 class="text-xl font-bold">TechxaBlocks</h3>
+            <p class="mt-2 text-sm text-techxagon-dark/65">Modular, beginner-friendly hands-on learning for coding and creative technology exploration.</p>
+            <a href="{% url 'corefrontend:techxablocks' %}" class="prog-link mt-4">Learn more <span>→</span></a>
+          </div>
+        </article>
+
+        <article class="prog-card reveal delay-5">
+          <div class="relative h-44 overflow-hidden">
+            <img src="{% static 'assets/techxaforge.png' %}" alt="TechxaForge" class="prog-img h-full w-full object-cover" />
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 via-black/5 to-transparent"></div>
+            <span class="prog-badge absolute top-4 left-4 inline-flex items-center rounded-full bg-white/90 px-3 py-1 text-xs font-bold shadow-sm">⚙️ TechxaForge</span>
+          </div>
+          <div class="p-6">
+            <h3 class="text-xl font-bold">TechxaForge</h3>
+            <p class="mt-2 text-sm text-techxagon-dark/65">An advanced innovation and maker pathway for building real prototypes and projects.</p>
+            <a href="{% url 'corefrontend:techxaforge' %}" class="prog-link mt-4">Learn more <span>→</span></a>
+          </div>
+        </article>
+ 
+        <article class="prog-card reveal delay-4">
+          <div class="relative h-44 overflow-hidden">
+            <img src="{% static 'assets/uiux.png' %}" alt="UI/UX" class="prog-img h-full w-full object-cover" />
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 via-black/5 to-transparent"></div>
+            <span class="prog-badge absolute top-4 left-4 inline-flex items-center rounded-full bg-white/90 px-3 py-1 text-xs font-bold shadow-sm">🎨 UI/UX</span>
+          </div>
+          <div class="p-6">
+            <h3 class="text-xl font-bold">UI/UX Design</h3>
+            <p class="mt-2 text-sm text-techxagon-dark/65">Design user-friendly experiences—from wireframes to prototypes.</p>
+          </div>
+        </article>
+
+        <!--<article class="prog-card reveal delay-5">
+          <div class="relative h-44 overflow-hidden">
+            <img src="{% static 'assets/webdev.jpg' %}" alt="Web Dev" class="prog-img h-full w-full object-cover" />
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 via-black/5 to-transparent"></div>
+            <span class="prog-badge absolute top-4 left-4 inline-flex items-center rounded-full bg-white/90 px-3 py-1 text-xs font-bold shadow-sm">🌐 Web Dev</span>
+          </div>
+          <div class="p-6">
+            <h3 class="text-xl font-bold">Web Development</h3>
+            <p class="mt-2 text-sm text-techxagon-dark/65">Create modern websites and web apps with real deployment practice.</p>
+          </div>
+        </article>
+
+        <article class="prog-card reveal delay-6">
+          <div class="relative h-44 overflow-hidden">
+            <img src="{% static 'assets/data.jpg' %}" alt="Data" class="prog-img h-full w-full object-cover" />
+            <div class="absolute inset-0 bg-gradient-to-t from-black/50 via-black/5 to-transparent"></div>
+            <span class="prog-badge absolute top-4 left-4 inline-flex items-center rounded-full bg-white/90 px-3 py-1 text-xs font-bold shadow-sm">📊 Data</span>
+          </div>
+          <div class="p-6">
+            <h3 class="text-xl font-bold">Data Analysis & Science</h3>
+            <p class="mt-2 text-sm text-techxagon-dark/65">Turn data into insight with dashboards, charts, and analytics.</p>
+          </div>
+        </article> -->
+      </div>
+    </div>
+  </section>
+
+  <div class="grad-line"></div>
+
+  <!-- ════════════════════════════════════════════════════════
+       PARTNERSHIP MODEL
+  ════════════════════════════════════════════════════════ -->
+  <section class="py-20 sm:py-24 bg-white">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div class="grid lg:grid-cols-12 gap-12 items-center">
+        <div class="lg:col-span-6">
+          <div class="section-label reveal">For Schools</div>
+          <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight reveal delay-1">A partnership model built for schools</h2>
+          <p class="mt-3 text-techxagon-dark/70 reveal delay-2">Techxagon integrates technology education directly into your school system—designed to scale sustainably and deliver measurable outcomes.</p>
+          <ul class="mt-8 grid gap-5">
+            <li class="partner-list-item reveal delay-1">
+              <div class="partner-dot-ring bg-red-50"><span class="h-2.5 w-2.5 rounded-full bg-techxagon-red"></span></div>
+              <div><p class="font-bold">4IR curriculum integration</p><p class="text-sm text-techxagon-dark/65 mt-0.5">Structured learning tracks aligned to future skills and practical delivery.</p></div>
+            </li>
+            <li class="partner-list-item reveal delay-2">
+              <div class="partner-dot-ring bg-orange-50"><span class="h-2.5 w-2.5 rounded-full bg-techxagon-orange"></span></div>
+              <div><p class="font-bold">Dedicated Techxagon tutors</p><p class="text-sm text-techxagon-dark/65 mt-0.5">Specialist instructors supporting students and school teams.</p></div>
+            </li>
+            <li class="partner-list-item reveal delay-3">
+              <div class="partner-dot-ring bg-slate-100"><span class="h-2.5 w-2.5 rounded-full bg-slate-500"></span></div>
+              <div><p class="font-bold">Teacher training & support</p><p class="text-sm text-techxagon-dark/65 mt-0.5">Enable educators with tools, methods, and ongoing coaching.</p></div>
+            </li>
+            <li class="partner-list-item reveal delay-4">
+              <div class="partner-dot-ring bg-neutral-100"><span class="h-2.5 w-2.5 rounded-full bg-neutral-600"></span></div>
+              <div><p class="font-bold">Infrastructure & Device-as-a-Service <span class="text-xs font-normal text-techxagon-dark/50">(optional)</span></p><p class="text-sm text-techxagon-dark/65 mt-0.5">Reduce upfront barriers—support labs, devices, and adoption planning.</p></div>
+            </li>
+          </ul>
+        </div>
+
+        <div class="lg:col-span-6 reveal-right">
+          <div class="partner-box">
+            <div class="partner-box-inner">
+              <p class="text-sm font-bold text-techxagon-dark/60 uppercase tracking-wide">What schools get</p>
+              <div class="mt-6 grid sm:grid-cols-2 gap-4">
+                <div class="schools-card"><p class="font-bold">Termly delivery plan</p><p class="mt-1.5 text-sm text-techxagon-dark/65">Clear timelines, milestones, and learning outcomes.</p></div>
+                <div class="schools-card"><p class="font-bold">Student portfolio outcomes</p><p class="mt-1.5 text-sm text-techxagon-dark/65">Visible projects to build confidence and employability.</p></div>
+                <div class="schools-card"><p class="font-bold">Quality assurance</p><p class="mt-1.5 text-sm text-techxagon-dark/65">Structured assessments and progress tracking.</p></div>
+                <div class="schools-card"><p class="font-bold">Parent & school reporting</p><p class="mt-1.5 text-sm text-techxagon-dark/65">Simple updates to show impact and engagement.</p></div>
+              </div>
+              <div class="mt-5 rounded-2xl p-5" style="background:linear-gradient(135deg,rgba(232,41,28,.06),rgba(249,115,22,.06));border:1px solid rgba(232,41,28,.12)">
+                <p class="font-bold">🎯 Goal</p>
+                <p class="text-sm text-techxagon-dark/65 mt-1.5">Bridge the gap between traditional school education and real-world tech skills—so students can compete globally for high-paying careers and remote work opportunities.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grad-line"></div>
+
+  <!-- ════════════════════════════════════════════════════════
+       STATS
+  ════════════════════════════════════════════════════════ -->
+  <section class="py-20 sm:py-24">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+        <div class="max-w-2xl">
+          <div class="section-label reveal">Impact</div>
+          <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight reveal delay-1">Proven impact you can trust</h2>
+          <p class="mt-3 text-techxagon-dark/70 reveal delay-2">From students to schools, we focus on practical outcomes—confidence, capability, and real projects.</p>
+        </div>
+        <div class="reveal delay-2">
+          <div style="border-radius:16px;background:linear-gradient(135deg,var(--red),var(--orange));padding:2px;box-shadow:0 4px 20px rgba(232,41,28,.25)">
+            <div style="border-radius:14px;background:#fff;padding:14px 20px;display:flex;align-items:center;gap:20px">
+              <p class="text-sm font-bold">Get a partnership brief</p>
+              <a href="/apply-partner" class="text-sm font-bold" style="color:var(--red)">Request now →</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-12 grid sm:grid-cols-3 gap-6">
+        <div class="stat-card reveal delay-1">
+          <p class="text-sm font-semibold text-techxagon-dark/60">Students taught</p>
+          <p class="stat-number mt-2"><span class="counter" data-target="25000" data-suffix="+">0</span></p>
+          <p class="mt-3 text-sm text-techxagon-dark/60">Learners introduced to future-ready tech skills.</p>
+        </div>
+        <div class="stat-card reveal delay-2">
+          <p class="text-sm font-semibold text-techxagon-dark/60">Partner schools</p>
+          <p class="stat-number mt-2"><span class="counter" data-target="86" data-suffix="+">0</span></p>
+          <p class="mt-3 text-sm text-techxagon-dark/60">Schools integrating Techxagon into learning delivery.</p>
+        </div>
+        <div class="stat-card reveal delay-3">
+          <p class="text-sm font-semibold text-techxagon-dark/60">Tutors / instructors</p>
+          <p class="stat-number mt-2"><span class="counter" data-target="75" data-suffix="+">0</span></p>
+          <p class="mt-3 text-sm text-techxagon-dark/60">Specialists delivering hands-on sessions and mentorship.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grad-line"></div>
+
+  <!-- ════════════════════════════════════════════════════════
+       TESTIMONIALS
+  ════════════════════════════════════════════════════════ -->
+  <section class="py-20 sm:py-24 bg-white">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6">
+        <div class="max-w-2xl">
+          <div class="section-label reveal">Testimonials</div>
+          <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight reveal delay-1">What students say</h2>
+          <p class="mt-3 text-techxagon-dark/70 reveal delay-2">Real feedback from learners who experienced Techxagon's project-based sessions.</p>
+        </div>
+        <div class="flex items-center gap-2 reveal delay-2">
+          <button id="tPrev" class="h-11 w-11 rounded-xl border border-techxagon-dark/15 hover:bg-techxagon-dark/5 transition-all hover:scale-110 active:scale-95" aria-label="Previous">
+            <svg class="h-5 w-5 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <button id="tNext" class="h-11 w-11 rounded-xl border border-techxagon-dark/15 hover:bg-techxagon-dark/5 transition-all hover:scale-110 active:scale-95" aria-label="Next">
+            <svg class="h-5 w-5 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-10 reveal">
+        <div class="testimonial-track relative overflow-hidden">
+          <div id="testimonialInner" class="flex" style="transition:transform .6s cubic-bezier(0.16,1,0.3,1)">
+
+            {# ── SLIDE 1 – Divine Favour ──────────────────────────── #}
+            <figure class="min-w-full">
+              <div class="testimonial-slide">
+                <div class="flex items-start gap-5">
+
+                  {# Real photo #}
+                  <div class="shrink-0">
+                    <img src="{% static 'assets/testimonials/chid1.jpg' %}"
+                         alt="Divine Favour"
+                         class="h-14 w-14 rounded-2xl object-cover"
+                         style="box-shadow:0 4px 14px rgba(232,41,28,.25);"
+                         onerror="this.onerror=null;this.style.display='none';this.nextElementSibling.style.display='grid';">
+                  </div>
+
+                  <blockquote class="text-lg sm:text-2xl font-bold leading-relaxed tracking-tight" style="font-family:'Bricolage Grotesque',sans-serif">
+                    "They've taught us tags in Techxagon Academy this term. Tags are the building blocks of HTML.
+                    They are currently teaching us how to use Scratch — and many other things."
+                  </blockquote>
+                </div>
+                <figcaption class="mt-8 flex items-center justify-between flex-wrap gap-3 pt-6 border-t border-techxagon-dark/08">
+                  <div>
+                    <p class="font-bold">Okonkwo Chidera Divine Favour</p>
+                    <p class="text-sm text-techxagon-dark/55">Sacred Heart Seminary, Nsude</p>
+                  </div>
+                  <span style="font-size:.78rem;font-weight:600;background:rgba(232,41,28,.08);color:var(--red);border-radius:8px;padding:4px 12px">
+                    Programming / Coding
+                  </span>
+                </figcaption>
+              </div>
+            </figure>
+
+            {# ── SLIDE 2 – Ann Mary ──────────────────────────────── #}
+            <figure class="min-w-full">
+              <div class="testimonial-slide">
+                <div class="flex items-start gap-5">
+
+                  <div class="shrink-0">
+                    <img src="{% static 'assets/testimonials/chid2.jpg' %}"
+                         alt="Ann Mary"
+                         class="h-14 w-14 rounded-2xl object-cover"
+                         style="box-shadow:0 4px 14px rgba(249,115,22,.25);"
+                         onerror="this.onerror=null;this.style.display='none';this.nextElementSibling.style.display='grid';">
+                  </div>
+
+                  <blockquote class="text-lg sm:text-2xl font-bold leading-relaxed tracking-tight" style="font-family:'Bricolage Grotesque',sans-serif">
+                    "I learnt about JavaScript — they told us CSS is a colourful crayon and HTML is the pen.
+                    It seems so interesting and fun and we put it into practice. Techxagon, thank you for
+                    helping me understand and learn more in tech."
+                  </blockquote>
+                </div>
+                <figcaption class="mt-8 flex items-center justify-between flex-wrap gap-3 pt-6 border-t border-techxagon-dark/08">
+                  <div>
+                    <p class="font-bold">Ann Mary Ann Kosiraji</p>
+                    <p class="text-sm text-techxagon-dark/55">Mater Dei College</p>
+                  </div>
+                  <span style="font-size:.78rem;font-weight:600;background:rgba(249,115,22,.08);color:var(--orange);border-radius:8px;padding:4px 12px">
+                    Programming / UI/UX
+                  </span>
+                </figcaption>
+              </div>
+            </figure>
+
+            {# ── SLIDE 3 – Ezeokoli Munachi ──────────────────────── #}
+            <figure class="min-w-full">
+              <div class="testimonial-slide">
+                <div class="flex items-start gap-5">
+                  {# No photo available — use initial avatar #}
+                  <div class="t-avatar">E</div>
+
+                  <blockquote class="text-lg sm:text-2xl font-bold leading-relaxed tracking-tight" style="font-family:'Bricolage Grotesque',sans-serif">
+                    "The teacher taught us how to use Scratch — how to control sprites and make them move,
+                    speak, and do whatever you want. The lessons were very engaging and I easily understood.
+                    Thumbs up to Techxagon, readying the future."
+                  </blockquote>
+                </div>
+                <figcaption class="mt-8 flex items-center justify-between flex-wrap gap-3 pt-6 border-t border-techxagon-dark/08">
+                  <div>
+                    <p class="font-bold">Ezeokoli Munachi</p>
+                    <p class="text-sm text-techxagon-dark/55">Emmanuel Anglican Secondary School</p>
+                  </div>
+                  <span style="font-size:.78rem;font-weight:600;background:rgba(232,41,28,.08);color:var(--red);border-radius:8px;padding:4px 12px">
+                    Robotics / Coding
+                  </span>
+                </figcaption>
+              </div>
+            </figure>
+
+          </div>{# end testimonialInner #}
+        </div>
+
+        <div class="mt-6 flex justify-center gap-2">
+          <button class="t-dot active" data-index="0" aria-label="Testimonial 1"></button>
+          <button class="t-dot"        data-index="1" aria-label="Testimonial 2"></button>
+          <button class="t-dot"        data-index="2" aria-label="Testimonial 3"></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grad-line"></div>
+
+  <!-- ════════════════════════════════════════════════════════
+       PROJECTS
+  ════════════════════════════════════════════════════════ -->
+  <section class="py-20 sm:py-24">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+        <div class="max-w-2xl">
+          <div class="section-label reveal">Student Work</div>
+          <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight reveal delay-1">
+            Student projects that show real skill
+          </h2>
+          <p class="mt-3 text-techxagon-dark/70 reveal delay-2">
+            Our learners don't just "take lessons" — they build outcomes they can showcase.
+          </p>
+        </div>
+        {% if featured_projects %}
+        <div class="reveal delay-2">
+          <a href="{% url 'projects:project_list' %}" class="btn-secondary magnetic">Explore projects</a>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="mt-12 grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% for project in featured_projects %}
+        <article class="project-card reveal delay-{{ forloop.counter }}">
+
+          {# Thumbnail or emoji fallback #}
+          <div class="project-thumb">
+            {% if project.thumbnail %}
+              <img src="{{ project.thumbnail.url }}"
+                   alt="{{ project.title }}"
+                   class="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
+            {% else %}
+              <div class="project-thumb-inner" style="background:{{ project.thumb_gradient_css }}">
+                {{ project.thumb_emoji }}
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="p-6">
+            {# Category #}
+            {% if project.category %}
+            <p class="text-xs font-bold text-techxagon-dark/55 uppercase tracking-wide">
+              {{ project.category.name }}
+            </p>
+            {% endif %}
+
+            <h3 class="mt-2 text-lg font-bold">{{ project.title }}</h3>
+            <p class="mt-2 text-sm text-techxagon-dark/65">{{ project.excerpt|truncatechars:100 }}</p>
+
+            {# Student byline #}
+            <div class="mt-4 flex items-center gap-2">
+              {% if project.student_photo %}
+                <img src="{{ project.student_photo.url }}"
+                     alt="{{ project.student_name }}"
+                     class="h-6 w-6 rounded-full object-cover">
+              {% else %}
+                <div class="h-6 w-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                     style="background:linear-gradient(135deg,#e8291c,#f97316)">
+                  {{ project.student_name|slice:":1" }}
+                </div>
+              {% endif %}
+              <span class="text-xs text-techxagon-dark/50 font-semibold">{{ project.student_name }}</span>
+            </div>
+
+            <a href="{% url 'projects:project_detail' project.slug %}"
+               class="prog-link mt-4">View details <span>→</span></a>
+          </div>
+        </article>
+
+        {% empty %}
+        {# Placeholder cards shown before any projects are added in admin #}
+        {% for placeholder in "123" %}
+        <article class="project-card reveal delay-{{ forloop.counter }}">
+          <div class="project-thumb">
+            <div class="project-thumb-inner"
+                 style="background:{% cycle 'linear-gradient(135deg,rgba(232,41,28,.12),rgba(249,115,22,.12))' 'linear-gradient(135deg,rgba(249,115,22,.12),rgba(100,116,139,.1))' 'linear-gradient(135deg,rgba(100,116,139,.1),rgba(232,41,28,.1))' %}">
+              {% cycle '🌐' '🤖' '📊' %}
+            </div>
+          </div>
+          <div class="p-6">
+            <p class="text-xs font-bold text-techxagon-dark/55 uppercase tracking-wide">
+              {% cycle 'Web Development' 'Robotics' 'Data Science' %}
+            </p>
+            <h3 class="mt-2 text-lg font-bold">
+              {% cycle 'School Club Website' 'Line-Following Robot' 'Student Performance Dashboard' %}
+            </h3>
+            <p class="mt-2 text-sm text-techxagon-dark/65">
+              {% cycle 'A responsive site built with modern HTML/CSS patterns.' 'Sensors + logic control to navigate paths accurately.' 'Charts + insights from data for decision making.' %}
+            </p>
+          </div>
+        </article>
+        {% endfor %}
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <div class="grad-line"></div>
+
+  <!-- ════════════════════════════════════════════════════════
+       BLOG
+  ════════════════════════════════════════════════════════ -->
+  <section class="py-20 sm:py-24 bg-white">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+        <div class="max-w-2xl">
+          <div class="section-label reveal">Insights</div>
+          <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight reveal delay-1">For parents, educators & schools</h2>
+          <p class="mt-3 text-techxagon-dark/70 reveal delay-2">Practical articles on tech education, learning paths, and preparing students for 4IR opportunities.</p>
+        </div>
+        <div class="reveal delay-2"><a href="{% url 'blog:blog_list' %}" class="btn-secondary magnetic">Visit the blog</a></div>
+      </div>
+
+{# ── REAL BLOG POSTS FROM DB ─────────────────────────────── #}
+      <div class="mt-12 grid md:grid-cols-3 gap-6">
+        {% for post in latest_posts %}
+        <article class="blog-card reveal delay-{{ forloop.counter }}">
+          {# Category label #}
+          {% if post.category %}
+          <p class="text-xs font-bold text-techxagon-dark/55 uppercase tracking-wide">
+            {{ post.category.name }}
+          </p>
+          {% endif %}
+
+          {# Title #}
+          <h3 class="mt-3 text-lg font-bold leading-snug">{{ post.title }}</h3>
+
+          {# Excerpt #}
+          <p class="mt-2 text-sm text-techxagon-dark/65">{{ post.excerpt|truncatechars:100 }}</p>
+
+          {# Meta #}
+          <div class="mt-4 flex items-center gap-3 text-xs text-techxagon-dark/40">
+            {% if post.published_at %}
+            <span>{{ post.published_at|date:"M j, Y" }}</span>
+            <span>·</span>
+            {% endif %}
+            <span>{{ post.read_time }} min read</span>
+          </div>
+
+          <a href="{% url 'blog:blog_detail' post.slug %}" class="prog-link mt-4">Read more <span>→</span></a>
+        </article>
+        {% empty %}
+        {# Fallback if no posts exist yet #}
+        <article class="blog-card reveal delay-1 md:col-span-3">
+          <p class="text-sm text-techxagon-dark/50 text-center py-8">
+            No articles published yet. <a href="{% url 'blog:blog_list' %}" class="text-techxagon-red font-semibold">Visit the blog →</a>
+          </p>
+        </article>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <div class="grad-line"></div>
+
+  <!-- ════════════════════════════════════════════════════════
+       FAQ
+  ════════════════════════════════════════════════════════ -->
+  <section class="py-20 sm:py-24">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div class="max-w-2xl">
+        <div class="section-label reveal">FAQ</div>
+        <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight reveal delay-1">Frequently asked questions</h2>
+        <p class="mt-3 text-techxagon-dark/70 reveal delay-2">Quick answers for parents, schools, and partners.</p>
+      </div>
+
+      <div class="mt-12 grid lg:grid-cols-2 gap-5">
+        <div class="faq-card reveal delay-1">
+          <button class="faqBtn2" aria-expanded="false">
+            <div><p class="font-bold text-base">Who are Techxagon programs for?</p><p class="text-sm text-techxagon-dark/55 mt-1">Secondary school students, schools, educators, and parents.</p></div>
+            <span class="faq-icon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></span>
+          </button>
+          <div class="faq-body"><p class="text-sm text-techxagon-dark/65">We primarily teach secondary school students. We also partner with schools and support educators and parents through clear learning pathways and progress reporting.</p></div>
+        </div>
+
+        <div class="faq-card reveal delay-2">
+          <button class="faqBtn2" aria-expanded="false">
+            <div><p class="font-bold text-base">How does the school partnership work?</p><p class="text-sm text-techxagon-dark/55 mt-1">Curriculum + tutors + teacher support.</p></div>
+            <span class="faq-icon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></span>
+          </button>
+          <div class="faq-body"><p class="text-sm text-techxagon-dark/65">We embed a structured 4IR learning program into your timetable, provide dedicated tutors, and deliver teacher training. Optional infrastructure and device support can also be included.</p></div>
+        </div>
+
+        <div class="faq-card reveal delay-3">
+          <button class="faqBtn2" aria-expanded="false">
+            <div><p class="font-bold text-base">Do students build real projects?</p><p class="text-sm text-techxagon-dark/55 mt-1">Yes—portfolio outcomes are central.</p></div>
+            <span class="faq-icon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></span>
+          </button>
+          <div class="faq-body"><p class="text-sm text-techxagon-dark/65">Students learn by building: websites, apps, robotics builds, design prototypes, cybersecurity exercises, and data dashboards—guided by tutors.</p></div>
+        </div>
+
+        <div class="faq-card reveal delay-4">
+          <button class="faqBtn2" aria-expanded="false">
+            <div><p class="font-bold text-base">How do we get started?</p><p class="text-sm text-techxagon-dark/55 mt-1">Apply online or request a partnership brief.</p></div>
+            <span class="faq-icon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></span>
+          </button>
+          <div class="faq-body"><p class="text-sm text-techxagon-dark/65">Use the "Partner" button to share your details. We'll respond with a short onboarding process, timeline, and the best-fit model for your school or learner group.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════
+       CTA
+  ════════════════════════════════════════════════════════ -->
+  <section class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8">
+    <div class="mx-auto max-w-7xl reveal-scale">
+      <div class="cta-wrap">
+        <div class="cta-inner">
+          <div class="cta-grid-lines"></div>
+          <div class="relative z-10 grid lg:grid-cols-12 gap-8 items-center">
+            <div class="lg:col-span-7">
+              <div class="section-label" style="color:rgba(255,255,255,.7)">Get started</div>
+              <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-white mt-2">Ready to bring Techxagon to your school—or start learning?</h2>
+              <p class="mt-4 text-white/65 max-w-xl leading-relaxed">Let's help students build future-ready skills through hands-on programs, dedicated tutors, and a partnership model built for real adoption.</p>
+            </div>
+            <div class="lg:col-span-5 flex flex-col sm:flex-row lg:flex-col gap-3">
+              <a href="/apply-partner" class="btn-primary magnetic" style="justify-content:center">
+                Partner with Techxagon
+                <svg class="ml-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              </a>
+              <a href="/contact" class="inline-flex items-center justify-center px-6 py-3.5 rounded-xl font-bold border-2 border-white/20 text-white hover:bg-white/10 transition">
+                Contact Us
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+{% endblock content %}
+
+{% block extra_js %}
+<script>
+(function() {
+  /* ─── SCROLL PROGRESS ─── */
+  const bar = document.getElementById('scrollProgress');
+  window.addEventListener('scroll', () => {
+    const p = window.scrollY / (document.body.scrollHeight - window.innerHeight);
+    bar.style.transform = `scaleX(${p})`;
+  }, {passive:true});
+
+  /* ─── CURSOR GLOW (desktop) ─── */
+  const glow = document.getElementById('cursorGlow');
+  if(window.innerWidth > 768) {
+    window.addEventListener('mousemove', e => {
+      glow.style.left = e.clientX + 'px';
+      glow.style.top  = e.clientY + 'px';
+    }, {passive:true});
+  } else {
+    glow.style.display = 'none';
+  }
+
+  /* ─── SCROLL REVEAL ─── */
+  const revealEls = document.querySelectorAll('.reveal, .reveal-left, .reveal-right, .reveal-scale');
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if(e.isIntersecting) {
+        e.target.classList.add('revealed');
+        io.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin:'0px 0px -40px 0px' });
+  revealEls.forEach(el => io.observe(el));
+
+  /* ─── PARTICLES ─── */
+  const pCont = document.getElementById('particles');
+  if(pCont) {
+    const colors = ['#e8291c','#f97316','#e84a1c'];
+    for(let i=0; i<18; i++) {
+      const p = document.createElement('span');
+      p.classList.add('particle');
+      p.style.cssText = `
+        left:${Math.random()*100}%;
+        width:${2+Math.random()*4}px;
+        height:${2+Math.random()*4}px;
+        background:${colors[Math.floor(Math.random()*colors.length)]};
+        --drift:${(Math.random()-.5)*120}px;
+        animation-duration:${6+Math.random()*8}s;
+        animation-delay:${Math.random()*8}s;
+      `;
+      pCont.appendChild(p);
+    }
+  }
+
+  /* ─── COUNTER ANIMATION ─── */
+  const counters = document.querySelectorAll('.counter');
+  const cObs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if(!e.isIntersecting) return;
+      const el = e.target;
+      const target = +el.dataset.target;
+      const suffix = el.dataset.suffix || '';
+      const duration = 1600;
+      const start = performance.now();
+      function tick(now) {
+        const p = Math.min((now - start) / duration, 1);
+        // ease out expo
+        const ease = p === 1 ? 1 : 1 - Math.pow(2, -10 * p);
+        const val = Math.floor(ease * target);
+        el.textContent = (target >= 1000 ? val.toLocaleString() : val) + suffix;
+        if(p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+      cObs.unobserve(el);
+    });
+  }, {threshold:0.5});
+  counters.forEach(c => cObs.observe(c));
+
+  /* ─── TESTIMONIAL SLIDER ─── */
+  const inner = document.getElementById('testimonialInner');
+  const tDots = Array.from(document.querySelectorAll('.t-dot'));
+  const total = tDots.length;
+  let idx = 0;
+  function updateSlider() {
+    inner.style.transform = `translateX(-${idx * 100}%)`;
+    tDots.forEach((d,i) => {
+      d.classList.toggle('active', i === idx);
+    });
+  }
+  document.getElementById('tPrev')?.addEventListener('click', () => { idx=(idx-1+total)%total; updateSlider(); });
+  document.getElementById('tNext')?.addEventListener('click', () => { idx=(idx+1)%total; updateSlider(); });
+  tDots.forEach(d => d.addEventListener('click', () => { idx=+d.dataset.index; updateSlider(); }));
+  let autoT = setInterval(() => { idx=(idx+1)%total; updateSlider(); }, 7000);
+  inner.parentElement?.addEventListener('mouseenter', () => clearInterval(autoT));
+  inner.parentElement?.addEventListener('mouseleave', () => { autoT=setInterval(()=>{idx=(idx+1)%total;updateSlider();},7000); });
+  updateSlider();
+
+  /* ─── IMAGE SLIDER + HERO TEXT ─── */
+  const heroSlides = [
+    {
+      title: `Transform students into <span class="text-transparent bg-clip-text bg-gradient-to-r from-techxagon-red to-techxagon-orange">future-ready creators</span> — not just consumers.`,
+      desc: "Techxagon Academy bridges the gap between classroom learning and real-world tech skills through hands-on coding, robotics, cybersecurity, UI/UX and data science."
+    },
+    {
+      title: `Students learn by <span class="text-transparent bg-clip-text bg-gradient-to-r from-techxagon-red to-techxagon-orange">building real technology projects</span>.`,
+      desc: "From websites and apps to robots and dashboards, Techxagon programs focus on practical creation—not passive learning."
+    },
+    {
+      title: `Preparing Africa's students for <span class="text-transparent bg-clip-text bg-gradient-to-r from-techxagon-red to-techxagon-orange">global tech opportunities</span>.`,
+      desc: "Our programs equip learners with skills needed for remote work, innovation, and high-value digital careers."
+    }
+  ];
+  const imgs = Array.from(document.querySelectorAll('.lpSlideImg'));
+  const titleEl = document.getElementById('heroTitle');
+  const descEl  = document.getElementById('heroDesc');
+  if(imgs.length) {
+    let si = 0;
+    setInterval(() => {
+      imgs[si].classList.remove('opacity-100'); imgs[si].classList.add('opacity-0');
+      si = (si+1)%imgs.length;
+      imgs[si].classList.remove('opacity-0'); imgs[si].classList.add('opacity-100');
+      if(titleEl) {
+        titleEl.style.opacity='0'; titleEl.style.transform='translateY(16px)';
+        setTimeout(() => {
+          titleEl.innerHTML = heroSlides[si].title;
+          titleEl.style.transition='opacity .5s ease,transform .5s ease';
+          titleEl.style.opacity='1'; titleEl.style.transform='translateY(0)';
+        }, 300);
+      }
+      if(descEl) {
+        descEl.style.opacity='0';
+        setTimeout(() => {
+          descEl.textContent = heroSlides[si].desc;
+          descEl.style.transition='opacity .5s ease';
+          descEl.style.opacity='1';
+        }, 400);
+      }
+    }, 6000);
+  }
+
+  /* ─── FAQ ─── */
+  document.querySelectorAll('.faqBtn2').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.faq-card');
+      const isOpen = card.classList.contains('open');
+      document.querySelectorAll('.faq-card').forEach(c => {
+        c.classList.remove('open');
+        c.querySelector('.faq-body').classList.remove('open');
+        c.querySelector('.faqBtn2').setAttribute('aria-expanded','false');
+      });
+      if(!isOpen) {
+        card.classList.add('open');
+        card.querySelector('.faq-body').classList.add('open');
+        btn.setAttribute('aria-expanded','true');
+      }
+    });
+  });
+
+  /* ─── MAGNETIC BUTTONS ─── */
+  document.querySelectorAll('.magnetic').forEach(el => {
+    el.addEventListener('mousemove', e => {
+      const r = el.getBoundingClientRect();
+      const x = (e.clientX - r.left - r.width/2)  * 0.25;
+      const y = (e.clientY - r.top  - r.height/2) * 0.25;
+      el.style.transform = `translate(${x}px,${y}px)`;
+    });
+    el.addEventListener('mouseleave', () => {
+      el.style.transition='transform .5s cubic-bezier(0.34,1.56,0.64,1)';
+      el.style.transform='translate(0,0)';
+      setTimeout(()=>el.style.transition='',500);
+    });
+  });
+
+})();
+</script>
+{% endblock extra_js %}

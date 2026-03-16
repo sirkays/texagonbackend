@@ -1,0 +1,338 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block content %}
+
+<main id="main" class="flex-1">
+
+    {# ── Breadcrumb ─────────────────────────────────────────────────────────── #}
+    <div class="border-b border-techxagon-dark/10 bg-white">
+        <div class="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+            <nav class="flex items-center gap-2 text-sm" aria-label="Breadcrumb">
+                <a href="/" class="text-techxagon-dark hover:text-techxagon-red">Home</a>
+                <span class="text-techxagon-dark/50">/</span>
+                <a href="{% url 'blog:blog_list' %}" class="text-techxagon-dark hover:text-techxagon-red">Blog</a>
+                <span class="text-techxagon-dark/50">/</span>
+                <span class="text-techxagon-dark">{{ post.title }}</span>
+            </nav>
+        </div>
+    </div>
+
+    {# ── Hero ───────────────────────────────────────────────────────────────── #}
+    <div class="bg-linear-to-br from-techxagon-dark/5 to-techxagon-dark/10">
+        <div class="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+            {% if post.category %}
+            <div class="mb-4">
+                <a href="{% url 'blog:blog_list' %}?category={{ post.category.slug }}"
+                   class="inline-flex items-center rounded-full bg-techxagon-red px-3 py-1 text-sm font-semibold text-white hover:opacity-90">
+                    {{ post.category.name }}
+                </a>
+            </div>
+            {% endif %}
+
+            <h1 class="mb-6 text-4xl leading-tight font-bold text-techxagon-dark sm:text-5xl">
+                {{ post.title }}
+            </h1>
+
+            <div class="flex flex-col gap-4 text-techxagon-dark/70 sm:flex-row sm:items-center">
+                {% if post.author %}
+                <div class="flex items-center gap-3">
+                    {% if post.author.author_profile.avatar %}
+                        <img src="{{ post.author.author_profile.avatar.url }}"
+                             alt="{{ post.author.author_profile.display_name }}"
+                             class="h-12 w-12 rounded-full object-cover" />
+                    {% else %}
+                        <div class="h-12 w-12 rounded-full bg-techxagon-red/20 flex items-center justify-center flex-shrink-0">
+                            <span class="text-techxagon-red font-bold">
+                                {{ post.author.first_name|slice:":1" }}{{ post.author.last_name|slice:":1" }}
+                            </span>
+                        </div>
+                    {% endif %}
+                    <div>
+                        <p class="font-semibold text-techxagon-dark">
+                            {% if post.author.get_full_name %}{{ post.author.get_full_name }}{% else %}{{ post.author.username }}{% endif %}
+                        </p>
+                        {% if post.author.author_profile.title %}
+                            <p class="text-sm">{{ post.author.author_profile.title }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                <div class="sm:border-l sm:border-techxagon-dark/20 sm:pl-4">
+                    {% if post.published_at %}
+                        <p class="text-sm">Published on <time datetime="{{ post.published_at|date:'Y-m-d' }}">{{ post.published_at|date:"F j, Y" }}</time></p>
+                    {% endif %}
+                    <p class="text-sm">{{ post.read_time }} min read</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Body ───────────────────────────────────────────────────────────────── #}
+    <div class="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+        <div class="grid grid-cols-1 gap-8 lg:grid-cols-3">
+
+            {# ── Article content ──────────────────────────────────────────────── #}
+            <div class="lg:col-span-2">
+
+                {% if post.featured_image %}
+                <div class="mb-8 overflow-hidden rounded-xl shadow-soft">
+                    <img src="{{ post.featured_image.url }}"
+                         alt="{{ post.title }}"
+                         class="aspect-video h-auto w-full object-cover" />
+                </div>
+                {% endif %}
+
+                <article class="article-content">
+                    {{ post.content|safe }}
+                </article>
+
+                {# ── Tags & share ─────────────────────────────────────────────── #}
+                <div class="mt-12 border-t border-techxagon-dark/20 pt-8">
+                    {% if post.tags.all %}
+                    <div class="mb-8 flex flex-wrap gap-2">
+                        {% for tag in post.tags.all %}
+                        <a href="{% url 'blog:blog_list' %}?q={{ tag.name }}"
+                           class="inline-flex items-center rounded-full bg-techxagon-dark/5 px-3 py-1 text-sm font-medium text-techxagon-dark hover:bg-techxagon-dark/10">
+                            #{{ tag.name }}
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    <div class="rounded-lg bg-techxagon-dark/5 p-6">
+                        <h3 class="mb-4 font-semibold">Share this article</h3>
+                        <div class="flex gap-4">
+                            <a href="https://twitter.com/intent/tweet?text={{ post.title|urlencode }}&url={{ request.build_absolute_uri }}"
+                               target="_blank" rel="noopener"
+                               title="Share on Twitter"
+                               class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-white text-techxagon-dark shadow-soft transition-colors hover:bg-techxagon-red hover:text-white">
+                                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M23 3a10.9 10.9 0 01-3.14 1.53 4.48 4.48 0 00-7.86 3v1A10.66 10.66 0 013 4s-4 9 5 13a11.64 11.64 0 01-7 2s9 5 20 5a9.5 9.5 0 00-9-5.5c4.75 2.25 7-7 7-7a4.5 4.5 0 00-4.5-4.5"></path>
+                                </svg>
+                            </a>
+                            <a href="https://www.facebook.com/sharer/sharer.php?u={{ request.build_absolute_uri|urlencode }}"
+                               target="_blank" rel="noopener"
+                               title="Share on Facebook"
+                               class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-white text-techxagon-dark shadow-soft transition-colors hover:bg-techxagon-red hover:text-white">
+                                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M18 2h-3a6 6 0 00-6 6v3H7v4h2v8h4v-8h3l1-4h-4V8a1 1 0 011-1h3z"></path>
+                                </svg>
+                            </a>
+                            <a href="https://www.linkedin.com/sharing/share-offsite/?url={{ request.build_absolute_uri|urlencode }}"
+                               target="_blank" rel="noopener"
+                               title="Share on LinkedIn"
+                               class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-white text-techxagon-dark shadow-soft transition-colors hover:bg-techxagon-red hover:text-white">
+                                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6zM2 9h4v12H2z"></path>
+                                    <circle cx="4" cy="4" r="2"></circle>
+                                </svg>
+                            </a>
+                            <button id="copyLinkBtn"
+                               title="Copy link"
+                               class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-white text-techxagon-dark shadow-soft transition-colors hover:bg-techxagon-red hover:text-white">
+                                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.658 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <p id="copyMsg" class="hidden mt-2 text-xs text-green-600 font-medium">Link copied!</p>
+                    </div>
+                </div>
+
+                {# ── Related articles ─────────────────────────────────────────── #}
+                {% if related_posts %}
+                <div class="mt-16 border-t border-techxagon-dark/20 pt-12">
+                    <h3 class="mb-8 text-2xl font-bold">Related Articles</h3>
+                    <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                        {% for related in related_posts %}
+                        <a href="{% url 'blog:blog_detail' related.slug %}"
+                           class="group overflow-hidden rounded-lg border border-techxagon-dark/10 transition-shadow hover:shadow-soft">
+                            {% if related.featured_image %}
+                                <img src="{{ related.featured_image.url }}"
+                                     alt="{{ related.title }}"
+                                     class="h-40 w-full object-cover" />
+                            {% else %}
+                                <div class="h-40 w-full bg-techxagon-dark/5"></div>
+                            {% endif %}
+                            <div class="p-5">
+                                {% if related.category %}
+                                <div class="mb-2">
+                                    <span class="inline-flex items-center rounded bg-techxagon-orange px-2 py-1 text-xs font-semibold text-white">
+                                        {{ related.category.name }}
+                                    </span>
+                                </div>
+                                {% endif %}
+                                <h4 class="mb-2 text-lg font-bold group-hover:text-techxagon-red transition-colors">
+                                    {{ related.title }}
+                                </h4>
+                                <p class="mb-4 text-sm text-techxagon-dark/70">{{ related.excerpt|truncatechars:100 }}</p>
+                                <p class="text-xs text-techxagon-dark/50">{{ related.read_time }} min read</p>
+                            </div>
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+            </div>{# end article column #}
+
+            {# ── Sidebar ──────────────────────────────────────────────────────── #}
+            <div class="lg:col-span-1">
+
+                {# Author bio #}
+                {% if post.author %}
+                <div class="mb-6 rounded-lg border border-techxagon-dark/10 bg-white p-6">
+                    <div class="mb-4 text-center">
+                        {% if post.author.author_profile.avatar %}
+                            <img src="{{ post.author.author_profile.avatar.url }}"
+                                 alt="{{ post.author.author_profile.display_name }}"
+                                 class="mx-auto mb-4 h-20 w-20 rounded-full object-cover" />
+                        {% else %}
+                            <div class="mx-auto mb-4 h-20 w-20 rounded-full bg-techxagon-red/20 flex items-center justify-center">
+                                <span class="text-techxagon-red font-bold text-2xl">
+                                    {{ post.author.first_name|slice:":1" }}{{ post.author.last_name|slice:":1" }}
+                                </span>
+                            </div>
+                        {% endif %}
+                        <h4 class="text-lg font-bold">
+                            {% if post.author.get_full_name %}{{ post.author.get_full_name }}{% else %}{{ post.author.username }}{% endif %}
+                        </h4>
+                        {% if post.author.author_profile.title %}
+                            <p class="mb-4 text-sm text-techxagon-dark/70">{{ post.author.author_profile.title }}</p>
+                        {% endif %}
+                    </div>
+                    {% if post.author.author_profile.bio %}
+                    <p class="mb-4 text-sm text-techxagon-dark/70">{{ post.author.author_profile.bio }}</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                {# Newsletter #}
+                <div class="mb-6 rounded-lg border border-techxagon-red/20 bg-linear-to-br from-techxagon-red/10 to-techxagon-orange/10 p-6">
+                    <h4 class="mb-2 font-bold">Subscribe for Updates</h4>
+                    <p class="mb-4 text-sm text-techxagon-dark/70">
+                        Get the latest coding tips and tutorials delivered to your inbox weekly.
+                    </p>
+                    <form id="sidebarNewsletterForm" class="space-y-3">
+                        {% csrf_token %}
+                        <input
+                            type="email"
+                            name="email"
+                            placeholder="your@email.com"
+                            class="w-full rounded-lg border border-techxagon-dark/20 px-4 py-2 text-sm outline-none focus:border-techxagon-red"
+                            required
+                        />
+                        <button
+                            type="submit"
+                            class="w-full rounded-lg bg-linear-to-r from-techxagon-red to-techxagon-orange px-4 py-2 text-sm font-semibold text-white hover:opacity-95"
+                        >
+                            Subscribe
+                        </button>
+                        <p id="sidebarNewsletterMsg" class="hidden text-sm text-center font-medium"></p>
+                    </form>
+                </div>
+
+                {# Back to blog #}
+                <div class="rounded-lg border border-techxagon-dark/10 bg-white p-6">
+                    <h4 class="mb-4 text-lg font-bold">Explore More</h4>
+                    <a href="{% url 'blog:blog_list' %}"
+                       class="block rounded-lg border border-techxagon-red px-4 py-2 text-center text-sm font-semibold text-techxagon-red transition-colors hover:bg-techxagon-red hover:text-white">
+                        ← Back to Blog
+                    </a>
+                    {% if post.category %}
+                    <a href="{% url 'blog:blog_list' %}?category={{ post.category.slug }}"
+                       class="mt-3 block rounded-lg border border-techxagon-dark/15 px-4 py-2 text-center text-sm font-semibold text-techxagon-dark hover:bg-techxagon-dark/5">
+                        More {{ post.category.name }} articles
+                    </a>
+                    {% endif %}
+                </div>
+
+            </div>{# end sidebar #}
+
+        </div>
+    </div>
+
+    {# ── CTA banner ─────────────────────────────────────────────────────────── #}
+    <section class="my-16 bg-linear-to-r from-techxagon-red to-techxagon-orange">
+        <div class="mx-auto max-w-4xl px-4 py-16 text-center sm:px-6 lg:px-8">
+            <h2 class="mb-4 text-3xl font-bold text-white sm:text-4xl">Ready to Master This?</h2>
+            <p class="mx-auto mb-8 max-w-2xl text-lg text-white/90">
+                Join our programs and start your journey to becoming a skilled developer.
+            </p>
+            <a href="/apply-partner"
+               class="inline-flex items-center rounded-lg bg-white px-8 py-3 text-lg font-semibold text-techxagon-red shadow-soft transition-opacity hover:opacity-95">
+                Explore Courses
+                <svg class="ml-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                </svg>
+            </a>
+        </div>
+    </section>
+
+</main>
+
+<script>
+    // ── Copy link ──────────────────────────────────────────────────────────
+    document.getElementById("copyLinkBtn")?.addEventListener("click", async () => {
+        try {
+            await navigator.clipboard.writeText(window.location.href);
+            const msg = document.getElementById("copyMsg");
+            msg.classList.remove("hidden");
+            setTimeout(() => msg.classList.add("hidden"), 2500);
+        } catch {
+            alert("Unable to copy link.");
+        }
+    });
+
+    // ── Newsletter (shared helper) ─────────────────────────────────────────
+    async function submitNewsletter(formId, msgId) {
+        const form = document.getElementById(formId);
+        if (!form) return;
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const email = form.querySelector('input[type="email"]').value;
+            const csrf = form.querySelector('[name=csrfmiddlewaretoken]').value;
+            const msgEl = document.getElementById(msgId);
+            try {
+                const res = await fetch("{% url 'blog:newsletter_subscribe' %}", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "X-CSRFToken": csrf,
+                    },
+                    body: `email=${encodeURIComponent(email)}`,
+                });
+                const data = await res.json();
+                msgEl.textContent = data.message;
+                msgEl.classList.remove("hidden", "text-red-600", "text-green-600");
+                msgEl.classList.add(data.success ? "text-green-600" : "text-red-600");
+                if (data.success) form.reset();
+            } catch {
+                msgEl.textContent = "Something went wrong. Please try again.";
+                msgEl.classList.remove("hidden");
+                msgEl.classList.add("text-red-600");
+            }
+        });
+    }
+
+    submitNewsletter("sidebarNewsletterForm", "sidebarNewsletterMsg");
+</script>
+
+<style>
+    /* ── Article content typography ───────────────────────────────────── */
+    .article-content { max-width: none; font-size: 1.05rem; line-height: 1.9; }
+    .article-content h2 { margin-top: 2.5rem; margin-bottom: 1rem; font-size: 1.6rem; font-weight: 700; }
+    .article-content h3 { margin-top: 2rem; margin-bottom: .75rem; font-size: 1.3rem; font-weight: 600; }
+    .article-content p  { margin-bottom: 1.5rem; }
+    .article-content ol, .article-content ul { margin-bottom: 1.5rem; padding-left: 1.5rem; }
+    .article-content ol { list-style-type: decimal; }
+    .article-content ul { list-style-type: disc; }
+    .article-content li { margin-bottom: .5rem; }
+    .article-content code { background: rgba(2,1,0,.06); border-radius: .3rem; padding: .15em .4em; font-size: .9em; }
+    .article-content pre  { background: #1e293b; color: #e2e8f0; border-radius: .75rem; padding: 1.5rem; overflow-x: auto; margin: 1.5rem 0; }
+    .article-content pre code { background: transparent; padding: 0; color: inherit; }
+    .article-content strong { font-weight: 600; }
+    .article-content a { color: #dc3005; text-decoration: underline; }
+</style>
+
+{% endblock content %}

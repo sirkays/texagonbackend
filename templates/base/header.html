@@ -1,0 +1,201 @@
+{% load static %}
+<header class="sticky top-0 z-50 bg-white/80 backdrop-blur border-b border-techxagon-dark/10">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="flex h-20 items-center justify-between">
+
+            <a href="{% url 'corefrontend:home_view' %}" class="flex items-center">
+                <img src="{% static 'assets/logo_text.png' %}" alt="Techxagon Academy" class="h-16 w-auto" />
+            </a>
+
+            <nav class="hidden lg:flex items-center gap-1" aria-label="Primary">
+
+                <div class="relative group">
+                    <button
+                        type="button"
+                        class="px-3 py-2 rounded-lg text-sm font-medium hover:bg-techxagon-dark/5 flex items-center gap-1">
+                        Programs
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path d="M6 9l6 6 6-6"></path>
+                        </svg>
+                    </button>
+
+                    <div class="absolute left-0 top-full pt-2">
+                        <div
+                            class="w-56 bg-white border border-techxagon-dark/10 rounded-xl shadow-soft opacity-0 invisible translate-y-1 pointer-events-none transition duration-200 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:pointer-events-auto">
+                            
+                            <a href="{% url 'corefrontend:project_detail' %}"
+                                class="block px-4 py-2 text-sm hover:bg-techxagon-dark/5">
+                                AI & Robotics
+                            </a>
+                            <a href="{% url 'corefrontend:techxablocks' %}"
+                                class="block px-4 py-2 text-sm hover:bg-techxagon-dark/5">
+                                TechxaBlocks
+                            </a>
+
+                            <a href="{% url 'corefrontend:techxaforge' %}"
+                                class="block px-4 py-2 text-sm hover:bg-techxagon-dark/5 rounded-b-xl">
+                                TechxaForge
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <!-- Explore Dropdown -->
+                <div class="relative group">
+                    <button
+                        type="button"
+                        class="px-3 py-2 rounded-lg text-sm font-medium hover:bg-techxagon-dark/5 flex items-center gap-1">
+                        Explore
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path d="M6 9l6 6 6-6"></path>
+                        </svg>
+                    </button>
+
+                    <div class="absolute left-0 top-full pt-2">
+                        <div
+                            class="w-48 bg-white border border-techxagon-dark/10 rounded-xl shadow-soft opacity-0 invisible translate-y-1 pointer-events-none transition duration-200 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:pointer-events-auto">
+                            <a href="{% url 'corefrontend:team' %}"
+                                class="block px-4 py-2 text-sm hover:bg-techxagon-dark/5 rounded-t-xl">
+                                Team
+                            </a>
+
+                            <a href="{% url 'corefrontend:projects' %}"
+                                class="block px-4 py-2 text-sm hover:bg-techxagon-dark/5">
+                                Projects
+                            </a>
+
+                            <a href="{% url 'corefrontend:gallery' %}"
+                                class="block px-4 py-2 text-sm hover:bg-techxagon-dark/5 rounded-b-xl">
+                                Gallery
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <a href="{% url 'corefrontend:for_schools' %}"
+                    class="px-3 py-2 rounded-lg text-sm font-medium hover:bg-techxagon-dark/5">
+                    For School
+                </a>
+
+
+
+                <a href="{% url 'blog:blog_list' %}"
+                    class="px-3 py-2 rounded-lg text-sm font-medium hover:bg-techxagon-dark/5">
+                    Blog
+                </a>
+
+                <a href="https://learn.techxagonacademy.com/store/"
+                    class="px-3 py-2 rounded-lg text-sm font-medium hover:bg-techxagon-dark/5">
+                    Store
+                </a>
+
+                <a href="{% url 'corefrontend:become_a_tutor' %}"
+                    class="px-3 py-2 rounded-lg text-sm font-medium hover:bg-techxagon-dark/5">
+                    Become a Tutor
+                </a>
+
+                <a href="{% url 'corefrontend:contact' %}"
+                    class="px-3 py-2 rounded-lg text-sm font-medium hover:bg-techxagon-dark/5">
+                    Contact Us
+                </a>
+
+                <a href="{% url 'corefrontend:apply_partner' %}"
+                    class="ml-2 inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95 shadow-soft">
+                    Partner
+                </a>
+
+            </nav>
+
+            <div class="lg:hidden flex items-center gap-2">
+
+                <a href="{% url 'corefrontend:apply_partner' %}"
+                    class="inline-flex items-center justify-center px-3 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95">
+                    Partner
+                </a>
+
+                <button id="mobileMenuBtn"
+                    class="inline-flex items-center justify-center h-10 w-10 rounded-lg border border-techxagon-dark/15 hover:bg-techxagon-dark/5"
+                    aria-label="Open menu" aria-expanded="false">
+
+                    <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+
+                </button>
+
+            </div>
+
+        </div>
+
+        <!-- Mobile Menu -->
+        <div id="mobileMenu" class="lg:hidden hidden pb-4">
+
+            <div
+                class="mt-2 grid gap-1 rounded-2xl border border-techxagon-dark/10 bg-white p-2 shadow-soft">
+
+                <a href="{% url 'corefrontend:programs' %}"
+                    class="px-3 py-2 rounded-xl text-sm font-medium hover:bg-techxagon-dark/5">
+                    Programs
+                </a>
+                <a href="{% url 'corefrontend:techxablocks' %}"
+                    class="px-3 py-2 rounded-xl text-sm font-medium hover:bg-techxagon-dark/5">
+                    TechxaBlocks
+                </a>
+
+                <a href="{% url 'corefrontend:techxaforge' %}"
+                    class="px-3 py-2 rounded-xl text-sm font-medium hover:bg-techxagon-dark/5">
+                    TechxaForge
+                </a>
+                <a href="{% url 'corefrontend:for_schools' %}"
+                    class="px-3 py-2 rounded-xl text-sm font-medium hover:bg-techxagon-dark/5">
+                    For School
+                </a>
+
+                <a href="{% url 'blog:blog_list' %}"
+                    class="px-3 py-2 rounded-xl text-sm font-medium hover:bg-techxagon-dark/5">
+                    Blog
+                </a>
+
+                <a href="https://learn.techxagonacademy.com/store/"
+                    class="px-3 py-2 rounded-xl text-sm font-medium hover:bg-techxagon-dark/5">
+                    Store
+                </a>
+
+                <a href="{% url 'corefrontend:become_a_tutor' %}"
+                    class="px-3 py-2 rounded-xl text-sm font-medium hover:bg-techxagon-dark/5">
+                    Become a Tutor
+                </a>
+
+                <a href="{% url 'corefrontend:contact' %}"
+                    class="px-3 py-2 rounded-xl text-sm font-medium hover:bg-techxagon-dark/5">
+                    Contact Us
+                </a>
+                <!-- Explore Section -->
+                <div class="px-3 pt-2">
+                    <p class="text-xs font-semibold text-techxagon-dark/50 uppercase">Explore</p>
+
+                    <a href="{% url 'corefrontend:team' %}"
+                        class="block px-3 py-2 rounded-xl text-sm hover:bg-techxagon-dark/5">
+                        Team
+                    </a>
+
+                    <a href="{% url 'corefrontend:projects' %}"
+                        class="block px-3 py-2 rounded-xl text-sm hover:bg-techxagon-dark/5">
+                        Projects
+                    </a>
+
+                    <a href="{% url 'corefrontend:gallery' %}"
+                        class="block px-3 py-2 rounded-xl text-sm hover:bg-techxagon-dark/5">
+                        Gallery
+                    </a>
+                </div>
+
+                <a href="{% url 'corefrontend:apply_partner' %}"
+                    class="mt-1 inline-flex items-center justify-center px-4 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95">
+                    Partner
+                </a>
+
+            </div>
+
+        </div>
+    </div>
+</header>

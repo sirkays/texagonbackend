@@ -1,0 +1,378 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block content %}
+  <main id="main">
+    <!-- HERO -->
+    <section class="relative overflow-hidden bg-white">
+      <div class="absolute inset-0 bg-grid opacity-40"></div>
+
+      <div
+        class="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-gradient-to-r from-techxagon-red/20 to-techxagon-orange/20 blur-2xl">
+      </div>
+      <div
+        class="absolute -bottom-28 -left-28 h-80 w-80 rounded-full bg-gradient-to-r from-techxagon-orange/20 to-techxagon-red/20 blur-2xl">
+      </div>
+
+      <div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14 sm:py-20">
+        <div class="grid lg:grid-cols-12 gap-10 items-center">
+          <div class="lg:col-span-7">
+            <div
+              class="inline-flex items-center gap-2 rounded-full border border-techxagon-dark/10 bg-white px-3 py-1 text-xs sm:text-sm shadow-soft">
+              <span class="inline-block h-2 w-2 rounded-full bg-techxagon-orange"></span>
+              <span class="font-medium">School partnership model • Tutors • Projects • Reporting</span>
+            </div>
+
+            <h1 class="mt-5 text-4xl sm:text-5xl font-extrabold tracking-tight">
+              Build a
+              <span
+                class="text-transparent bg-clip-text bg-gradient-to-r from-techxagon-red to-techxagon-orange">future-ready</span>
+              school tech program
+            </h1>
+
+            <p class="mt-4 text-base sm:text-lg text-techxagon-dark/75 max-w-2xl">
+              Techxagon integrates hands-on 4IR learning into your timetable—coding, robotics, cybersecurity, UI/UX, web
+              development and data—so students learn by building real projects.
+            </p>
+
+            <div class="mt-7 flex flex-col sm:flex-row gap-3">
+              <a href="/apply-partner"
+                class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange shadow-soft hover:opacity-95">
+                Partner
+              </a>
+              <a href="#benefits"
+                class="inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                See what schools get
+              </a>
+            </div>
+
+            <div class="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-xl">
+              <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft">
+                <p class="text-sm font-semibold">Curriculum Integration</p>
+                <p class="text-xs text-techxagon-dark/60 mt-1">Term plan + outcomes</p>
+              </div>
+              <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft">
+                <p class="text-sm font-semibold">Dedicated Tutors</p>
+                <p class="text-xs text-techxagon-dark/60 mt-1">Hands-on delivery</p>
+              </div>
+              <div class="rounded-2xl border border-techxagon-dark/10 bg-white p-4 shadow-soft col-span-2 sm:col-span-1">
+                <p class="text-sm font-semibold">Project Portfolios</p>
+                <p class="text-xs text-techxagon-dark/60 mt-1">Proof of skill</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="lg:col-span-5">
+            <div class="relative">
+              <div class="">
+                <div class="grid gap-4">
+                  <div class="relative h-[170px] sm:h-[190px]">
+                    <div class="absolute left-0 top-0 w-[62%] h-full">
+                      <div class="h-full rounded-[2rem] overflow-hidden border-[6px] border-white shadow-soft">
+                        <img src="{% static 'assets/smallguyresize.jpg' %}" alt="Tech learning in school" class="h-full w-full object-cover" />
+                      </div>
+                    </div>
+                    <div class="absolute right-0 bottom-0 w-[48%] h-[75%]">
+                      <div class="h-full rounded-[2rem] overflow-hidden border-[6px] border-white shadow-soft">
+                        <img src="{% static 'assets/smallladyresize.jpg' %}" alt="Student projects" class="h-full w-full object-cover" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="relative h-[170px] sm:h-[190px]">
+                    <div class="absolute left-0 bottom-0 w-[48%] h-[75%]">
+                      <div class="h-full rounded-[2rem] overflow-hidden border-[6px] border-white shadow-soft">
+                        <img src="{% static 'assets/student-laptop.png' %}" alt="Robotics lab" class="h-full w-full object-cover" />
+                      </div>
+                    </div>
+                    <div class="absolute right-0 top-0 w-[62%] h-full">
+                      <div class="h-full rounded-[2rem] overflow-hidden border-[6px] border-white shadow-soft">
+                        <img src="{% static 'assets/student-laptop3.jpeg' %}" alt="Classroom session" class="h-full w-full object-cover" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="relative h-[170px] sm:h-[190px]">
+                    <div class="absolute left-0 top-0 w-[62%] h-full">
+                      <div class="h-full rounded-[2rem] overflow-hidden border-[6px] border-white shadow-soft">
+                        <img src="{% static 'assets/student-laptop2.jpeg' %}" alt="Innovation showcase" class="h-full w-full object-cover" />
+                      </div>
+                    </div>
+                    <div class="absolute right-0 bottom-0 w-[48%] h-[75%]">
+                      <div class="h-full rounded-[2rem] overflow-hidden border-[6px] border-white shadow-soft">
+                        <img src="{% static 'assets/student-laptop4.jpeg' %}" alt="Presentation and awards" class="h-full w-full object-cover" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                class="pointer-events-none absolute -inset-8 bg-gradient-to-r from-techxagon-red/10 to-techxagon-orange/10 blur-3xl opacity-70">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BENEFITS -->
+    <section id="benefits" class="py-16 sm:py-20 bg-white border-y border-techxagon-dark/10">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+          <div class="max-w-2xl">
+            <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">What your school gets</h2>
+            <p class="mt-3 text-techxagon-dark/70">
+              A complete “done-with-you” model: we plan, deliver, and track outcomes—so your school grows tech capacity
+              without overload.
+            </p>
+          </div>
+          <div>
+            <a href="/apply-partner"
+              class="inline-flex items-center justify-center px-5 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+              Request a partnership brief
+            </a>
+          </div>
+        </div>
+
+        <div class="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div class="rounded-3xl border border-techxagon-dark/10 bg-white p-7 shadow-soft">
+            <p class="text-xs font-semibold text-techxagon-dark/60">Academics</p>
+            <p class="mt-2 text-lg font-bold">Curriculum-ready 4IR tracks</p>
+            <p class="mt-2 text-sm text-techxagon-dark/70">
+              Structured lessons, clear objectives, and project outcomes aligned to student levels.
+            </p>
+          </div>
+
+          <div class="rounded-3xl border border-techxagon-dark/10 bg-white p-7 shadow-soft">
+            <p class="text-xs font-semibold text-techxagon-dark/60">Delivery</p>
+            <p class="mt-2 text-lg font-bold">Dedicated Techxagon tutors</p>
+            <p class="mt-2 text-sm text-techxagon-dark/70">
+              Specialist instructors deliver sessions, guide projects, and support teachers.
+            </p>
+          </div>
+
+          <div class="rounded-3xl border border-techxagon-dark/10 bg-white p-7 shadow-soft">
+            <p class="text-xs font-semibold text-techxagon-dark/60">Outcomes</p>
+            <p class="mt-2 text-lg font-bold">Real student projects & portfolios</p>
+            <p class="mt-2 text-sm text-techxagon-dark/70">
+              Websites, prototypes, robotics builds, dashboards—evidence parents can see.
+            </p>
+          </div>
+
+          <div class="rounded-3xl border border-techxagon-dark/10 bg-white p-7 shadow-soft">
+            <p class="text-xs font-semibold text-techxagon-dark/60">Brand</p>
+            <p class="mt-2 text-lg font-bold">Innovation positioning</p>
+            <p class="mt-2 text-sm text-techxagon-dark/70">
+              Stand out as a forward-thinking school with a clear future-skills program.
+            </p>
+          </div>
+
+          <div class="rounded-3xl border border-techxagon-dark/10 bg-white p-7 shadow-soft">
+            <p class="text-xs font-semibold text-techxagon-dark/60">Support</p>
+            <p class="mt-2 text-lg font-bold">Teacher training & guidance</p>
+            <p class="mt-2 text-sm text-techxagon-dark/70">
+              Upskill your team with practical methods, resources, and ongoing coaching.
+            </p>
+          </div>
+
+          <div class="rounded-3xl border border-techxagon-dark/10 bg-white p-7 shadow-soft">
+            <p class="text-xs font-semibold text-techxagon-dark/60">Reporting</p>
+            <p class="mt-2 text-lg font-bold">Assessments + progress updates</p>
+            <p class="mt-2 text-sm text-techxagon-dark/70">
+              Simple reporting for leadership and parents—participation, skills, and outputs.
+            </p>
+          </div>
+        </div>
+
+        <div class="mt-10 rounded-3xl border border-techxagon-dark/10 bg-white p-6 sm:p-8 shadow-soft">
+          <div class="grid md:grid-cols-12 gap-6 items-center">
+            <div class="md:col-span-7">
+              <p class="text-sm font-semibold text-techxagon-dark/70">Optional add-ons</p>
+              <p class="mt-2 text-xl font-extrabold tracking-tight">
+                Lab setup • Devices • Robotics kits • Innovation showcase days
+              </p>
+              <p class="mt-2 text-sm text-techxagon-dark/70">
+                We can start with what you have and scale based on your budget and goals.
+              </p>
+            </div>
+            <div class="md:col-span-5 flex flex-col sm:flex-row md:flex-col gap-3 md:items-stretch">
+              <a href="/contact"
+                class="inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                Ask about add-ons
+              </a>
+              <a href="/apply-partner"
+                class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95">
+                Partner now
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PARTNERSHIP MODEL -->
+    <section class="py-16 sm:py-20">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="grid lg:grid-cols-12 gap-10 items-start">
+          <div class="lg:col-span-6">
+            <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">How the partnership works</h2>
+            <p class="mt-3 text-techxagon-dark/70">
+              Simple, structured, and easy to adopt—designed for school environments.
+            </p>
+
+            <ol class="mt-8 space-y-4">
+              <li class="rounded-3xl border border-techxagon-dark/10 bg-white p-6 shadow-soft">
+                <div class="flex items-start gap-4">
+                  <div
+                    class="h-10 w-10 rounded-2xl bg-techxagon-red/10 grid place-items-center font-extrabold text-techxagon-red">
+                    1</div>
+                  <div>
+                    <p class="font-bold">Discovery & timetable fit</p>
+                    <p class="mt-1 text-sm text-techxagon-dark/70">
+                      We align tracks, class levels, duration, and term objectives with your schedule.
+                    </p>
+                  </div>
+                </div>
+              </li>
+              <li class="rounded-3xl border border-techxagon-dark/10 bg-white p-6 shadow-soft">
+                <div class="flex items-start gap-4">
+                  <div
+                    class="h-10 w-10 rounded-2xl bg-techxagon-orange/10 grid place-items-center font-extrabold text-techxagon-orange">
+                    2</div>
+                  <div>
+                    <p class="font-bold">Onboarding & setup</p>
+                    <p class="mt-1 text-sm text-techxagon-dark/70">
+                      Tutor assignment, materials planning, and success criteria agreed with your team.
+                    </p>
+                  </div>
+                </div>
+              </li>
+              <li class="rounded-3xl border border-techxagon-dark/10 bg-white p-6 shadow-soft">
+                <div class="flex items-start gap-4">
+                  <div
+                    class="h-10 w-10 rounded-2xl bg-techxagon-deep/10 grid place-items-center font-extrabold text-techxagon-deep">
+                    3</div>
+                  <div>
+                    <p class="font-bold">Weekly delivery & projects</p>
+                    <p class="mt-1 text-sm text-techxagon-dark/70">
+                      Hands-on sessions, project milestones, and student portfolio outcomes.
+                    </p>
+                  </div>
+                </div>
+              </li>
+              <li class="rounded-3xl border border-techxagon-dark/10 bg-white p-6 shadow-soft">
+                <div class="flex items-start gap-4">
+                  <div
+                    class="h-10 w-10 rounded-2xl bg-techxagon-dark/10 grid place-items-center font-extrabold text-techxagon-dark">
+                    4</div>
+                  <div>
+                    <p class="font-bold">Assessment & reporting</p>
+                    <p class="mt-1 text-sm text-techxagon-dark/70">
+                      Progress updates for school leadership and parents—plus improvement recommendations.
+                    </p>
+                  </div>
+                </div>
+              </li>
+            </ol>
+          </div>
+
+          <div class="lg:col-span-6">
+            <div class="rounded-3xl border border-techxagon-dark/10 bg-white shadow-soft overflow-hidden">
+              <div class="p-6 sm:p-8">
+                <p class="text-sm font-semibold text-techxagon-dark/70">Common outcomes schools love</p>
+
+                <div class="mt-6 grid sm:grid-cols-2 gap-4">
+                  <div class="rounded-2xl bg-techxagon-dark/5 p-5">
+                    <p class="font-semibold">Better student engagement</p>
+                    <p class="mt-1 text-sm text-techxagon-dark/70">Learning feels practical, fun, and motivating.</p>
+                  </div>
+                  <div class="rounded-2xl bg-techxagon-dark/5 p-5">
+                    <p class="font-semibold">Measurable outputs</p>
+                    <p class="mt-1 text-sm text-techxagon-dark/70">Projects, demos, and portfolio evidence.</p>
+                  </div>
+                  <div class="rounded-2xl bg-techxagon-dark/5 p-5">
+                    <p class="font-semibold">Stronger school appeal</p>
+                    <p class="mt-1 text-sm text-techxagon-dark/70">Parents see clear value and future readiness.</p>
+                  </div>
+                  <div class="rounded-2xl bg-techxagon-dark/5 p-5">
+                    <p class="font-semibold">Pathways for learners</p>
+                    <p class="mt-1 text-sm text-techxagon-dark/70">Clarity on tech careers & next steps.</p>
+                  </div>
+                </div>
+
+                <div class="mt-6 rounded-2xl bg-gradient-to-r from-techxagon-red to-techxagon-orange p-[1px]">
+                  <div class="rounded-2xl bg-white p-5">
+                    <p class="font-semibold">Suggested starting package</p>
+                    <p class="mt-2 text-sm text-techxagon-dark/70">
+                      Many schools start with <span class="font-semibold">Programming + Robotics</span>, then expand to
+                      UI/UX, Cybersecurity, Web Dev, and Data.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="mt-6 flex flex-col sm:flex-row gap-3">
+                  <a href="/apply-partner"
+                    class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-techxagon-dark hover:bg-techxagon-dark/90 shadow-soft">
+                    Apply / Partner
+                  </a>
+                  <a href="/contact"
+                    class="inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                    Talk to us
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-6 rounded-3xl border border-techxagon-dark/10 bg-white p-6 shadow-soft">
+              <p class="text-sm font-semibold text-techxagon-dark/70">Note</p>
+              <p class="mt-2 text-sm text-techxagon-dark/70">
+                To match the “boxed image” layout perfectly, use 6 photos with similar lighting and crop-friendly
+                composition, named:
+                <span class="font-mono text-xs">school_hero_1.jpg</span> … <span class="font-mono text-xs">school_hero_6.jpg</span>.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FINAL CTA -->
+    <section class="py-16 sm:py-20">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="rounded-3xl bg-gradient-to-r from-techxagon-red to-techxagon-orange p-[1px] shadow-soft">
+          <div class="rounded-3xl bg-white p-8 sm:p-12">
+            <div class="grid lg:grid-cols-12 gap-8 items-center">
+              <div class="lg:col-span-7">
+                <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">
+                  Ready to partner with Techxagon?
+                </h2>
+                <p class="mt-3 text-techxagon-dark/70 max-w-2xl">
+                  Let’s design a term plan, assign tutors, and deliver project outcomes your parents and leadership can
+                  trust.
+                </p>
+              </div>
+              <div class="lg:col-span-5 flex flex-col sm:flex-row lg:flex-col gap-3 lg:items-stretch">
+                <a href="/apply-partner"
+                  class="inline-flex items-center justify-center px-6 py-3 rounded-xl text-white font-semibold bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95">
+                  Apply / Partner
+                </a>
+                <a href="/contact"
+                  class="inline-flex items-center justify-center px-6 py-3 rounded-xl font-semibold border border-techxagon-dark/15 bg-white hover:bg-techxagon-dark/5">
+                  Contact Us
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+{% endblock content %}
+
+
+{% block extra_js %}
+
+{% endblock extra_js %}
+</body>
+</html>

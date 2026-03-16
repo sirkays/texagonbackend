@@ -89,6 +89,9 @@ INSTALLED_APPS = [
     "notifications",
     "api",
     "konnect",
+    'corefrontend',
+    'blog',
+    'projects',
     "rest_framework",
     "rest_framework_api_key",
     
@@ -119,7 +122,7 @@ ROOT_URLCONF = 'texagonbackend.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / "templates"],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -193,7 +196,14 @@ FLW_SECRET_HASH = os.environ.get("FLW_SECRET_HASH", "")
 # Static + Media (Django 5.2+)
 # -----------------------------
 STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR / "static"
+
+# Where Django looks for static files during development
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
+
+# Where collectstatic will gather files for production
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"

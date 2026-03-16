@@ -1,0 +1,150 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Techxagon Academy | Future-Ready Tech Skills for Secondary Schools</title>
+    <meta name="description"
+        content="Techxagon Academy equips secondary school students with hands-on tech skills—coding, robotics, cybersecurity, UI/UX, web dev and data science—through school partnerships." />
+    <link rel="canonical" href="https://techxagonacademy.com/" />
+
+    <link rel="icon" href="{% static 'assets/favicon.ico' %}" />
+    <link rel="apple-touch-icon" href="{% static 'assets/apple-touch-icon.png' %}" />
+
+    <meta property="og:title" content="Techxagon Academy | Future-Ready Tech Skills for Secondary Schools" />
+    <meta property="og:description"
+        content="Hands-on 4IR programs for students + scalable school partnerships across Africa. Coding, Robotics, Cybersecurity, UI/UX, Web Dev, Data Science." />
+    <meta property="og:image" content="{% static 'assets/og-image.jpg' %}" />
+    <meta property="og:url" content="https://techxagonacademy.com/" />
+    <meta property="og:type" content="website" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Techxagon Academy | Future-Ready Tech Skills for Secondary Schools" />
+    <meta name="twitter:description"
+        content="Hands-on 4IR programs for students + scalable school partnerships across Africa." />
+    <meta name="twitter:image" content="{% static 'assets/og-image.jpg' %}" />
+
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+    <style type="text/tailwindcss">
+        @theme {
+            --color-techxagon-red: #DC3005;
+            --color-techxagon-orange: #EF8916;
+            --color-techxagon-deep: #E65F0C;
+            --color-techxagon-dark: #020100;
+            --shadow-soft: 0 10px 30px rgba(2, 1, 0, 0.10);
+        }
+
+    </style>
+
+    <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://techxagonacademy.com/#organization",
+        "name": "Techxagon Academy",
+        "url": "https://techxagonacademy.com/",
+        "logo": "https://techxagonacademy.com/assets/logo.png",
+        "sameAs": [
+          "https://facebook.com/techxagonacademy",
+          "https://instagram.com/techxagonacademy",
+          "https://twitter.com/techxagonacademy",
+          "https://linkedin.com/company/techxagonacademy"
+        ],
+        "contactPoint": [
+          {
+            "@type": "ContactPoint",
+            "contactType": "customer support",
+            "email": "info@techxagonacademy.com",
+            "telephone": "+234-000-000-0000",
+            "availableLanguage": ["en"]
+          }
+        ]
+      },
+      {
+        "@type": "EducationalOrganization",
+        "@id": "https://techxagonacademy.com/#eduorg",
+        "name": "Techxagon Academy",
+        "url": "https://techxagonacademy.com/",
+        "description": "An EdTech company transforming secondary school education across Africa by teaching future-ready technology skills through hands-on learning and school partnerships.",
+        "parentOrganization": { "@id": "https://techxagonacademy.com/#organization" }
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://techxagonacademy.com/#website",
+        "url": "https://techxagonacademy.com/",
+        "name": "Techxagon Academy",
+        "publisher": { "@id": "https://techxagonacademy.com/#organization" },
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": "https://techxagonacademy.com/blog/?s={search_term_string}",
+          "query-input": "required name=search_term_string"
+        }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": "https://techxagonacademy.com/#breadcrumbs",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Home",
+            "item": "https://techxagonacademy.com/"
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+    <style>
+        .bg-grid {
+            background-image:
+                radial-gradient(circle at 1px 1px, rgba(2, 1, 0, 0.08) 1px, transparent 0);
+            background-size: 22px 22px;
+        }
+        
+        html {
+            scroll-behavior: smooth;
+        }
+    </style>
+    {% block extra_css %}
+
+    {% endblock extra_css %}
+</head>
+
+<body class="bg-techxagon-dark/[0.02] text-techxagon-dark antialiased">
+    <a href="#main"
+        class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[999] focus:bg-white focus:px-4 focus:py-2 focus:rounded-lg focus:shadow-soft">
+        Skip to content
+    </a>
+
+
+    {% include 'base/header.html' %}
+
+    {% block content %}{% endblock content %}
+
+    {% include 'base/footer.html' %}
+
+    <script>
+        document.getElementById("year").textContent = new Date().getFullYear();
+        const mobileMenuBtn = document.getElementById("mobileMenuBtn");
+        const mobileMenu = document.getElementById("mobileMenu");
+        mobileMenuBtn?.addEventListener("click", () => {
+            const isOpen = !mobileMenu.classList.contains("hidden");
+            mobileMenu.classList.toggle("hidden");
+            mobileMenuBtn.setAttribute("aria-expanded", String(!isOpen));
+        });
+
+    </script>
+    {% block extra_js %}
+
+    {% endblock extra_js %}
+
+    </body>
+</html>
+

@@ -1,0 +1,372 @@
+<style type="text/tailwindcss">
+  @theme {
+    --color-tx-red:    #DC3005;
+    --color-tx-orange: #EF8916;
+    --color-tx-deep:   #E65F0C;
+    --color-tx-dark:   #0D0A08;
+    --color-tx-mid:    #1E1712;
+    --color-tx-muted:  #6B5E55;
+    --color-tx-card:   #FFFCFA;
+    --color-tx-border: #E8DDD7;
+    --color-tx-base:   #FAF7F4;
+    --color-tx-text:   #1A120C;
+    --font-display:    'Playfair Display', serif;
+    --font-body:       'Syne', sans-serif;
+  }
+
+  /* ══════════════════════════════════════
+     FLOATING LABEL — BASE
+  ══════════════════════════════════════ */
+  .float-field { position: relative; }
+
+  .float-field label {
+    position: absolute;
+    top: 50%;
+    left: 16px;
+    transform: translateY(-50%);
+    transform-origin: left top;
+    font-size: 14px;
+    color: var(--color-tx-muted);
+    font-weight: 500;
+    pointer-events: none;
+    transition: all 0.2s ease;
+    padding: 0 4px;
+    background: transparent;
+    line-height: 1.4;
+    /* Resting: clip with ellipsis, never overflow */
+    max-width: calc(100% - 40px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Textarea resting label — allow 2-line wrap */
+  .float-field.textarea-field label {
+    top: 18px;
+    transform: none;
+    transform-origin: left top;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: clip;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  /* ══════════════════════════════════════
+     FLOATING LABEL — ACTIVE / FLOATED STATE
+     Use -webkit-line-clamp so long labels
+     never bleed off-screen on mobile.
+  ══════════════════════════════════════ */
+  .float-field input:focus ~ label,
+  .float-field input:not(:placeholder-shown) ~ label,
+  .float-field select:focus ~ label,
+  .float-field textarea:focus ~ label,
+  .float-field textarea:not(:placeholder-shown) ~ label {
+    top: -8px;
+    transform: none;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-tx-deep);
+    background: var(--color-tx-card);
+    letter-spacing: 0.06em;
+    /* Clamp to 2 lines — no off-screen bleed */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: clip;
+    max-width: calc(100% - 20px);
+  }
+
+  /* Select chosen state */
+  select.field-input.chosen ~ label {
+    top: -8px;
+    transform: none;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-tx-deep);
+    background: var(--color-tx-card);
+    letter-spacing: 0.06em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: clip;
+    max-width: calc(100% - 20px);
+  }
+
+  /* ══════════════════════════════════════
+     FIELD INPUT BASE
+  ══════════════════════════════════════ */
+  .field-input {
+    width: 100%;
+    padding: 16px 16px 14px;
+    border: 1.5px solid var(--color-tx-border);
+    border-radius: 14px;
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-tx-text);
+    background: white;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .field-input:focus {
+    border-color: var(--color-tx-orange);
+    box-shadow: 0 0 0 4px rgba(239,137,22,0.1);
+  }
+
+  .field-input.error {
+    border-color: var(--color-tx-red);
+    box-shadow: 0 0 0 4px rgba(220,48,5,0.1);
+  }
+
+  select.field-input {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B5E55' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    padding-right: 40px;
+  }
+
+  textarea.field-input {
+    min-height: 120px;
+    resize: vertical;
+    line-height: 1.6;
+    /* Extra top padding so the 2-line resting label doesn't overlap typed text */
+    padding-top: 44px;
+  }
+
+  /* Once focused or filled, shrink top padding so text sits naturally */
+  textarea.field-input:focus,
+  textarea.field-input:not(:placeholder-shown) {
+    padding-top: 20px;
+  }
+
+  /* ══════════════════════════════════════
+     CUSTOM CHECKBOXES
+  ══════════════════════════════════════ */
+  .check-box {
+    width: 18px; height: 18px;
+    border: 2px solid #D5C8C0;
+    border-radius: 5px;
+    -webkit-appearance: none;
+    appearance: none;
+    flex-shrink: 0;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .check-box:checked {
+    background: linear-gradient(135deg, var(--color-tx-red), var(--color-tx-orange));
+    border-color: transparent;
+  }
+  .check-box:checked::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 5px;
+    width: 5px; height: 9px;
+    border: 2px solid white;
+    border-top: none; border-left: none;
+    transform: rotate(45deg);
+  }
+
+  .agree-box {
+    width: 20px; height: 20px;
+    border: 2px solid #D5C8C0;
+    border-radius: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    flex-shrink: 0;
+    margin-top: 1px;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .agree-box:checked {
+    background: linear-gradient(135deg, var(--color-tx-red), var(--color-tx-orange));
+    border-color: transparent;
+  }
+  .agree-box:checked::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 5px;
+    width: 6px; height: 10px;
+    border: 2.5px solid white;
+    border-top: none; border-left: none;
+    transform: rotate(45deg);
+  }
+
+  /* ══════════════════════════════════════
+     ANIMATIONS
+  ══════════════════════════════════════ */
+  @keyframes fadeSlide {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .step-section { animation: fadeSlide 0.4s ease; }
+
+  /* ══════════════════════════════════════
+     SIDEBAR GLOW ORBS
+  ══════════════════════════════════════ */
+  .sidebar-orb-top {
+    position: absolute; top: -120px; right: -80px;
+    width: 400px; height: 400px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(239,137,22,0.18) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .sidebar-orb-bottom {
+    position: absolute; bottom: -100px; left: -60px;
+    width: 340px; height: 340px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(220,48,5,0.14) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* ══════════════════════════════════════
+     GRADIENT HELPERS
+  ══════════════════════════════════════ */
+  .grad-text {
+    background: linear-gradient(90deg, var(--color-tx-orange), var(--color-tx-red));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .btn-grad {
+    background: linear-gradient(135deg, var(--color-tx-red) 0%, var(--color-tx-orange) 100%);
+  }
+
+  /* ══════════════════════════════════════
+     PROGRESS SEGMENTS
+  ══════════════════════════════════════ */
+  .seg-inner {
+    height: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, var(--color-tx-red), var(--color-tx-orange));
+    transform: scaleX(0); transform-origin: left;
+    transition: transform 0.5s cubic-bezier(0.4,0,0.2,1);
+  }
+  .seg-done .seg-inner,
+  .seg-active .seg-inner { transform: scaleX(1); }
+
+  /* ══════════════════════════════════════
+     STEP CIRCLE STATES
+  ══════════════════════════════════════ */
+  .step-circle-done {
+    background: linear-gradient(135deg, var(--color-tx-red), var(--color-tx-orange)) !important;
+    border-color: transparent !important;
+    color: white !important;
+  }
+  .step-circle-active {
+    border-color: var(--color-tx-orange) !important;
+    color: var(--color-tx-orange) !important;
+    box-shadow: 0 0 0 4px rgba(239,137,22,0.12);
+  }
+
+  /* ══════════════════════════════════════
+     CONNECTOR FILL
+  ══════════════════════════════════════ */
+  .conn-fill {
+    background: linear-gradient(to bottom, var(--color-tx-red), var(--color-tx-orange)) !important;
+  }
+
+  /* ══════════════════════════════════════
+     CARD SECTION DIVIDER
+  ══════════════════════════════════════ */
+  .section-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-tx-muted);
+    margin-bottom: 24px;
+  }
+  .section-divider::after {
+    content: '';
+    flex: 1; height: 1px;
+    background: var(--color-tx-border);
+  }
+
+  /* ══════════════════════════════════════
+     MOBILE — 768px and below
+  ══════════════════════════════════════ */
+  @media (max-width: 768px) {
+
+    /* Resting label */
+    .float-field label {
+      font-size: 13px;
+      max-width: calc(100% - 36px);
+    }
+
+    /* Textarea resting label */
+    .float-field.textarea-field label {
+      font-size: 13px;
+      max-width: calc(100% - 28px);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      white-space: normal;
+      overflow: hidden;
+    }
+
+    /* Floated label on mobile — clamped, never overflows */
+    .float-field input:focus ~ label,
+    .float-field input:not(:placeholder-shown) ~ label,
+    .float-field select:focus ~ label,
+    .float-field textarea:focus ~ label,
+    .float-field textarea:not(:placeholder-shown) ~ label,
+    select.field-input.chosen ~ label {
+      font-size: 10.5px;
+      max-width: calc(100% - 16px);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      white-space: normal;
+      overflow: hidden;
+      text-overflow: clip;
+    }
+  }
+
+  /* ══════════════════════════════════════
+     MOBILE — 400px and below (small phones)
+  ══════════════════════════════════════ */
+  @media (max-width: 400px) {
+
+    .float-field label {
+      font-size: 12px;
+      left: 12px;
+      max-width: calc(100% - 28px);
+    }
+
+    .float-field.textarea-field label {
+      font-size: 12px;
+      max-width: calc(100% - 24px);
+    }
+
+    .float-field input:focus ~ label,
+    .float-field input:not(:placeholder-shown) ~ label,
+    .float-field select:focus ~ label,
+    .float-field textarea:focus ~ label,
+    .float-field textarea:not(:placeholder-shown) ~ label,
+    select.field-input.chosen ~ label {
+      font-size: 10px;
+      max-width: calc(100% - 12px);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      white-space: normal;
+      overflow: hidden;
+      text-overflow: clip;
+    }
+
+    textarea.field-input {
+      padding-top: 48px;
+    }
+  }
+</style>
