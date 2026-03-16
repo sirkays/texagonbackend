@@ -52,7 +52,7 @@ class UserManager(BaseUserManager):
         return self.create_user(email=email, password=password, username=username, **extra_fields)
 
 class User(AbstractUser):
-    username = models.CharField(max_length=150, blank=True, null=True)
+    username = models.CharField(max_length=150, unique=True)
     email = models.EmailField(unique=True)
 
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
