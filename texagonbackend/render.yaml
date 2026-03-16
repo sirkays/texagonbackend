@@ -1,0 +1,74 @@
+databases:
+  - name: texagon-db
+    plan: basic-256mb
+
+services:
+  # WEB
+  - type: web
+    name: texagon-backend
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /healthz/
+    envVars:
+      - key: PROCESS_TYPE
+        value: "web"
+      - key: LOCAL
+        value: "0"
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: USE_CELERY
+        value: "0"  # Set to 0 to run tasks synchronously
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: DJANGO_ALLOWED_HOSTS
+        value: "texagon-backend.onrender.com,texagon.onrender.com,localhost,127.0.0.1"
+      - key: FRONTEND_ORIGIN
+        value: "https://texagon.onrender.com"
+
+      - key: POSTGRES_HOST
+        fromDatabase: { name: texagon-db, property: host }
+      - key: POSTGRES_PORT
+        fromDatabase: { name: texagon-db, property: port }
+      - key: POSTGRES_DB
+        fromDatabase: { name: texagon-db, property: database }
+      - key: POSTGRES_USER
+        fromDatabase: { name: texagon-db, property: user }
+      - key: POSTGRES_PASSWORD
+        fromDatabase: { name: texagon-db, property: password }
+
+      # --- EMAIL SETTINGS ---
+      - key: DOMAIN_EMAIL
+        sync: false
+      - key: SEND_EMAIL
+        sync: false
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: EMAIL_PORT
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+
+      # --- CLOUDINARY ---
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # --- PAYMENT & BRANDING ---
+      - key: PAYMENT_TEST
+        value: "1"
+      - key: FLW_SECRET_KEY
+        sync: false
+      - key: FLW_SECRET_HASH
+        sync: false
+      - key: TEST_KEY_SECRET
+        sync: false
+      - key: LOGO_URL
+        value: "https://texagon.onrender.com/logo.png"

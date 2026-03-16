@@ -24,8 +24,8 @@ from academics.models import ParentProfile,StudentProfile
 from billing.models import SubscriptionInvoice, SubscriptionPayment, InvoiceType
 from core.utils import _is_org_admin_or_teacher, _resolve_org, get_object_or_404_ajax
 from orgs.models import OrganizationMembership
-from store.models import (Order, Payment, OrderItem,CartItem,Cart,Coupon,BNPLInstallment)
-from .models import Complaint, ComplaintResponse,ComplaintAttachment
+from store.models import (BNPLAgreement, BNPLPlanTemplate, Order, Payment, OrderItem,CartItem,Cart,Coupon,BNPLInstallment)
+from .models import Complaint, ComplaintResponse,ComplaintAttachment, SubscriptionPlan, UserAccountSubscription
 from .utils import (confirm_transaction, generate_payment_link,_validate_verified_transaction,_mark_payment_status,
 _mark_payment_status,normalize_flutterwave_status,_safe_meta_patch,verify_flw_signature)
 from rest_framework.parsers import JSONParser, FormParser, MultiPartParser

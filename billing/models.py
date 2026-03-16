@@ -99,7 +99,7 @@ class SubscriptionInvoice(TimeStampedModel):
             OrganizationMembership.Role.PARENT,
         }
         if membership and membership.role not in allowed_roles:
-            raise ValidationError({
+            raise ValidationError({ # type: ignore
                 'organization_membership': 'organization_membership must be a Teacher or a Parent.'
             })
 
