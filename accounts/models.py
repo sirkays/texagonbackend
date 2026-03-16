@@ -5,52 +5,71 @@ from django.db.models import Q
 import random
 import string
 from datetime import timedelta
-from django.conf import settings
 from django.utils import timezone
+
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
 
-    def create_user(self, email, password=None, **extra_fields):
+    def _generate_unique_username(self, email):
+        base_username = (email.split("@")[0] if email else "user").strip()
+        base_username = base_username[:150] or "user"
+
+        username = base_username
+        counter = 1
+
+        while self.model.objects.filter(username=username).exists():
+            suffix = str(counter)
+            username = f"{base_username[:150 - len(suffix)]}{suffix}"
+            counter += 1
+
+        return username
+
+    def create_user(self, email, password=None, username=None, **extra_fields):
         if not email:
             raise ValueError("Email must be set")
+
         email = self.normalize_email(email)
-        user = self.model(email=email, **extra_fields)
+
+        if not username:
+            username = self._generate_unique_username(email)
+
+        user = self.model(email=email, username=username, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, email, password=None, **extra_fields):
+    def create_superuser(self, email, password=None, username=None, **extra_fields):
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("is_active", True)
+
         if extra_fields.get("is_staff") is not True:
             raise ValueError("Superuser must have is_staff=True.")
         if extra_fields.get("is_superuser") is not True:
             raise ValueError("Superuser must have is_superuser=True.")
-        return self.create_user(email, password, **extra_fields)
+
+        return self.create_user(email=email, password=password, username=username, **extra_fields)
 
 class User(AbstractUser):
-    # remove username column; email becomes the login
-    username = None
+    username = models.CharField(max_length=150, blank=True, null=True)
     email = models.EmailField(unique=True)
 
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     phone = models.CharField(max_length=32, blank=True)
     primary_org = models.ForeignKey(
         "orgs.Organization",
-        blank=True, null=True,
+        blank=True,
+        null=True,
         on_delete=models.SET_NULL,
         related_name="primary_users",
     )
     is_generated = models.BooleanField(default=False)
 
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = []  # no username, so leave empty
+    REQUIRED_FIELDS = ["username"]
 
     objects = UserManager()
-
-
 
 class AdminAccess(models.Model):
     user = models.OneToOneField(
@@ -79,14 +98,11 @@ class AdminAccess(models.Model):
         self.full_clean()
         return super().save(*args, **kwargs)
 
-    # ✅ ADD THIS
     @classmethod
     def user_has_admin_access(cls, user):
         if not user or not user.is_authenticated:
             return False
         return cls.objects.filter(user=user, active=True).exists()
-
-
 
 
 class EmailOTP(models.Model):
@@ -107,7 +123,6 @@ class EmailOTP(models.Model):
 
     @classmethod
     def generate_code(cls, length=6) -> str:
-        # numeric code, e.g. 6 digits
         return "".join(random.choices(string.digits, k=length))
 
     @classmethod
@@ -124,9 +139,12 @@ class EmailOTP(models.Model):
         return (not self.used) and (self.expires_at >= timezone.now())
 
 
-
 class EmailChangeRequest(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="email_change_requests")
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="email_change_requests",
+    )
     new_email = models.EmailField()
     code = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now_add=True)

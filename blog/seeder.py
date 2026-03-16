@@ -33,7 +33,7 @@ TAGS = [
 
 AUTHORS = [
     {
-        "first_name": "sarah.johnson",
+        "username": "sarah.johnson",
         "first_name": "Sarah",
         "last_name": "Johnson",
         "email": "sarah@techxagon.com",
@@ -44,7 +44,7 @@ AUTHORS = [
         ),
     },
     {
-        "first_name": "david.okafor",
+        "username": "david.okafor",
         "first_name": "David",
         "last_name": "Okafor",
         "email": "david@techxagon.com",
@@ -55,7 +55,7 @@ AUTHORS = [
         ),
     },
     {
-        "first_name": "amara.nwosu",
+        "username": "amara.nwosu",
         "first_name": "Amara",
         "last_name": "Nwosu",
         "email": "amara@techxagon.com",
@@ -66,7 +66,7 @@ AUTHORS = [
         ),
     },
     {
-        "first_name": "felix.eze",
+        "username": "felix.eze",
         "first_name": "Felix",
         "last_name": "Eze",
         "email": "felix@techxagon.com",
@@ -268,7 +268,7 @@ def seed_blog(flush=False, posts_count=None, no_subscribers=False):
         logs.append("[flush] Removing existing blog data...")
         BlogPost.objects.all().delete()
         AuthorProfile.objects.all().delete()
-        User.objects.filter(first_name__in=[a["first_name"] for a in AUTHORS]).delete()
+        User.objects.filter(username__in=[a["username"] for a in AUTHORS]).delete()
         Category.objects.all().delete()
         Tag.objects.all().delete()
         NewsletterSubscriber.objects.all().delete()
@@ -301,7 +301,7 @@ def seed_blog(flush=False, posts_count=None, no_subscribers=False):
     logs.append("[3/5] Authors")
     for data in AUTHORS:
         user, user_created = User.objects.get_or_create(
-            first_name=data["first_name"],
+            username=data["username"],
             defaults={
                 "first_name": data["first_name"],
                 "last_name": data["last_name"],
@@ -326,7 +326,7 @@ def seed_blog(flush=False, posts_count=None, no_subscribers=False):
         if user_created:
             info("Password set to: techxagon2024!")
 
-        authors[data["first_name"]] = user
+        authors[data["username"]] = user
 
     # Posts
     logs.append(f"[4/5] Blog Posts (creating up to {posts_count})")
