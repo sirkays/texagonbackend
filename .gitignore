@@ -7,7 +7,6 @@ local_settings.py
 db.sqlite3
 media/
 staticfiles/
-static/
 #userdashboard/settings.py
 # Ignore all migration files except __init__.py
 #**/migrations/*
