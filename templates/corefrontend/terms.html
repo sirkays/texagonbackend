@@ -1,0 +1,428 @@
+{% extends 'base/base.html' %}
+{% load static %}
+{% block content %}
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');
+
+  :root {
+    --red: #e8291c;
+    --orange: #f97316;
+    --dark: #0d0d0d;
+    --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  body { font-family: 'DM Sans', sans-serif; }
+  h1,h2,h3,h4 { font-family: 'Bricolage Grotesque', sans-serif; }
+
+  .reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.75s var(--ease-expo), transform 0.75s var(--ease-expo);
+  }
+  .reveal.revealed {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .hero-legal {
+    position: relative;
+    overflow: hidden;
+    background: #fff;
+    padding: 7rem 0 4rem;
+  }
+
+  .mesh-bg {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 70% 30%, rgba(232,41,28,.08) 0%, transparent 65%),
+      radial-gradient(ellipse 60% 50% at 20% 70%, rgba(249,115,22,.07) 0%, transparent 65%),
+      radial-gradient(ellipse 40% 40% at 50% 50%, rgba(232,41,28,.04) 0%, transparent 70%);
+  }
+
+  .dot-grid {
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(13,13,13,.09) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 40%, transparent 100%);
+  }
+
+  .section-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--red);
+    margin-bottom: 12px;
+  }
+
+  .section-label::before {
+    content: '';
+    display: block;
+    width: 20px;
+    height: 2px;
+    background: linear-gradient(90deg, var(--red), var(--orange));
+    border-radius: 2px;
+  }
+
+  .legal-shell {
+    position: relative;
+    z-index: 2;
+  }
+
+  .legal-card {
+    border-radius: 28px;
+    border: 1px solid rgba(13,13,13,.08);
+    background: #fff;
+    box-shadow: 0 10px 40px rgba(0,0,0,.06);
+    overflow: hidden;
+  }
+
+  .legal-header {
+    padding: 2rem;
+    background: linear-gradient(135deg, rgba(232,41,28,.05), rgba(249,115,22,.05));
+    border-bottom: 1px solid rgba(13,13,13,.08);
+  }
+
+  .legal-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 1rem;
+  }
+
+  .legal-pill {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid rgba(13,13,13,.1);
+    background: #fff;
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: .85rem;
+    color: rgba(13,13,13,.72);
+  }
+
+  .legal-body {
+    padding: 2rem;
+  }
+
+  .legal-section + .legal-section {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(13,13,13,.08);
+  }
+
+  .legal-section h2 {
+    font-size: 1.4rem;
+    font-weight: 800;
+    margin-bottom: .8rem;
+  }
+
+  .legal-section p,
+  .legal-section li {
+    color: rgba(13,13,13,.72);
+    line-height: 1.8;
+    font-size: .98rem;
+  }
+
+  .legal-section ul {
+    margin-top: .8rem;
+    padding-left: 1.2rem;
+  }
+
+  .grad-line {
+    height: 1px;
+    background: linear-gradient(90deg,transparent,rgba(232,41,28,.3),rgba(249,115,22,.3),transparent);
+  }
+
+  .cta-wrap {
+    border-radius: 28px;
+    overflow: hidden;
+    position: relative;
+    background: linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 100%);
+    padding: 2px;
+  }
+
+  .cta-inner {
+    border-radius: 26px;
+    background: linear-gradient(135deg,#111,#1c1c1c);
+    padding: 44px 32px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .btn-primary {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:13px 28px;
+    border-radius:14px;
+    font-weight:700;
+    background:linear-gradient(135deg, var(--red), var(--orange));
+    color:#fff;
+    box-shadow: 0 4px 20px rgba(232,41,28,.35);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(232,41,28,.45);
+  }
+
+  .btn-secondary {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:13px 28px;
+    border-radius:14px;
+    font-weight:700;
+    border:1.5px solid rgba(13,13,13,.13);
+    background:#fff;
+    transition: transform 0.25s ease, background .2s, box-shadow .25s;
+  }
+
+  .btn-secondary:hover {
+    transform: translateY(-2px);
+    background:#f8f8f8;
+    box-shadow:0 6px 20px rgba(0,0,0,.08);
+  }
+
+  @media (max-width: 640px) {
+    .legal-header, .legal-body { padding: 1.35rem; }
+    .cta-inner { padding: 32px 22px; }
+  }
+</style>
+
+<main>
+  <section class="hero-legal">
+    <div class="mesh-bg"></div>
+    <div class="dot-grid"></div>
+
+    <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 legal-shell">
+      <div class="text-center reveal">
+        <div class="section-label justify-center">Terms</div>
+        <h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight">
+          Terms & Conditions
+        </h1>
+        <p class="mt-4 text-techxagon-dark/70 max-w-2xl mx-auto leading-relaxed">
+          These Terms & Conditions govern access to and use of the Techxagon Academy
+          website, educational programs, school partnerships, and related services.
+        </p>
+      </div>
+
+      <div class="mt-10 legal-card reveal">
+        <div class="legal-header">
+          <h2 class="text-2xl font-extrabold">Techxagon Academy Terms & Conditions</h2>
+            <div class="legal-meta">
+            <span class="legal-pill">Effective Date: March 16, 2026</span>
+            <span class="legal-pill">Last Updated: March 16, 2026</span>
+            <span class="legal-pill">Please review carefully</span>
+            </div>
+        </div>
+
+        <div class="legal-body">
+          <section class="legal-section">
+            <h2>1. Acceptance of Terms</h2>
+            <p>
+              By accessing or using the Techxagon Academy website or services, you agree to be bound
+              by these Terms & Conditions. If you do not agree, please do not use our website or services.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>2. About Our Services</h2>
+            <p>
+              Techxagon Academy provides educational content, student learning programs, school
+              partnership services, training support, and related resources focused on technology
+              education and practical digital skills development.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>3. Eligibility and Responsibility</h2>
+            <p>
+              Users of our services may include students, parents, guardians, teachers, schools,
+              and institutional partners. Where a user is under the age required to legally consent,
+              use of certain services may require the involvement or approval of a parent, guardian,
+              school, or authorized representative.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>4. Use of Website</h2>
+            <p>You agree to use the website only for lawful purposes and in a manner that does not:</p>
+            <ul>
+              <li>Violate any applicable law or regulation.</li>
+              <li>Interfere with the operation, security, or integrity of the website.</li>
+              <li>Attempt unauthorized access to accounts, systems, or data.</li>
+              <li>Copy, misuse, scrape, or exploit website content beyond permitted use.</li>
+            </ul>
+          </section>
+
+          <section class="legal-section">
+            <h2>5. Intellectual Property</h2>
+            <p>
+              Unless otherwise stated, all website content, branding, designs, graphics, text,
+              curriculum materials, logos, and other original materials are owned by or licensed
+              to Techxagon Academy and are protected by applicable intellectual property laws.
+            </p>
+            <p>
+              You may not reproduce, distribute, modify, republish, or commercially exploit our
+              materials without prior written permission.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>6. Applications, Registrations, and Partnerships</h2>
+            <p>
+              When submitting a form, applying for a program, or requesting partnership information,
+              you agree to provide accurate and complete information. We reserve the right to reject,
+              suspend, or discontinue applications or partnerships where information is inaccurate,
+              incomplete, or inconsistent with our operational requirements.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>7. Payments and Fees</h2>
+            <p>
+              Where any program, service, or school partnership involves payment, the applicable
+              fees, timelines, and payment terms will be communicated separately. Unless otherwise
+              stated, fees paid may be subject to administrative, contractual, or program-specific
+              conditions.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>8. User Content and Submissions</h2>
+            <p>
+              If you submit testimonials, project materials, messages, feedback, or other content
+              to us, you confirm that you have the right to share such content. You grant us a
+              limited right to use submitted materials where necessary for communication, program
+              administration, promotional purposes, or showcasing student outcomes, subject to
+              applicable permissions and privacy obligations.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>9. Third-Party Services</h2>
+            <p>
+              Our website or services may integrate with or link to third-party tools, platforms,
+              or websites. We do not control and are not responsible for the content, terms, or
+              privacy practices of third-party services.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>10. Disclaimer</h2>
+            <p>
+              Our website and services are provided on an “as is” and “as available” basis. While
+              we aim for accuracy, reliability, and continuity, we do not guarantee that the website
+              will always be uninterrupted, error-free, or free of harmful components.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>11. Limitation of Liability</h2>
+            <p>
+              To the fullest extent permitted by law, Techxagon Academy shall not be liable for any
+              indirect, incidental, special, consequential, or punitive damages arising from the use
+              of or inability to use our website or services. Nothing in these terms excludes liability
+              where such exclusion is not permitted by law.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>12. Suspension or Termination</h2>
+            <p>
+              We reserve the right to suspend, restrict, or terminate access to the website or any
+              service where necessary for security, maintenance, misuse prevention, legal compliance,
+              or operational reasons.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>13. Changes to These Terms</h2>
+            <p>
+              We may revise these Terms & Conditions from time to time. Updated terms will be posted
+              on this page, and continued use of our website or services after such updates constitutes
+              acceptance of the revised terms.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>14. Governing Law</h2>
+            <p>
+              These Terms & Conditions shall be governed by and interpreted in accordance with the laws
+              applicable in your operating jurisdiction, unless otherwise stated in a separate written agreement.
+            </p>
+          </section>
+
+          <section class="legal-section">
+            <h2>15. Contact Information</h2>
+            <p>
+              If you have any questions regarding these Terms & Conditions, please contact us:
+            </p>
+            <ul>
+              <li>Email: info@techxagonacademy.com</li>
+              <li>Phone: 0708 408 3162</li>
+              <li>Address: 167 Ademola Adetokumbo Crescent,
+Wuse 2 Abuja</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grad-line"></div>
+
+  <section class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8">
+    <div class="mx-auto max-w-5xl reveal">
+      <div class="cta-wrap">
+        <div class="cta-inner">
+          <div class="grid lg:grid-cols-12 gap-8 items-center relative z-10">
+            <div class="lg:col-span-8">
+              <div class="section-label" style="color:rgba(255,255,255,.7)">Contact</div>
+              <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
+                Need clarification on these terms?
+              </h2>
+              <p class="mt-4 text-white/70 leading-relaxed max-w-2xl">
+                Reach out to Techxagon Academy for questions about usage, registrations,
+                partnerships, or service terms.
+              </p>
+            </div>
+            <div class="lg:col-span-4 flex flex-col sm:flex-row lg:flex-col gap-3">
+              <a href="/contact" class="btn-primary">Contact Us</a>
+              <a href="/" class="btn-secondary">Back to Home</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+{% endblock content %}
+
+{% block extra_js %}
+<script>
+(function() {
+  const revealEls = document.querySelectorAll('.reveal');
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('revealed');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12 });
+
+  revealEls.forEach(el => io.observe(el));
+})();
+</script>
+{% endblock extra_js %}

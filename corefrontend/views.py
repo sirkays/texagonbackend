@@ -479,3 +479,12 @@ def gallery(request):
 
 def team(request):
     return render(request, "corefrontend/teams.html")
+
+def privacy(request):
+    return render(request, "corefrontend/privacy.html")
+
+
+def terms(request):
+    return render(request, "corefrontend/terms.html")
+
+

@@ -1,71 +1,63 @@
 {% load static %}
 <footer class="bg-techxagon-dark text-white">
-        <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14">
-            <div class="grid lg:grid-cols-12 gap-10">
-                <div class="lg:col-span-4">
-                    <div class="flex items-center"><img src="{% static 'assets/logo_text.png' %}" alt="Techxagon Academy Logo" class="h-12 w-auto object-contain" /></div>
-                    <p class="mt-4 text-sm text-white/70 max-w-md">We empower African youths with practical, employability-driven technology skills—through hands-on learning and scalable school partnerships.</p>
-                    <div class="mt-6 space-y-2 text-sm text-white/70">
-                        <p><span class="text-white font-semibold">Email:</span> info@techxagonacademy.com</p>
-                        <p><span class="text-white font-semibold">Phone:</span> +234-000-000-0000</p>
-                        <p><span class="text-white font-semibold">Address:</span> Lagos, Nigeria (placeholder)</p>
-                    </div>
-                </div>
-
-                <div class="lg:col-span-5 grid sm:grid-cols-2 gap-8">
-                    <div>
-                        <p class="font-semibold">Navigation</p>
-                        <ul class="mt-4 space-y-2 text-sm text-white/75">
-                            <li><a class="hover:text-white" href="{% url 'corefrontend:programs' %}">Programs</a></li>
-                            <li><a class="hover:text-white" href="{% url 'corefrontend:for_schools' %}">For School</a></li>
-                            <li><a class="hover:text-white" href="{% url 'corefrontend:projects' %}">Projects</a></li>
-                            <li><a class="hover:text-white" href="{% url 'blog:blog_list' %}">Blog</a></li>
-                            <li><a class="hover:text-white" href="">Shop</a></li>
-                            <li><a class="hover:text-white" href="{% url 'corefrontend:contact' %}">Contact Us</a></li>
-                            <li><a class="hover:text-white" href="{% url 'corefrontend:apply_partner' %}">Partner</a></li>
-                        </ul>
-                    </div>
-
-                    <div>
-                        <p class="font-semibold">Social</p>
-                        <ul class="mt-4 space-y-2 text-sm text-white/75">
-                            <li><a class="hover:text-white" href="https://www.instagram.com/techxagonacademy" rel="noopener">Instagram</a></li>
-                            <li><a class="hover:text-white" href="https://facebook.com/people/Techxagon-Academy" rel="noopener">Facebook</a></li>
-                            <li><a class="hover:text-white" href="https://x.com/Techxagondemy" rel="noopener">X (Twitter)</a></li>
-                            <li><a class="hover:text-white" href="https://www.linkedin.com/company/techxagon-ng" rel="noopener">LinkedIn</a></li>
-                        </ul>
-
-                        <!-- <p class="mt-8 font-semibold">Newsletter</p>
-                        <p class="mt-2 text-sm text-white/70">Monthly updates on programs, projects, and school partnerships.</p> -->
-                        <!-- <form class="mt-4 flex gap-2" action="#" method="post">
-                            <label class="sr-only" for="newsletterEmail">Email</label>
-                            <input id="newsletterEmail" name="email" type="email" required placeholder="you@example.com" class="w-full rounded-xl bg-white/10 border border-white/15 px-4 py-3 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-techxagon-orange" />
-                            <button type="submit" class="shrink-0 rounded-xl px-4 py-3 text-sm font-semibold text-techxagon-dark bg-white hover:bg-white/90">Subscribe</button>
-                        </form> -->
-                    </div>
-                </div>
-
-                <div class="lg:col-span-3">
-                    <p class="font-semibold">Quick CTAs</p>
-                    <div class="mt-4 space-y-3">
-                        <a href="{% url 'corefrontend:apply_partner' %}" class="block text-center px-5 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95">Partner</a>
-                        <a href="{% url 'corefrontend:programs' %}" class="block text-center px-5 py-3 rounded-xl font-semibold border border-white/20 hover:bg-white/10">Explore Programs</a>
-                        <a href="{% url 'corefrontend:contact' %}" class="block text-center px-5 py-3 rounded-xl font-semibold border border-white/20 hover:bg-white/10">Contact Us</a>
-                    </div>
-
-                    <div class="mt-8 rounded-2xl bg-white/5 border border-white/10 p-4">
-                        <p class="text-sm font-semibold">Mission</p>
-                        <p class="mt-2 text-sm text-white/70">Bridge the gap between traditional school education and real-world tech skills.</p>
-                    </div>
-                </div>
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-14">
+        <div class="grid lg:grid-cols-12 gap-10">
+            <div class="lg:col-span-4">
+                <div class="flex items-center"><img src="{% static 'assets/logo_text.png' %}" alt="Techxagon Academy Logo" class="h-12 w-auto object-contain" /></div>
+                <p class="mt-4 text-sm text-white/70 max-w-md">We empower African youths with practical, employability-driven technology skills—through hands-on learning and scalable school partnerships.</p>
+                <address class="mt-6 space-y-2 text-sm text-white/70 not-italic">
+                    <p><span class="text-white font-semibold">Email:</span> <a href="mailto:info@techxagonacademy.com" class="hover:text-white">info@techxagonacademy.com</a></p>
+                    <p><span class="text-white font-semibold">Phone:</span> <a href="tel:+2347084083162" class="hover:text-white">+2347084083162</a></p>
+                    <p><span class="text-white font-semibold">Address:</span> Lagos, Nigeria</p>
+                </address>
             </div>
 
-            <div class="mt-12 pt-8 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <p class="text-sm text-white/60">© <span id="year"></span> Techxagon Academy. All rights reserved.</p>
-                <div class="flex gap-4 text-sm text-white/60">
-                    <a class="hover:text-white" href="/privacy">Privacy</a>
-                    <a class="hover:text-white" href="/terms">Terms</a>
+            <div class="lg:col-span-5 grid sm:grid-cols-2 gap-8">
+                <nav aria-label="Footer Navigation">
+                    <p class="font-semibold">Navigation</p>
+                    <ul class="mt-4 space-y-2 text-sm text-white/75">
+                        <li><a class="hover:text-white" href="{% url 'corefrontend:programs' %}">Programs</a></li>
+                        <li><a class="hover:text-white" href="{% url 'corefrontend:for_schools' %}">For School</a></li>
+                        <li><a class="hover:text-white" href="{% url 'corefrontend:projects' %}">Projects</a></li>
+                        <li><a class="hover:text-white" href="{% url 'blog:blog_list' %}">Blog</a></li>
+                        <li><a class="hover:text-white" href="">Shop</a></li>
+                        <li><a class="hover:text-white" href="{% url 'corefrontend:contact' %}">Contact Us</a></li>
+                        <li><a class="hover:text-white" href="{% url 'corefrontend:apply_partner' %}">Partner</a></li>
+                    </ul>
+                </nav>
+
+                <nav aria-label="Social Media Links">
+                    <p class="font-semibold">Social</p>
+                    <ul class="mt-4 space-y-2 text-sm text-white/75">
+                        <li><a class="hover:text-white" href="https://www.instagram.com/techxagonacademy" target="_blank" rel="noopener noreferrer">Instagram</a></li>
+                        <li><a class="hover:text-white" href="https://facebook.com/people/Techxagon-Academy" target="_blank" rel="noopener noreferrer">Facebook</a></li>
+                        <li><a class="hover:text-white" href="https://x.com/Techxagondemy" target="_blank" rel="noopener noreferrer">X (Twitter)</a></li>
+                        <li><a class="hover:text-white" href="https://www.linkedin.com/company/techxagon-ng" target="_blank" rel="noopener noreferrer">LinkedIn</a></li>
+                    </ul>
+                </nav>
+            </div>
+
+            <div class="lg:col-span-3">
+                <p class="font-semibold">Quick CTAs</p>
+                <div class="mt-4 space-y-3">
+                    <a href="{% url 'corefrontend:apply_partner' %}" class="block text-center px-5 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-techxagon-red to-techxagon-orange hover:opacity-95">Partner</a>
+                    <a href="{% url 'corefrontend:programs' %}" class="block text-center px-5 py-3 rounded-xl font-semibold border border-white/20 hover:bg-white/10">Explore Programs</a>
+                    <a href="{% url 'corefrontend:contact' %}" class="block text-center px-5 py-3 rounded-xl font-semibold border border-white/20 hover:bg-white/10">Contact Us</a>
+                </div>
+
+                <div class="mt-8 rounded-2xl bg-white/5 border border-white/10 p-4">
+                    <p class="text-sm font-semibold">Mission</p>
+                    <p class="mt-2 text-sm text-white/70">Bridge the gap between traditional school education and real-world tech skills.</p>
                 </div>
             </div>
         </div>
-    </footer>
+
+        <div class="mt-12 pt-8 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <p class="text-sm text-white/60">© <span id="year"></span> Techxagon Academy. All rights reserved.</p>
+            <div class="flex gap-4 text-sm text-white/60">
+                <a class="hover:text-white" href="{% url 'corefrontend:privacy' %}">Privacy</a>
+                <a class="hover:text-white" href="{% url 'corefrontend:terms' %}">Terms</a>
+            </div>
+        </div>
+    </div>
+</footer>

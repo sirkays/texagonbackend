@@ -94,9 +94,12 @@ INSTALLED_APPS = [
     'projects',
     "rest_framework",
     "rest_framework_api_key",
-    
+    'django.contrib.sites',
+    'django.contrib.sitemaps',
 
 ]
+
+SITE_ID = 1
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",

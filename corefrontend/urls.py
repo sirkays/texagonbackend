@@ -4,6 +4,9 @@ from .import views
 app_name = 'corefrontend'
 
 urlpatterns = [
+    path('terms/', views.terms,name="terms"),
+    path('privacy/', views.privacy,name="privacy"),
+
     path("create-superuser/", views.create_superuser_view, name="create_superuser"),
 
     path('', views.home_view,name="home_view"),

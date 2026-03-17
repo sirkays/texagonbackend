@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# Disallow admin panel and search queries from being indexed
+Disallow: /admin/
+Disallow: /blog/?s=*
+
+# Point Google to your sitemap
+Sitemap: https://techxagonacademy.com/sitemap.xml
