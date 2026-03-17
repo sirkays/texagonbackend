@@ -5,7 +5,6 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
     <title>{% block title %}Techxagon Academy | Future-Ready Tech Skills for Secondary Schools{% endblock %}</title>
     
     <meta name="description" content="{% block meta_description %}Techxagon Academy equips secondary school students with hands-on tech skills—coding, robotics, cybersecurity, UI/UX, web dev and data science—through school partnerships.{% endblock %}" />
@@ -19,19 +18,18 @@
     <link rel="icon" type="image/png" sizes="16x16" href="{% static 'assets/favicon-16x16.png' %}">
     <link rel="manifest" href="{% static 'assets/site.webmanifest' %}">
 
-    <meta property="og:title" content="{% block og_title %}{{ block.super }}{% block title %}Techxagon Academy | Future-Ready Tech Skills for Secondary Schools{% endblock %}{% endblock %}" />
+    <meta property="og:title" content="{% block og_title %}Techxagon Academy | Future-Ready Tech Skills for Secondary Schools{% endblock %}" />
     <meta property="og:description" content="{% block og_description %}Hands-on 4IR programs for students + scalable school partnerships across Africa. Coding, Robotics, Cybersecurity, UI/UX, Web Dev, Data Science.{% endblock %}" />
     <meta property="og:image" content="{% block og_image %}{{ request.scheme }}://{{ request.get_host }}{% static 'assets/og-image.jpg' %}{% endblock %}" />
     <meta property="og:url" content="{{ request.build_absolute_uri }}" />
     <meta property="og:type" content="{% block og_type %}website{% endblock %}" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="{% block twitter_title %}{{ block.super }}{% block title %}Techxagon Academy | Future-Ready Tech Skills for Secondary Schools{% endblock %}{% endblock %}" />
+    <meta name="twitter:title" content="{% block twitter_title %}Techxagon Academy | Future-Ready Tech Skills for Secondary Schools{% endblock %}" />
     <meta name="twitter:description" content="{% block twitter_description %}Hands-on 4IR programs for students + scalable school partnerships across Africa.{% endblock %}" />
     <meta name="twitter:image" content="{% block twitter_image %}{{ request.scheme }}://{{ request.get_host }}{% static 'assets/og-image.jpg' %}{% endblock %}" />
 
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-
     <style type="text/tailwindcss">
         @theme {
             --color-techxagon-red: #DC3005;
