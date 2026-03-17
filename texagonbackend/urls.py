@@ -6,6 +6,7 @@ from django.contrib.auth import views as auth_views
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.generic import TemplateView
+from django.contrib.sitemaps.views import sitemap
 from corefrontend.sitemaps import StaticViewSitemap # Import your sitemap classes
 # from blog.sitemaps import BlogSitemap
 
