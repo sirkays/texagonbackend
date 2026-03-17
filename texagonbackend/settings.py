@@ -10,10 +10,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "CHANGE_ME")
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
-FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "https://texagon.onrender.com")
+FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "https://techxagonacademy.com")
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
 PAYMENT_TEST = os.environ.get("PAYMENT_TEST", "1") == "1"
-LOGO_URL = os.environ.get("LOGO_URL", "https://texagon.onrender.com/logo.png")
+LOGO_URL = os.environ.get("LOGO_URL", "https://techxagonacademy.com/logo.png")
 
 TEST_KEY_SECRET = os.environ.get("TEST_KEY_SECRET", "CHANGE_ME")
 FLW_SECRET_KEY = os.environ.get("FLW_SECRET_KEY", "CHANGE_ME")
@@ -30,6 +30,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://texagonbackend.onrender.com",
     "https://texagon.onrender.com",
     "https://learn.techxagonacademy.com",
+    "https://techxagonacademy.com"
 ]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
@@ -49,6 +50,7 @@ if os.environ.get('LOCAL') == "0":
         "http://localhost",
         "http://127.0.0.1:3000",
         "https://learn.techxagonacademy.com",
+        "https://techxagonacademy.com",
     ]
 
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
