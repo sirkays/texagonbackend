@@ -6,6 +6,14 @@ from django.contrib.auth import views as auth_views
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.generic import TemplateView
+from corefrontend.sitemaps import StaticViewSitemap # Import your sitemap classes
+# from blog.sitemaps import BlogSitemap
+
+# Create a dictionary of your sitemaps
+sitemaps = {
+    'static': StaticViewSitemap,
+    # 'blog': BlogSitemap,
+}
 
 def healthz(_request):
     return JsonResponse({"ok": True})
@@ -33,6 +41,7 @@ urlpatterns = [
     path('blog/', include('blog.urls')),
     path('projects/', include('projects.urls')),
     path('robots.txt', TemplateView.as_view(template_name="robots.txt", content_type="text/plain")),
+    path('sitemap.xml', sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
 ]
 
 if settings.DEBUG:
