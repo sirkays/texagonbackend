@@ -400,8 +400,8 @@
                         <input type="checkbox" id="terms" name="terms" required
                             class="mt-1 w-4 h-4 rounded border border-techxagon-dark/15 text-techxagon-orange focus:ring-1 focus:ring-techxagon-orange/50" />
                         <label for="terms" class="text-sm text-techxagon-dark/70">
-                            I agree to the <a href="#" class="text-techxagon-orange font-semibold hover:underline">terms
-                                and conditions</a> and <a href="#"
+                            I agree to the <a href="{% url 'corefrontend:terms'  %}" class="text-techxagon-orange font-semibold hover:underline">terms
+                                and conditions</a> and <a href="{% url 'corefrontend:privacy' %}"
                                 class="text-techxagon-orange font-semibold hover:underline">privacy policy</a>
                         </label>
                     </div>
