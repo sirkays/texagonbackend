@@ -6,7 +6,7 @@ class DashboardLoginForm(AuthenticationForm):
     username = forms.CharField(
         widget=forms.TextInput(attrs={
             'class': 'field',
-            'placeholder': 'Username',
+            'placeholder': 'email',
             'autocomplete': 'username',
         })
     )

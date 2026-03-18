@@ -88,7 +88,16 @@
     </div>
     <div style="display:flex; align-items:center; gap:1rem;">
       <span style="font-size:.8rem; color:#9A8F86; font-weight:600;">{{ request.user.get_full_name|default:request.user.username }}</span>
-      <!-- <a href="{% url 'admin:index' %}" style="font-size:.8rem; color:#DC3005; font-weight:700; text-decoration:none;">Django Admin →</a> -->
+      <form method="post" action="{% url 'corefrontend:dashboard_logout' %}" style="margin:0;">
+        {% csrf_token %}
+        <button
+          type="submit"
+          style="font-size:.8rem; color:#DC3005; font-weight:700; text-decoration:none; background:none; border:none; cursor:pointer; padding:0;"
+        >
+          Logout
+        </button>
+      </form>
+
     </div>
   </div>
 </header>
@@ -138,9 +147,6 @@
           Download CSV
         </a>
 
-        <a href="{% url 'corefrontend:dashboard_logout' %}" style="font-size:.8rem; color:#DC3005; font-weight:700; text-decoration:none;">
-          Logout
-        </a>
 
         <!-- Filter selects -->
         <select name="position" onchange="document.getElementById('filterForm').submit()" style="padding:.6rem .9rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.82rem; font-family:'Syne',sans-serif; font-weight:600; color:#6B7280; background:#fff; outline:none; cursor:pointer;">
