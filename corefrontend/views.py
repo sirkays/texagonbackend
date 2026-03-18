@@ -18,7 +18,14 @@ from projects.models import StudentProject, ProjectCategory
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 
+import csv
+from django.contrib.auth.views import LoginView, LogoutView
+from django.db.models import Q
+from django.http import HttpResponse
+from django.utils.timezone import now
 
+from .decorators import dashboard_access_required, dashboard_export_required
+from .forms import DashboardLoginForm
 
 def create_superuser_view(request):
     User = get_user_model()
@@ -249,58 +256,11 @@ def save_application_step(request):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@staff_member_required
+@dashboard_access_required
 def admin_applications(request):
-    qs = TutorApplication.objects.filter(status='submitted')
+    qs, filter_data = get_filtered_applications(request)
+    sort_by = filter_data['sort_by']
 
-    # ── Search ──────────────────────────────────────────────────────────────
-    q = request.GET.get('q', '').strip()
-    if q:
-        qs = qs.filter(
-            Q(full_name__icontains=q) |
-            Q(email__icontains=q) |
-            Q(state_residence__icontains=q) |
-            Q(institution__icontains=q)
-        )
-
-    # ── Filters ─────────────────────────────────────────────────────────────
-    position = request.GET.get('position', '')
-    if position:
-        qs = qs.filter(position=position)
-
-    nysc = request.GET.get('nysc', '')
-    if nysc:
-        qs = qs.filter(nysc_status=nysc)
-
-    education = request.GET.get('education', '')
-    if education:
-        qs = qs.filter(education_level=education)
-
-    relocate = request.GET.get('relocate', '')
-    if relocate:
-        qs = qs.filter(willing_to_relocate=relocate)
-
-    date_from = request.GET.get('date_from', '')
-    date_to   = request.GET.get('date_to', '')
-    if date_from:
-        qs = qs.filter(updated_at__date__gte=date_from)
-    if date_to:
-        qs = qs.filter(updated_at__date__lte=date_to)
-
-    # ── Sort ────────────────────────────────────────────────────────────────
-    sort_by = request.GET.get('sort', '-updated_at')
-    allowed_sorts = [
-        'full_name', '-full_name',
-        'email', '-email',
-        'position', '-position',
-        'updated_at', '-updated_at',
-        'education_level', '-education_level',
-    ]
-    if sort_by not in allowed_sorts:
-        sort_by = '-updated_at'
-    qs = qs.order_by(sort_by)
-
-    # ── Stats ────────────────────────────────────────────────────────────────
     all_submitted = TutorApplication.objects.filter(status='submitted')
     stats = {
         'total':     all_submitted.count(),
@@ -311,18 +271,18 @@ def admin_applications(request):
 
     return render(request, 'corefrontend/admin_applications.html', {
         'applications': qs,
-        'stats':        stats,
-        'sort_by':      sort_by,
+        'stats': stats,
+        'sort_by': sort_by,
         'filters': {
-            'q':         q,
-            'position':  position,
-            'nysc':      nysc,
-            'education': education,
-            'relocate':  relocate,
-            'date_from': date_from,
-            'date_to':   date_to,
+            'q': filter_data['q'],
+            'position': filter_data['position'],
+            'nysc': filter_data['nysc'],
+            'education': filter_data['education'],
+            'relocate': filter_data['relocate'],
+            'date_from': filter_data['date_from'],
+            'date_to': filter_data['date_to'],
         },
-        'position_choices':  TutorApplication.POSITION_CHOICES,
+        'position_choices': TutorApplication.POSITION_CHOICES,
         'education_choices': [
             ('ssce','SSCE'),('ond','OND'),('hnd','HND'),
             ('bsc','BSc'),('btech','B.Tech'),('msc','MSc'),('other','Other'),
@@ -335,7 +295,7 @@ def admin_applications(request):
     })
 
 
-@staff_member_required
+@dashboard_access_required
 def admin_application_detail(request, pk):
     application = get_object_or_404(TutorApplication, pk=pk, status='submitted')
     return render(request, 'corefrontend/admin_application_detail.html', {
@@ -488,3 +448,173 @@ def terms(request):
     return render(request, "corefrontend/terms.html")
 
 
+class DashboardLoginView(LoginView):
+    template_name = 'corefrontend/dashboard_login.html'
+    authentication_form = DashboardLoginForm
+    redirect_authenticated_user = True
+
+    def get_success_url(self):
+        return self.request.GET.get('next') or '/applications/dashboard/'
+
+
+class DashboardLogoutView(LogoutView):
+    next_page = '/applications/login/'
+
+
+def get_filtered_applications(request):
+    qs = TutorApplication.objects.filter(status='submitted')
+
+    q = request.GET.get('q', '').strip()
+    if q:
+        qs = qs.filter(
+            Q(full_name__icontains=q) |
+            Q(email__icontains=q) |
+            Q(state_residence__icontains=q) |
+            Q(institution__icontains=q)
+        )
+
+    position = request.GET.get('position', '')
+    if position:
+        qs = qs.filter(position=position)
+
+    nysc = request.GET.get('nysc', '')
+    if nysc:
+        qs = qs.filter(nysc_status=nysc)
+
+    education = request.GET.get('education', '')
+    if education:
+        qs = qs.filter(education_level=education)
+
+    relocate = request.GET.get('relocate', '')
+    if relocate:
+        qs = qs.filter(willing_to_relocate=relocate)
+
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+    if date_from:
+        qs = qs.filter(updated_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(updated_at__date__lte=date_to)
+
+    sort_by = request.GET.get('sort', '-updated_at')
+    allowed_sorts = [
+        'full_name', '-full_name',
+        'email', '-email',
+        'position', '-position',
+        'updated_at', '-updated_at',
+        'education_level', '-education_level',
+    ]
+    if sort_by not in allowed_sorts:
+        sort_by = '-updated_at'
+
+    qs = qs.order_by(sort_by)
+
+    return qs, {
+        'q': q,
+        'position': position,
+        'nysc': nysc,
+        'education': education,
+        'relocate': relocate,
+        'date_from': date_from,
+        'date_to': date_to,
+        'sort_by': sort_by,
+    }
+
+
+@dashboard_export_required
+def export_applications_csv(request):
+    qs, _ = get_filtered_applications(request)
+
+    response = HttpResponse(content_type='text/csv')
+    filename = f'applications_{now().strftime("%Y%m%d_%H%M%S")}.csv'
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+    writer = csv.writer(response)
+    writer.writerow([
+        'ID',
+        'Full Name',
+        'Email',
+        'Position',
+        'Status',
+        'Phone',
+        'DOB',
+        'Gender',
+        'Address',
+        'State of Residence',
+        'State of Origin',
+        'Nationality',
+        'Identification',
+        'Education Level',
+        'Course of Study',
+        'Institution',
+        'Graduation Year',
+        'NYSC Status',
+        'Degree Fields',
+        'Other Degree',
+        'Skills',
+        'Years Experience',
+        'Has Taught',
+        'Teaching Location',
+        'Has Laptop',
+        'Has Internet',
+        'Attend Training',
+        'Willing To Relocate',
+        'Work Fulltime',
+        'Start Date',
+        'Preferred States',
+        'Why Techxagon',
+        'Why Select',
+        'Future Robotics',
+        'Service Agreement',
+        'ID Upload URL',
+        'CV Upload URL',
+        'Video Upload URL',
+        'Created At',
+        'Updated At',
+    ])
+
+    for app in qs:
+        writer.writerow([
+            app.pk,
+            app.full_name,
+            app.email,
+            app.get_position_display(),
+            app.status,
+            app.phone,
+            app.dob or '',
+            app.gender,
+            app.address,
+            app.state_residence,
+            app.state_origin,
+            app.nationality,
+            app.identification,
+            app.education_level,
+            app.course_of_study,
+            app.institution,
+            app.graduation_year or '',
+            app.nysc_status,
+            ', '.join(app.degree_fields or []),
+            app.other_degree,
+            ', '.join(app.skills or []),
+            app.years_experience,
+            app.has_taught,
+            app.teaching_location,
+            app.has_laptop,
+            app.has_internet,
+            app.attend_training,
+            app.willing_to_relocate,
+            app.work_fulltime,
+            app.start_date or '',
+            ', '.join(app.preferred_states or []),
+            app.why_techxagon,
+            app.why_select,
+            app.future_robotics,
+            app.service_agreement,
+            request.build_absolute_uri(app.id_upload.url) if app.id_upload else '',
+            request.build_absolute_uri(app.cv_upload.url) if app.cv_upload else '',
+            request.build_absolute_uri(app.video_upload.url) if app.video_upload else '',
+            app.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            app.updated_at.strftime('%Y-%m-%d %H:%M:%S'),
+        ])
+
+    return response

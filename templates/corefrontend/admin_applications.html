@@ -130,6 +130,17 @@
           <svg style="position:absolute; left:.875rem; top:50%; transform:translateY(-50%); color:#9A8F86;" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           <input name="q" value="{{ filters.q }}" placeholder="Search name, email, school…" style="width:100%; padding:.6rem .9rem .6rem 2.4rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.85rem; font-family:'Syne',sans-serif; outline:none; background:#F7F4F1;" onfocus="this.style.borderColor='#F97316'" onblur="this.style.borderColor='#EDE8E3'" />
         </div>
+        <a
+          href="{% url 'corefrontend:export_applications_csv' %}?q={{ filters.q }}&position={{ filters.position }}&nysc={{ filters.nysc }}&education={{ filters.education }}&relocate={{ filters.relocate }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&sort={{ sort_by }}"
+          class="btn-ghost"
+          style="white-space:nowrap; text-decoration:none;"
+        >
+          Download CSV
+        </a>
+
+        <a href="{% url 'corefrontend:dashboard_logout' %}" style="font-size:.8rem; color:#DC3005; font-weight:700; text-decoration:none;">
+          Logout
+        </a>
 
         <!-- Filter selects -->
         <select name="position" onchange="document.getElementById('filterForm').submit()" style="padding:.6rem .9rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.82rem; font-family:'Syne',sans-serif; font-weight:600; color:#6B7280; background:#fff; outline:none; cursor:pointer;">
@@ -152,6 +163,7 @@
           <option value="yes" {% if filters.relocate == 'yes' %}selected{% endif %}>Willing</option>
           <option value="no"  {% if filters.relocate == 'no'  %}selected{% endif %}>Not willing</option>
         </select>
+
 
         <!-- Date range -->
         <input type="date" name="date_from" value="{{ filters.date_from }}" onchange="document.getElementById('filterForm').submit()" title="From date" style="padding:.6rem .9rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.82rem; font-family:'Syne',sans-serif; font-weight:600; color:#6B7280; outline:none;" />

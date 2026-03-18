@@ -1,6 +1,7 @@
 from django.db import models
 from django.utils.text import slugify
 
+from django.conf import settings
 
 class OurProgram(models.Model):
     name = models.CharField(max_length=225)
@@ -123,3 +124,26 @@ class TutorApplication(models.Model):
             'serviceAgreement': self.service_agreement,
             'hasVideoUpload':  bool(self.video_upload),
         }
+    
+
+class ApplicationsDashboardAccess(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='applications_dashboard_access'
+    )
+    can_view_dashboard = models.BooleanField(default=True)
+    can_export_csv = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Applications Dashboard Access'
+        verbose_name_plural = 'Applications Dashboard Access'
+
+    def __str__(self):
+        return f"{self.user.username} | dashboard={self.can_view_dashboard} | export={self.can_export_csv}"
+
+    

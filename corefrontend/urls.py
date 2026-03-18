@@ -34,8 +34,12 @@ urlpatterns = [
     path('save-application-step/', views.save_application_step,   name='save_application_step'),
     path('submit-application/',    views.submit_application,       name='submit_application'),
 
+    path('applications/login/', views.DashboardLoginView.as_view(), name='dashboard_login'),
+    path('applications/logout/', views.DashboardLogoutView.as_view(), name='dashboard_logout'),
 
-    path('admin-user/applications/',          views.admin_applications,         name='admin_applications'),
-    path('admin-user/applications/<int:pk>/', views.admin_application_detail,   name='admin_application_detail'),
+    path('applications/dashboard/', views.admin_applications, name='admin_applications'),
+    path('applications/dashboard/export/csv/', views.export_applications_csv, name='export_applications_csv'),
+    path('applications/dashboard/<int:pk>/', views.admin_application_detail, name='admin_application_detail'),
+
     path('admin-user/send-email/',            views.admin_send_email,           name='admin_send_email'),
 ]

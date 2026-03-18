@@ -1,6 +1,60 @@
 from django.contrib import admin
-from .models import OurProgram, TutorApplication
+from .models import OurProgram, TutorApplication,ApplicationsDashboardAccess
 
+
+@admin.register(ApplicationsDashboardAccess)
+class ApplicationsDashboardAccessAdmin(admin.ModelAdmin):
+    list_display = (
+        'user',
+        'can_view_dashboard',
+        'can_export_csv',
+        'is_active',
+        'created_at',
+        'updated_at',
+    )
+    list_filter = (
+        'can_view_dashboard',
+        'can_export_csv',
+        'is_active',
+        'created_at',
+        'updated_at',
+    )
+    search_fields = (
+        'user__username',
+        'user__first_name',
+        'user__last_name',
+        'user__email',
+        'notes',
+    )
+    readonly_fields = (
+        'created_at',
+        'updated_at',
+    )
+    autocomplete_fields = ('user',)
+    list_select_related = ('user',)
+    ordering = ('-created_at',)
+
+    fieldsets = (
+        ('User', {
+            'fields': ('user',)
+        }),
+        ('Access Control', {
+            'fields': (
+                'can_view_dashboard',
+                'can_export_csv',
+                'is_active',
+            )
+        }),
+        ('Notes', {
+            'fields': ('notes',)
+        }),
+        ('Timestamps', {
+            'fields': (
+                'created_at',
+                'updated_at',
+            )
+        }),
+    )
 
 @admin.register(OurProgram)
 class OurProgramAdmin(admin.ModelAdmin):
@@ -130,3 +184,8 @@ class TutorApplicationAdmin(admin.ModelAdmin):
     @admin.display(description="Video Uploaded", boolean=True)
     def has_video_upload(self, obj):
         return bool(obj.video_upload)
+    
+
+
+
+
