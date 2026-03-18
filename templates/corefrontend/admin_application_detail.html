@@ -3,52 +3,399 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ app.full_name }} | Application Detail</title>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <style>
-    body { font-family:'Syne',sans-serif; background:#F7F4F1; color:#1A1410; }
+    * { box-sizing: border-box; }
+
+    body {
+      font-family:'Syne',sans-serif;
+      background:#F7F4F1;
+      color:#1A1410;
+      margin: 0;
+    }
+
     .mono { font-family:'DM Mono',monospace; }
     .grad { background:linear-gradient(135deg,#DC3005 0%,#F97316 100%); }
-    .card { background:#fff; border:1px solid #EDE8E3; border-radius:16px; padding:1.75rem 2rem; margin-bottom:1.25rem; }
-    .section-label { font-size:.65rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:#C5B8B0; margin-bottom:1rem; padding-bottom:.5rem; border-bottom:1px solid #EDE8E3; }
-    .field-row { display:grid; grid-template-columns:repeat(2,1fr); gap:1rem; margin-bottom:1rem; }
-    .field-row.three { grid-template-columns:repeat(3,1fr); }
-    .field-item label { display:block; font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9A8F86; margin-bottom:.3rem; }
-    .field-item p { font-size:.9rem; font-weight:600; color:#1A1410; margin:0; }
-    .badge { display:inline-flex; align-items:center; padding:.2rem .65rem; border-radius:999px; font-size:.7rem; font-weight:700; }
+
+    .page-header {
+      background:#fff;
+      border-bottom:1px solid #EDE8E3;
+      position:sticky;
+      top:0;
+      z-index:50;
+    }
+
+    .header-inner,
+    .main-wrap {
+      max-width:1100px;
+      margin:0 auto;
+      padding-left:2rem;
+      padding-right:2rem;
+    }
+
+    .header-inner {
+      padding-top:.875rem;
+      padding-bottom:.875rem;
+      display:flex;
+      align-items:center;
+      gap:1rem;
+    }
+
+    .header-title {
+      flex:1;
+      min-width:0;
+    }
+
+    .header-title .name {
+      font-weight:800;
+      font-size:.95rem;
+      line-height:1.3;
+      word-break: break-word;
+    }
+
+    .header-title .meta {
+      font-size:.72rem;
+      color:#9A8F86;
+      word-break: break-word;
+    }
+
+    .main-wrap {
+      padding-top:2rem;
+      padding-bottom:2rem;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 320px;
+      gap:1.5rem;
+      align-items:start;
+    }
+
+    .card {
+      background:#fff;
+      border:1px solid #EDE8E3;
+      border-radius:16px;
+      padding:1.75rem 2rem;
+      margin-bottom:1.25rem;
+      overflow-wrap:anywhere;
+    }
+
+    .section-label {
+      font-size:.65rem;
+      font-weight:800;
+      letter-spacing:.12em;
+      text-transform:uppercase;
+      color:#C5B8B0;
+      margin-bottom:1rem;
+      padding-bottom:.5rem;
+      border-bottom:1px solid #EDE8E3;
+    }
+
+    .field-row {
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:1rem;
+      margin-bottom:1rem;
+    }
+
+    .field-row.three {
+      grid-template-columns:repeat(3,minmax(0,1fr));
+    }
+
+    .field-row.four {
+      grid-template-columns:repeat(4,minmax(0,1fr));
+    }
+
+    .field-item {
+      min-width: 0;
+    }
+
+    .field-item label {
+      display:block;
+      font-size:.68rem;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      color:#9A8F86;
+      margin-bottom:.3rem;
+    }
+
+    .field-item p {
+      font-size:.9rem;
+      font-weight:600;
+      color:#1A1410;
+      margin:0;
+      word-break:break-word;
+    }
+
+    .badge {
+      display:inline-flex;
+      align-items:center;
+      padding:.2rem .65rem;
+      border-radius:999px;
+      font-size:.7rem;
+      font-weight:700;
+      max-width:100%;
+    }
+
     .badge-red { background:#FEF2F0; color:#DC3005; }
     .badge-green { background:#F0FDF4; color:#16A34A; }
     .badge-gray { background:#F3F4F6; color:#6B7280; }
     .badge-orange { background:#FFF7ED; color:#F97316; }
-    .chip { display:inline-block; padding:.25rem .65rem; background:#F7F4F1; border:1px solid #EDE8E3; border-radius:8px; font-size:.75rem; font-weight:600; margin:.2rem; color:#6B7280; }
-    .btn { display:inline-flex; align-items:center; gap:.4rem; padding:.6rem 1.25rem; border-radius:10px; font-size:.85rem; font-weight:700; cursor:pointer; border:none; text-decoration:none; }
+
+    .chip {
+      display:inline-block;
+      padding:.25rem .65rem;
+      background:#F7F4F1;
+      border:1px solid #EDE8E3;
+      border-radius:8px;
+      font-size:.75rem;
+      font-weight:600;
+      margin:.2rem;
+      color:#6B7280;
+      max-width:100%;
+      word-break:break-word;
+    }
+
+    .btn {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:.4rem;
+      padding:.6rem 1.25rem;
+      border-radius:10px;
+      font-size:.85rem;
+      font-weight:700;
+      cursor:pointer;
+      border:none;
+      text-decoration:none;
+      white-space:nowrap;
+      min-height:42px;
+    }
+
+    .sidebar-sticky {
+      position:sticky;
+      top:80px;
+    }
 
     /* Modal */
-    .modal-overlay { position:fixed; inset:0; background:rgba(26,20,16,.45); backdrop-filter:blur(4px); z-index:100; display:none; align-items:center; justify-content:center; padding:1rem; }
+    .modal-overlay {
+      position:fixed;
+      inset:0;
+      background:rgba(26,20,16,.45);
+      backdrop-filter:blur(4px);
+      z-index:100;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:1rem;
+    }
+
     .modal-overlay.open { display:flex; }
-    .modal { background:#fff; border-radius:20px; width:100%; max-width:580px; box-shadow:0 24px 64px rgba(0,0,0,.18); overflow:hidden; }
-    .modal-header { padding:1.5rem 2rem 1.25rem; border-bottom:1px solid #EDE8E3; }
+
+    .modal {
+      background:#fff;
+      border-radius:20px;
+      width:100%;
+      max-width:580px;
+      max-height:90vh;
+      overflow:auto;
+      box-shadow:0 24px 64px rgba(0,0,0,.18);
+    }
+
+    .modal-header {
+      padding:1.5rem 2rem 1.25rem;
+      border-bottom:1px solid #EDE8E3;
+    }
+
     .modal-body { padding:1.5rem 2rem; }
-    .modal-footer { padding:1.25rem 2rem; border-top:1px solid #EDE8E3; display:flex; justify-content:flex-end; gap:.75rem; }
-    .field-inp { width:100%; padding:.7rem 1rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.875rem; font-family:'Syne',sans-serif; outline:none; }
+
+    .modal-footer {
+      padding:1.25rem 2rem;
+      border-top:1px solid #EDE8E3;
+      display:flex;
+      justify-content:flex-end;
+      gap:.75rem;
+      flex-wrap:wrap;
+    }
+
+    .field-inp {
+      width:100%;
+      padding:.7rem 1rem;
+      border:1.5px solid #EDE8E3;
+      border-radius:10px;
+      font-size:.875rem;
+      font-family:'Syne',sans-serif;
+      outline:none;
+    }
+
     .field-inp:focus { border-color:#F97316; }
-    textarea.field-inp { resize:vertical; min-height:140px; }
-    #toast { position:fixed; bottom:1.5rem; right:1.5rem; z-index:999; padding:.9rem 1.25rem; border-radius:12px; background:#1A1410; color:#fff; font-size:.85rem; font-weight:600; display:flex; align-items:center; gap:.75rem; box-shadow:0 8px 32px rgba(0,0,0,.25); transition:all .3s; opacity:0; transform:translateY(10px); pointer-events:none; }
-    #toast.show { opacity:1; transform:translateY(0); }
+
+    textarea.field-inp {
+      resize:vertical;
+      min-height:140px;
+    }
+
+    #toast {
+      position:fixed;
+      bottom:1.5rem;
+      right:1.5rem;
+      z-index:999;
+      padding:.9rem 1.25rem;
+      border-radius:12px;
+      background:#1A1410;
+      color:#fff;
+      font-size:.85rem;
+      font-weight:600;
+      display:flex;
+      align-items:center;
+      gap:.75rem;
+      box-shadow:0 8px 32px rgba(0,0,0,.25);
+      transition:all .3s;
+      opacity:0;
+      transform:translateY(10px);
+      pointer-events:none;
+      max-width:min(420px, calc(100vw - 2rem));
+    }
+
+    #toast.show {
+      opacity:1;
+      transform:translateY(0);
+    }
+
+    .muted-label {
+      display:block;
+      font-size:.68rem;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      color:#9A8F86;
+      margin-bottom:.5rem;
+    }
+
+    .sidebar-stack {
+      display:flex;
+      flex-direction:column;
+      gap:1rem;
+    }
+
+    /* Tablet */
+    @media (max-width: 1024px) {
+      .main-wrap {
+        grid-template-columns:1fr;
+      }
+
+      .sidebar-sticky {
+        position:static;
+        top:auto;
+      }
+    }
+
+    /* Mobile */
+    @media (max-width: 768px) {
+      .page-header {
+        position:static;
+      }
+
+      .header-inner,
+      .main-wrap {
+        padding-left:1rem;
+        padding-right:1rem;
+      }
+
+      .header-inner {
+        flex-wrap:wrap;
+        align-items:flex-start;
+      }
+
+      .header-inner > a,
+      .header-inner > button {
+        width:100%;
+      }
+
+      .header-title {
+        order: -1;
+        width: 100%;
+      }
+
+      .main-wrap {
+        padding-top:1rem;
+        padding-bottom:1rem;
+        gap:1rem;
+      }
+
+      .card {
+        padding:1.1rem;
+        border-radius:14px;
+      }
+
+      .field-row,
+      .field-row.three,
+      .field-row.four {
+        grid-template-columns:1fr;
+      }
+
+      .btn {
+        width:100%;
+        white-space:normal;
+      }
+
+      .modal {
+        border-radius:16px;
+      }
+
+      .modal-header,
+      .modal-body,
+      .modal-footer {
+        padding:1rem;
+      }
+
+      .modal-footer {
+        flex-direction:column;
+      }
+
+      #toast {
+        right:1rem;
+        left:1rem;
+        bottom:1rem;
+        max-width:none;
+      }
+    }
+
+    /* Small phones */
+    @media (max-width: 480px) {
+      .header-title .name {
+        font-size:.9rem;
+      }
+
+      .header-title .meta {
+        font-size:.68rem;
+      }
+
+      .field-item p {
+        font-size:.86rem;
+      }
+
+      .badge,
+      .chip {
+        font-size:.72rem;
+      }
+    }
   </style>
 </head>
 <body>
 
-<header style="background:#fff; border-bottom:1px solid #EDE8E3; position:sticky; top:0; z-index:50;">
-  <div style="max-width:1100px; margin:0 auto; padding:.875rem 2rem; display:flex; align-items:center; gap:1rem;">
+<header class="page-header">
+  <div class="header-inner">
     <a href="{% url 'corefrontend:admin_applications' %}" style="display:inline-flex; align-items:center; gap:.4rem; font-size:.82rem; font-weight:700; color:#9A8F86; text-decoration:none; background:#F7F4F1; padding:.4rem .9rem; border-radius:8px; border:1px solid #EDE8E3;">
       ← Back
     </a>
-    <div style="flex:1;">
-      <div style="font-weight:800; font-size:.95rem;">{{ app.full_name|default:"Unnamed Applicant" }}</div>
-      <div class="mono" style="font-size:.72rem; color:#9A8F86;">{{ app.email }} · Submitted {{ app.updated_at|date:"d M Y, H:i" }}</div>
+
+    <div class="header-title">
+      <div class="name">{{ app.full_name|default:"Unnamed Applicant" }}</div>
+      <div class="mono meta">{{ app.email }} · Submitted {{ app.updated_at|date:"d M Y, H:i" }}</div>
     </div>
+
     <button onclick="document.getElementById('emailModal').classList.add('open')" class="btn grad" style="color:#fff;">
       <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,12 2,6"/></svg>
       Send Email
@@ -56,34 +403,39 @@
   </div>
 </header>
 
-<main style="max-width:1100px; margin:0 auto; padding:2rem; display:grid; grid-template-columns:1fr 320px; gap:1.5rem; align-items:start;">
+<main class="main-wrap">
 
   <!-- Left: detail -->
   <div>
     <!-- Step 1 -->
     <div class="card">
       <div class="section-label">Personal Information</div>
+
       <div class="field-row three">
         <div class="field-item"><label>Full Name</label><p>{{ app.full_name|default:"—" }}</p></div>
         <div class="field-item"><label>Date of Birth</label><p>{{ app.dob|date:"d M Y"|default:"—" }}</p></div>
         <div class="field-item"><label>Gender</label><p>{{ app.gender|capfirst|default:"—" }}</p></div>
       </div>
+
       <div class="field-row three">
         <div class="field-item"><label>WhatsApp</label><p class="mono">{{ app.phone|default:"—" }}</p></div>
         <div class="field-item"><label>Email</label><p class="mono" style="font-size:.82rem;">{{ app.email }}</p></div>
         <div class="field-item"><label>ID Type</label><p>{{ app.identification|upper|default:"—" }}</p></div>
       </div>
+
       <div class="field-row">
         <div class="field-item"><label>Residential Address</label><p>{{ app.address|default:"—" }}</p></div>
         <div class="field-item"><label>Nationality</label><p>{{ app.nationality|default:"—" }}</p></div>
       </div>
+
       <div class="field-row">
         <div class="field-item"><label>State of Residence</label><p>{{ app.state_residence|default:"—" }}</p></div>
         <div class="field-item"><label>State of Origin</label><p>{{ app.state_origin|default:"—" }}</p></div>
       </div>
+
       {% if app.id_upload %}
       <div style="margin-top:.5rem;">
-        <label class="field-item" style="display:block; font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9A8F86; margin-bottom:.5rem;">Valid ID</label>
+        <label class="muted-label">Valid ID</label>
         <a href="{{ app.id_upload.url }}" target="_blank" class="btn" style="background:#F7F4F1; color:#DC3005; border:1px solid #EDE8E3; font-size:.78rem;">
           <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           View Uploaded ID
@@ -95,11 +447,13 @@
     <!-- Step 2 -->
     <div class="card">
       <div class="section-label">Education</div>
+
       <div class="field-row three">
         <div class="field-item"><label>Highest Level</label><p>{{ app.education_level|upper|default:"—" }}</p></div>
         <div class="field-item"><label>Course of Study</label><p>{{ app.course_of_study|default:"—" }}</p></div>
         <div class="field-item"><label>Graduation Year</label><p>{{ app.graduation_year|default:"—" }}</p></div>
       </div>
+
       <div class="field-row">
         <div class="field-item"><label>Institution</label><p>{{ app.institution|default:"—" }}</p></div>
         <div class="field-item"><label>NYSC Status</label>
@@ -110,10 +464,12 @@
           </p>
         </div>
       </div>
+
       <div>
-        <label class="field-item" style="display:block; font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9A8F86; margin-bottom:.5rem;">Fields of Degree</label>
+        <label class="muted-label">Fields of Degree</label>
         <div>{% for d in app.degree_fields %}<span class="chip">{{ d }}</span>{% empty %}<span style="color:#9A8F86; font-size:.85rem;">—</span>{% endfor %}</div>
       </div>
+
       {% if app.cv_upload %}
       <div style="margin-top:1rem;">
         <a href="{{ app.cv_upload.url }}" target="_blank" class="btn" style="background:#F7F4F1; color:#DC3005; border:1px solid #EDE8E3; font-size:.78rem;">
@@ -127,15 +483,18 @@
     <!-- Step 3 -->
     <div class="card">
       <div class="section-label">Technical Skills</div>
+
       <div>
-        <label class="field-item" style="display:block; font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9A8F86; margin-bottom:.5rem;">Skills</label>
+        <label class="muted-label">Skills</label>
         <div>{% for s in app.skills %}<span class="chip" style="background:#FEF2F0; border-color:#FECACA; color:#DC3005;">{{ s }}</span>{% empty %}<span style="color:#9A8F86;">—</span>{% endfor %}</div>
       </div>
+
       <div class="field-row three" style="margin-top:1rem;">
         <div class="field-item"><label>Experience</label><p>{{ app.years_experience|default:"—" }}</p></div>
         <div class="field-item"><label>Has Taught Before</label><p>{{ app.has_taught|capfirst|default:"—" }}</p></div>
         <div class="field-item"><label>Teaching Location</label><p>{{ app.teaching_location|default:"—" }}</p></div>
       </div>
+
       <div class="field-row">
         <div class="field-item"><label>Owns Laptop</label>
           <p>{% if app.has_laptop == 'yes' %}<span class="badge badge-green">Yes</span>{% else %}<span class="badge badge-gray">No</span>{% endif %}</p>
@@ -149,7 +508,8 @@
     <!-- Step 4 -->
     <div class="card">
       <div class="section-label">Availability</div>
-      <div class="field-row" style="grid-template-columns:repeat(4,1fr);">
+
+      <div class="field-row four">
         <div class="field-item"><label>Training (3 mo.)</label>
           <p>{% if app.attend_training == 'yes' %}<span class="badge badge-green">Yes</span>{% else %}<span class="badge badge-gray">No</span>{% endif %}</p>
         </div>
@@ -161,8 +521,9 @@
         </div>
         <div class="field-item"><label>Start Date</label><p>{{ app.start_date|date:"d M Y"|default:"—" }}</p></div>
       </div>
+
       <div>
-        <label class="field-item" style="display:block; font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9A8F86; margin-bottom:.5rem;">Preferred States</label>
+        <label class="muted-label">Preferred States</label>
         <div>{% for s in app.preferred_states %}<span class="chip">{{ s|capfirst }}</span>{% empty %}<span style="color:#9A8F86;">—</span>{% endfor %}</div>
       </div>
     </div>
@@ -170,18 +531,22 @@
     <!-- Step 5 -->
     <div class="card">
       <div class="section-label">Screening Answers</div>
+
       <div style="margin-bottom:1.25rem;">
-        <label class="field-item" style="display:block; font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9A8F86; margin-bottom:.5rem;">Why Techxagon?</label>
+        <label class="muted-label">Why Techxagon?</label>
         <p style="font-size:.9rem; line-height:1.65; color:#3D3330;">{{ app.why_techxagon|default:"—" }}</p>
       </div>
+
       <div style="margin-bottom:1.25rem;">
-        <label class="field-item" style="display:block; font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9A8F86; margin-bottom:.5rem;">Why Should We Select You?</label>
+        <label class="muted-label">Why Should We Select You?</label>
         <p style="font-size:.9rem; line-height:1.65; color:#3D3330;">{{ app.why_select|default:"—" }}</p>
       </div>
+
       <div style="margin-bottom:1.25rem;">
-        <label class="field-item" style="display:block; font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9A8F86; margin-bottom:.5rem;">Future of Robotics &amp; AI in Africa</label>
+        <label class="muted-label">Future of Robotics &amp; AI in Africa</label>
         <p style="font-size:.9rem; line-height:1.65; color:#3D3330;">{{ app.future_robotics|default:"—" }}</p>
       </div>
+
       <div class="field-row">
         <div class="field-item"><label>Service Agreement</label>
           <p>{% if app.service_agreement == 'yes' %}<span class="badge badge-green">Agreed</span>{% else %}<span class="badge badge-gray">Declined</span>{% endif %}</p>
@@ -197,33 +562,43 @@
   </div>
 
   <!-- Right: summary sidebar -->
-  <div style="position:sticky; top:80px;">
-    <div class="card" style="margin-bottom:1rem;">
-      <div class="section-label">Application</div>
-      <div style="display:flex; flex-direction:column; gap:.875rem;">
-        <div><div style="font-size:.68rem; font-weight:700; color:#9A8F86; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.25rem;">Position</div>
-          <span class="badge badge-red" style="font-size:.78rem;">{{ app.get_position_display }}</span></div>
-        <div><div style="font-size:.68rem; font-weight:700; color:#9A8F86; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.25rem;">Status</div>
-          <span class="badge badge-green" style="font-size:.78rem;">✓ Submitted</span></div>
-        <div><div style="font-size:.68rem; font-weight:700; color:#9A8F86; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.25rem;">Submitted On</div>
-          <span class="mono" style="font-size:.8rem; font-weight:600;">{{ app.updated_at|date:"d M Y, H:i" }}</span></div>
+  <div class="sidebar-sticky">
+    <div class="sidebar-stack">
+      <div class="card" style="margin-bottom:0;">
+        <div class="section-label">Application</div>
+        <div style="display:flex; flex-direction:column; gap:.875rem;">
+          <div>
+            <div style="font-size:.68rem; font-weight:700; color:#9A8F86; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.25rem;">Position</div>
+            <span class="badge badge-red" style="font-size:.78rem;">{{ app.get_position_display }}</span>
+          </div>
+          <div>
+            <div style="font-size:.68rem; font-weight:700; color:#9A8F86; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.25rem;">Status</div>
+            <span class="badge badge-green" style="font-size:.78rem;">✓ Submitted</span>
+          </div>
+          <div>
+            <div style="font-size:.68rem; font-weight:700; color:#9A8F86; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.25rem;">Submitted On</div>
+            <span class="mono" style="font-size:.8rem; font-weight:600;">{{ app.updated_at|date:"d M Y, H:i" }}</span>
+          </div>
+        </div>
       </div>
-    </div>
 
-    <div class="card">
-      <div class="section-label">Quick Actions</div>
-      <div style="display:flex; flex-direction:column; gap:.6rem;">
-        <button onclick="document.getElementById('emailModal').classList.add('open')" class="btn grad" style="color:#fff; justify-content:center; width:100%;">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,12 2,6"/></svg>
-          Send Email
-        </button>
-        {% if app.cv_upload %}
-        <a href="{{ app.cv_upload.url }}" target="_blank" class="btn" style="background:#F7F4F1; color:#1A1410; border:1px solid #EDE8E3; justify-content:center; width:100%;">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          Download CV
-        </a>
-        {% endif %}
-        <a href="{% url 'corefrontend:admin_applications' %}" class="btn" style="background:#F7F4F1; color:#6B7280; border:1px solid #EDE8E3; justify-content:center; width:100%;">← All Applications</a>
+      <div class="card" style="margin-bottom:0;">
+        <div class="section-label">Quick Actions</div>
+        <div style="display:flex; flex-direction:column; gap:.6rem;">
+          <button onclick="document.getElementById('emailModal').classList.add('open')" class="btn grad" style="color:#fff; width:100%;">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,12 2,6"/></svg>
+            Send Email
+          </button>
+
+          {% if app.cv_upload %}
+          <a href="{{ app.cv_upload.url }}" target="_blank" class="btn" style="background:#F7F4F1; color:#1A1410; border:1px solid #EDE8E3; width:100%;">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Download CV
+          </a>
+          {% endif %}
+
+          <a href="{% url 'corefrontend:admin_applications' %}" class="btn" style="background:#F7F4F1; color:#6B7280; border:1px solid #EDE8E3; width:100%;">← All Applications</a>
+        </div>
       </div>
     </div>
   </div>
@@ -233,19 +608,21 @@
 <div class="modal-overlay" id="emailModal">
   <div class="modal">
     <div class="modal-header">
-      <div style="display:flex; align-items:center; justify-content:space-between;">
-        <div>
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem;">
+        <div style="min-width:0;">
           <h2 style="font-size:1.05rem; font-weight:800; margin:0 0 .2rem;">Email Applicant</h2>
-          <p class="mono" style="font-size:.78rem; color:#9A8F86; margin:0;">{{ app.email }}</p>
+          <p class="mono" style="font-size:.78rem; color:#9A8F86; margin:0; word-break:break-word;">{{ app.email }}</p>
         </div>
-        <button onclick="document.getElementById('emailModal').classList.remove('open')" style="background:#F7F4F1; border:none; border-radius:8px; width:32px; height:32px; cursor:pointer; font-size:1.1rem; color:#6B7280;">✕</button>
+        <button onclick="document.getElementById('emailModal').classList.remove('open')" style="background:#F7F4F1; border:none; border-radius:8px; width:32px; height:32px; cursor:pointer; font-size:1.1rem; color:#6B7280; flex-shrink:0;">✕</button>
       </div>
     </div>
+
     <div class="modal-body">
       <div style="margin-bottom:1rem;">
         <label style="display:block; font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#9A8F86; margin-bottom:.4rem;">Subject *</label>
         <input id="emailSubject" class="field-inp" type="text" placeholder="e.g. Your Techxagon Application" />
       </div>
+
       <div>
         <label style="display:block; font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#9A8F86; margin-bottom:.4rem;">
           Message *
@@ -254,6 +631,7 @@
         <textarea id="emailBody" class="field-inp" placeholder="Dear {{name}}, ..."></textarea>
       </div>
     </div>
+
     <div class="modal-footer">
       <button onclick="document.getElementById('emailModal').classList.remove('open')" class="btn" style="background:#F7F4F1; color:#6B7280;">Cancel</button>
       <button onclick="openMailApp()" class="btn" style="background:#F7F4F1; color:#1A1410; border:1px solid #EDE8E3;" title="Open in device mail app">
@@ -282,28 +660,33 @@
     const subject = document.getElementById('emailSubject').value.trim();
     const body    = document.getElementById('emailBody').value.trim();
     if (!subject || !body) { showToast('Fill in subject and message.'); return; }
+
     const btn = document.getElementById('sendBtn');
-    btn.disabled = true; btn.textContent = 'Sending…';
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
 
     const fd = new FormData();
     fd.append('csrfmiddlewaretoken', CSRF);
     fd.append('subject', subject);
-    fd.append('body',    body);
-    fd.append('mode',    'individual');
+    fd.append('body', body);
+    fd.append('mode', 'individual');
     fd.append('app_ids', APP_ID);
 
     try {
       const res  = await fetch(SEND_URL, { method:'POST', body:fd });
       const data = await res.json();
+
       if (data.success) {
         showToast(`✓ Email sent to {{ app.email }}`);
         document.getElementById('emailModal').classList.remove('open');
         document.getElementById('emailSubject').value = '';
-        document.getElementById('emailBody').value    = '';
+        document.getElementById('emailBody').value = '';
       } else {
         showToast(data.error || 'Send failed.');
       }
-    } catch { showToast('Network error.'); }
+    } catch {
+      showToast('Network error.');
+    }
 
     btn.disabled = false;
     btn.innerHTML = '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send';
@@ -315,12 +698,17 @@
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 3000);
   }
-    function openMailApp() {
-        const subject = encodeURIComponent(document.getElementById('emailSubject').value.trim());
-        const body    = encodeURIComponent(document.getElementById('emailBody').value.trim());
-        const email   = encodeURIComponent('{{ app.email }}');
-        window.location.href = `mailto:${email}${subject ? '?subject=' + subject : ''}${body ? (subject ? '&' : '?') + 'body=' + body : ''}`;
-    }
+
+  function openMailApp() {
+    const subject = encodeURIComponent(document.getElementById('emailSubject').value.trim());
+    const body    = encodeURIComponent(document.getElementById('emailBody').value.trim());
+    const email   = encodeURIComponent('{{ app.email }}');
+    window.location.href = `mailto:${email}${subject ? '?subject=' + subject : ''}${body ? (subject ? '&' : '?') + 'body=' + body : ''}`;
+  }
+
+  document.getElementById('emailModal').addEventListener('click', function(e) {
+    if (e.target === this) this.classList.remove('open');
+  });
 </script>
 </body>
 </html>

@@ -8,69 +8,517 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
   <style>
     *, *::before, *::after { box-sizing: border-box; }
 
+    body {
+      margin: 0;
+      font-family: 'Syne', sans-serif;
+      background: #FCFAF8;
+      color: #1A1410;
+    }
+
+    .mono { font-family: 'DM Mono', monospace; }
+
+    /* ── Layout helpers ── */
+    .page-shell { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+    .topbar-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: .875rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .topbar-left, .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: .875rem;
+      min-width: 0;
+    }
+    .topbar-right { gap: 1rem; }
+
     /* ── Gradient accent ── */
     .grad { background: linear-gradient(135deg, #DC3005 0%, #F97316 100%); }
-    .grad-text { background: linear-gradient(135deg, #DC3005, #F97316); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-    .grad-border { border: 1.5px solid transparent; background-clip: padding-box; position: relative; }
-    .grad-border::after { content:''; position:absolute; inset:-1.5px; border-radius:inherit; background:linear-gradient(135deg,#DC3005,#F97316); z-index:-1; }
+    .grad-text {
+      background: linear-gradient(135deg, #DC3005, #F97316);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .grad-border {
+      border: 1.5px solid transparent;
+      background-clip: padding-box;
+      position: relative;
+    }
+    .grad-border::after {
+      content:'';
+      position:absolute;
+      inset:-1.5px;
+      border-radius:inherit;
+      background:linear-gradient(135deg,#DC3005,#F97316);
+      z-index:-1;
+    }
 
     /* ── Cards ── */
     .card { background: #fff; border: 1px solid #EDE8E3; border-radius: 16px; }
-    .stat-card { background:#fff; border:1px solid #EDE8E3; border-radius:16px; padding:1.25rem 1.5rem; }
+    .stat-card {
+      background:#fff;
+      border:1px solid #EDE8E3;
+      border-radius:16px;
+      padding:1.25rem 1.5rem;
+      min-width: 0;
+    }
+
+    /* ── Stats ── */
+    .stats-grid {
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0, 1fr));
+      gap:1rem;
+      margin-bottom:2rem;
+    }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      padding:1.25rem 1.5rem;
+      border-bottom:1px solid #EDE8E3;
+      display:flex;
+      align-items:center;
+      gap:1rem;
+      flex-wrap:wrap;
+    }
+    .toolbar-form {
+      display:flex;
+      align-items:center;
+      gap:1rem;
+      flex-wrap:wrap;
+      width:100%;
+    }
+    .search-wrap {
+      position:relative;
+      flex:1 1 320px;
+      min-width:220px;
+    }
+    .toolbar-select,
+    .toolbar-date,
+    .toolbar-input {
+      padding:.6rem .9rem;
+      border:1.5px solid #EDE8E3;
+      border-radius:10px;
+      font-size:.82rem;
+      font-family:'Syne',sans-serif;
+      font-weight:600;
+      color:#6B7280;
+      background:#fff;
+      outline:none;
+      width: auto;
+      min-height: 42px;
+    }
+    .toolbar-input {
+      width:100%;
+      padding:.6rem .9rem .6rem 2.4rem;
+      background:#F7F4F1;
+      font-size:.85rem;
+      font-weight:500;
+    }
 
     /* ── Table ── */
-    thead th { background:#F7F4F1; font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9A8F86; padding:.75rem 1rem; border-bottom:1px solid #EDE8E3; cursor:pointer; user-select:none; white-space:nowrap; }
+    .table-wrap { overflow-x:auto; width:100%; }
+    table { width:100%; border-collapse:collapse; }
+
+    thead th {
+      background:#F7F4F1;
+      font-size:.72rem;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      color:#9A8F86;
+      padding:.75rem 1rem;
+      border-bottom:1px solid #EDE8E3;
+      cursor:pointer;
+      user-select:none;
+      white-space:nowrap;
+      text-align:left;
+    }
     thead th:hover { color:#DC3005; }
-    tbody tr { border-bottom:1px solid #F2EDE8; transition:background .15s; }
+
+    tbody tr {
+      border-bottom:1px solid #F2EDE8;
+      transition:background .15s;
+    }
     tbody tr:hover { background:#FAF8F6; }
-    tbody td { padding:.875rem 1rem; font-size:.875rem; vertical-align:middle; }
+
+    tbody td {
+      padding:.875rem 1rem;
+      font-size:.875rem;
+      vertical-align:middle;
+    }
+
     .sort-arrow { display:inline-block; margin-left:.3rem; opacity:.4; font-size:.65rem; }
     .sort-active .sort-arrow { opacity:1; color:#DC3005; }
 
     /* ── Badge ── */
-    .badge { display:inline-flex; align-items:center; gap:.3rem; padding:.2rem .65rem; border-radius:999px; font-size:.7rem; font-weight:700; letter-spacing:.04em; }
+    .badge {
+      display:inline-flex;
+      align-items:center;
+      gap:.3rem;
+      padding:.2rem .65rem;
+      border-radius:999px;
+      font-size:.7rem;
+      font-weight:700;
+      letter-spacing:.04em;
+    }
     .badge-red { background:#FEF2F0; color:#DC3005; }
     .badge-orange { background:#FFF7ED; color:#F97316; }
     .badge-green { background:#F0FDF4; color:#16A34A; }
     .badge-gray { background:#F3F4F6; color:#6B7280; }
 
     /* ── Checkbox ── */
-    input[type=checkbox] { width:16px; height:16px; accent-color:#DC3005; cursor:pointer; }
+    input[type=checkbox] {
+      width:16px;
+      height:16px;
+      accent-color:#DC3005;
+      cursor:pointer;
+    }
 
     /* ── Filter pill ── */
-    .filter-pill { display:inline-flex; align-items:center; gap:.35rem; padding:.35rem .85rem; border-radius:999px; border:1.5px solid #EDE8E3; background:#fff; font-size:.8rem; font-weight:600; color:#6B7280; transition:all .15s; cursor:pointer; }
-    .filter-pill:hover, .filter-pill.active { border-color:#DC3005; color:#DC3005; background:#FEF2F0; }
+    .filter-pill {
+      display:inline-flex;
+      align-items:center;
+      gap:.35rem;
+      padding:.35rem .85rem;
+      border-radius:999px;
+      border:1.5px solid #EDE8E3;
+      background:#fff;
+      font-size:.8rem;
+      font-weight:600;
+      color:#6B7280;
+      transition:all .15s;
+      cursor:pointer;
+    }
+    .filter-pill:hover, .filter-pill.active {
+      border-color:#DC3005;
+      color:#DC3005;
+      background:#FEF2F0;
+    }
 
     /* ── Modal ── */
-    .modal-overlay { position:fixed; inset:0; background:rgba(26,20,16,.45); backdrop-filter:blur(4px); z-index:100; display:none; align-items:center; justify-content:center; padding:1rem; }
+    .modal-overlay {
+      position:fixed;
+      inset:0;
+      background:rgba(26,20,16,.45);
+      backdrop-filter:blur(4px);
+      z-index:100;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:1rem;
+    }
     .modal-overlay.open { display:flex; }
-    .modal { background:#fff; border-radius:20px; width:100%; max-width:600px; box-shadow:0 24px 64px rgba(0,0,0,.18); overflow:hidden; }
+    .modal {
+      background:#fff;
+      border-radius:20px;
+      width:100%;
+      max-width:600px;
+      box-shadow:0 24px 64px rgba(0,0,0,.18);
+      overflow:hidden;
+      max-height: calc(100vh - 2rem);
+      overflow-y: auto;
+    }
     .modal-header { padding:1.5rem 2rem 1.25rem; border-bottom:1px solid #EDE8E3; }
     .modal-body { padding:1.5rem 2rem; }
-    .modal-footer { padding:1.25rem 2rem; border-top:1px solid #EDE8E3; display:flex; justify-content:flex-end; gap:.75rem; }
+    .modal-footer {
+      padding:1.25rem 2rem;
+      border-top:1px solid #EDE8E3;
+      display:flex;
+      justify-content:flex-end;
+      gap:.75rem;
+      flex-wrap: wrap;
+    }
 
     /* ── Fields ── */
-    .field { width:100%; padding:.7rem 1rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.875rem; font-family:'Syne',sans-serif; outline:none; transition:border-color .15s; background:#fff; }
+    .field {
+      width:100%;
+      padding:.7rem 1rem;
+      border:1.5px solid #EDE8E3;
+      border-radius:10px;
+      font-size:.875rem;
+      font-family:'Syne',sans-serif;
+      outline:none;
+      transition:border-color .15s;
+      background:#fff;
+    }
     .field:focus { border-color:#F97316; }
     textarea.field { resize:vertical; min-height:160px; }
 
     /* ── Buttons ── */
-    .btn-primary { display:inline-flex; align-items:center; gap:.5rem; padding:.65rem 1.4rem; border-radius:10px; font-size:.875rem; font-weight:700; color:#fff; cursor:pointer; border:none; transition:opacity .15s,transform .1s; }
+    .btn,
+    .btn-primary,
+    .btn-ghost {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:.5rem;
+      padding:.65rem 1.1rem;
+      border-radius:10px;
+      font-size:.875rem;
+      font-weight:700;
+      text-decoration:none;
+      min-height: 42px;
+    }
+
+    .btn-primary {
+      color:#fff;
+      cursor:pointer;
+      border:none;
+      transition:opacity .15s,transform .1s;
+    }
     .btn-primary:hover { opacity:.9; transform:translateY(-1px); }
-    .btn-ghost { display:inline-flex; align-items:center; gap:.5rem; padding:.65rem 1.4rem; border-radius:10px; font-size:.875rem; font-weight:700; color:#6B7280; background:#F7F4F1; border:none; cursor:pointer; transition:background .15s; }
+
+    .btn-ghost {
+      color:#6B7280;
+      background:#F7F4F1;
+      border:none;
+      cursor:pointer;
+      transition:background .15s;
+    }
     .btn-ghost:hover { background:#EDE8E3; color:#1A1410; }
 
+    /* ── Row actions ── */
+    .row-actions {
+      display:flex;
+      gap:.5rem;
+      flex-wrap: wrap;
+    }
+    .action-link,
+    .action-button {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:.3rem;
+      padding:.35rem .75rem;
+      border-radius:8px;
+      font-size:.75rem;
+      font-weight:700;
+      text-decoration:none;
+      transition:all .15s;
+      white-space: nowrap;
+    }
+    .action-link {
+      background:#F7F4F1;
+      border:1px solid #EDE8E3;
+      color:#6B7280;
+    }
+    .action-link:hover { background:#EDE8E3; }
+    .action-button {
+      background:#FEF2F0;
+      border:1px solid #FECACA;
+      color:#DC3005;
+      cursor:pointer;
+    }
+    .action-button:hover { background:#FEE2DE; }
+
+    /* ── Bulk bar ── */
+    #bulkBar {
+      display:none;
+      align-items:center;
+      gap:.75rem;
+      margin-left:auto;
+      flex-wrap:wrap;
+    }
+
     /* ── Toast ── */
-    #toast { position:fixed; bottom:1.5rem; right:1.5rem; z-index:999; padding:.9rem 1.25rem; border-radius:12px; background:#1A1410; color:#fff; font-size:.85rem; font-weight:600; display:flex; align-items:center; gap:.75rem; box-shadow:0 8px 32px rgba(0,0,0,.25); transition:all .3s; opacity:0; transform:translateY(10px); pointer-events:none; max-width:340px; }
-    #toast.show { opacity:1; transform:translateY(0); }
+    #toast {
+      position:fixed;
+      bottom:1.5rem;
+      right:1.5rem;
+      z-index:999;
+      padding:.9rem 1.25rem;
+      border-radius:12px;
+      background:#1A1410;
+      color:#fff;
+      font-size:.85rem;
+      font-weight:600;
+      display:flex;
+      align-items:center;
+      gap:.75rem;
+      box-shadow:0 8px 32px rgba(0,0,0,.25);
+      transition:all .3s;
+      opacity:0;
+      transform:translateY(10px);
+      pointer-events:none;
+      max-width:340px;
+    }
+    #toast.show {
+      opacity:1;
+      transform:translateY(0);
+    }
 
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width:6px; height:6px; }
     ::-webkit-scrollbar-track { background:#F7F4F1; }
     ::-webkit-scrollbar-thumb { background:#D5C8C0; border-radius:3px; }
+
+    /* ── Tablet ── */
+    @media (max-width: 1024px) {
+      .page-shell { padding: 1.25rem; }
+      .topbar-inner { padding: .875rem 1.25rem; }
+      .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .toolbar { padding: 1rem; }
+      .modal-header, .modal-body, .modal-footer { padding-left: 1.25rem; padding-right: 1.25rem; }
+    }
+
+    /* ── Mobile ── */
+    @media (max-width: 768px) {
+      .page-shell { padding: 1rem; }
+      .topbar-inner {
+        padding: .875rem 1rem;
+        align-items: flex-start;
+      }
+      .topbar-left, .topbar-right {
+        width: 100%;
+        justify-content: space-between;
+      }
+      .topbar-left img {
+        height: 56px !important;
+      }
+
+      .stats-grid { grid-template-columns: 1fr; }
+
+      .toolbar-form {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .search-wrap,
+      .toolbar-select,
+      .toolbar-date,
+      .btn-primary,
+      .btn-ghost,
+      .toolbar-form > a {
+        width: 100%;
+      }
+
+      #bulkBar {
+        margin-left: 0;
+        width: 100%;
+      }
+      #bulkBar .btn-primary,
+      #bulkBar .btn-ghost {
+        width: 100%;
+      }
+
+      /* Convert table to stacked cards */
+      .table-wrap {
+        overflow-x: visible;
+      }
+
+      table, thead, tbody, th, td, tr {
+        display: block;
+        width: 100%;
+      }
+
+      thead {
+        display: none;
+      }
+
+      tbody {
+        display: grid;
+        gap: 1rem;
+        padding: 1rem;
+      }
+
+      tbody tr {
+        background: #fff;
+        border: 1px solid #EDE8E3;
+        border-radius: 14px;
+        padding: .4rem 0;
+        overflow: hidden;
+      }
+
+      tbody td {
+        border: none;
+        padding: .65rem 1rem;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        text-align: right;
+      }
+
+      tbody td::before {
+        content: attr(data-label);
+        font-size: .72rem;
+        font-weight: 800;
+        color: #9A8F86;
+        letter-spacing: .05em;
+        text-transform: uppercase;
+        text-align: left;
+        min-width: 96px;
+        flex-shrink: 0;
+      }
+
+      tbody td:first-child {
+        padding-bottom: .25rem;
+      }
+
+      tbody td:first-child::before {
+        content: "Select";
+      }
+
+      .row-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
+
+      .row-actions .action-link,
+      .row-actions .action-button {
+        flex: 1 1 auto;
+      }
+
+      .modal {
+        border-radius: 16px;
+      }
+
+      .modal-footer {
+        flex-direction: column-reverse;
+      }
+
+      .modal-footer button {
+        width: 100%;
+      }
+
+      #toast {
+        right: 1rem;
+        left: 1rem;
+        bottom: 1rem;
+        max-width: none;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .stat-card {
+        padding: 1rem;
+      }
+      .modal-header, .modal-body, .modal-footer {
+        padding: 1rem;
+      }
+      tbody td {
+        flex-direction: column;
+        align-items: flex-start;
+        text-align: left;
+        gap: .35rem;
+      }
+      tbody td::before {
+        min-width: auto;
+      }
+      .row-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
   </style>
 </head>
 <body>
@@ -79,15 +527,16 @@
      TOP NAV
 ══════════════════════════════════════════════════════════════════════════ -->
 <header style="background:#fff; border-bottom:1px solid #EDE8E3; position:sticky; top:0; z-index:50;">
-  <div style="max-width:1400px; margin:0 auto; padding:.875rem 2rem; display:flex; align-items:center; justify-content:space-between;">
-    <div style="display:flex; align-items:center; gap:.875rem;">
-        <img src="{% static 'assets/logo_text.png' %}" alt="Techxagon" style="height:76px; width:auto; object-fit:contain;" />
+  <div class="topbar-inner">
+    <div class="topbar-left">
+      <img src="{% static 'assets/logo_text.png' %}" alt="Techxagon" style="height:76px; width:auto; object-fit:contain;" />
       <div>
         <div style="font-size:.65rem; color:#9A8F86; letter-spacing:.1em; text-transform:uppercase; font-weight:600;">Applications Dashboard</div>
       </div>
     </div>
-    <div style="display:flex; align-items:center; gap:1rem;">
-      <span style="font-size:.8rem; color:#9A8F86; font-weight:600;">{{ request.user.get_full_name|default:request.user.username }}</span>
+
+    <div class="topbar-right">
+      <span style="font-size:.8rem; color:#9A8F86; font-weight:600; word-break:break-word;">{{ request.user.get_full_name|default:request.user.username }}</span>
       <form method="post" action="{% url 'corefrontend:dashboard_logout' %}" style="margin:0;">
         {% csrf_token %}
         <button
@@ -97,7 +546,6 @@
           Logout
         </button>
       </form>
-
     </div>
   </div>
 </header>
@@ -105,10 +553,10 @@
 <!-- ══════════════════════════════════════════════════════════════════════════
      MAIN
 ══════════════════════════════════════════════════════════════════════════ -->
-<main style="max-width:1400px; margin:0 auto; padding:2rem;">
+<main class="page-shell">
 
   <!-- Stats row -->
-  <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-bottom:2rem;">
+  <div class="stats-grid">
     <div class="stat-card">
       <div style="font-size:.7rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#9A8F86; margin-bottom:.4rem;">Total Submitted</div>
       <div style="font-size:2rem; font-weight:800;" class="grad-text">{{ stats.total }}</div>
@@ -131,61 +579,74 @@
   <div class="card" style="overflow:hidden;">
 
     <!-- Table toolbar -->
-    <div style="padding:1.25rem 1.5rem; border-bottom:1px solid #EDE8E3; display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+    <div class="toolbar">
+      <form method="GET" id="filterForm" class="toolbar-form">
 
-      <!-- Search -->
-      <form method="GET" id="filterForm" style="display:contents;">
-        <div style="position:relative; flex:1; min-width:220px;">
+        <!-- Search -->
+        <div class="search-wrap">
           <svg style="position:absolute; left:.875rem; top:50%; transform:translateY(-50%); color:#9A8F86;" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          <input name="q" value="{{ filters.q }}" placeholder="Search name, email, school…" style="width:100%; padding:.6rem .9rem .6rem 2.4rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.85rem; font-family:'Syne',sans-serif; outline:none; background:#F7F4F1;" onfocus="this.style.borderColor='#F97316'" onblur="this.style.borderColor='#EDE8E3'" />
+          <input
+            name="q"
+            value="{{ filters.q }}"
+            placeholder="Search name, email, school…"
+            class="toolbar-input"
+            onfocus="this.style.borderColor='#F97316'"
+            onblur="this.style.borderColor='#EDE8E3'"
+          />
         </div>
+
         <a
           href="{% url 'corefrontend:export_applications_csv' %}?q={{ filters.q }}&position={{ filters.position }}&nysc={{ filters.nysc }}&education={{ filters.education }}&relocate={{ filters.relocate }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&sort={{ sort_by }}"
           class="btn-ghost"
-          style="white-space:nowrap; text-decoration:none;"
+          style="white-space:nowrap;"
         >
           Download CSV
         </a>
 
-
         <!-- Filter selects -->
-        <select name="position" onchange="document.getElementById('filterForm').submit()" style="padding:.6rem .9rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.82rem; font-family:'Syne',sans-serif; font-weight:600; color:#6B7280; background:#fff; outline:none; cursor:pointer;">
+        <select name="position" onchange="document.getElementById('filterForm').submit()" class="toolbar-select">
           <option value="">All Positions</option>
-          {% for val, label in position_choices %}<option value="{{ val }}" {% if filters.position == val %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          {% for val, label in position_choices %}
+            <option value="{{ val }}" {% if filters.position == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
         </select>
 
-        <select name="nysc" onchange="document.getElementById('filterForm').submit()" style="padding:.6rem .9rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.82rem; font-family:'Syne',sans-serif; font-weight:600; color:#6B7280; background:#fff; outline:none; cursor:pointer;">
+        <select name="nysc" onchange="document.getElementById('filterForm').submit()" class="toolbar-select">
           <option value="">All NYSC</option>
-          {% for val, label in nysc_choices %}<option value="{{ val }}" {% if filters.nysc == val %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          {% for val, label in nysc_choices %}
+            <option value="{{ val }}" {% if filters.nysc == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
         </select>
 
-        <select name="education" onchange="document.getElementById('filterForm').submit()" style="padding:.6rem .9rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.82rem; font-family:'Syne',sans-serif; font-weight:600; color:#6B7280; background:#fff; outline:none; cursor:pointer;">
+        <select name="education" onchange="document.getElementById('filterForm').submit()" class="toolbar-select">
           <option value="">All Education</option>
-          {% for val, label in education_choices %}<option value="{{ val }}" {% if filters.education == val %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          {% for val, label in education_choices %}
+            <option value="{{ val }}" {% if filters.education == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
         </select>
 
-        <select name="relocate" onchange="document.getElementById('filterForm').submit()" style="padding:.6rem .9rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.82rem; font-family:'Syne',sans-serif; font-weight:600; color:#6B7280; background:#fff; outline:none; cursor:pointer;">
+        <select name="relocate" onchange="document.getElementById('filterForm').submit()" class="toolbar-select">
           <option value="">Relocation</option>
           <option value="yes" {% if filters.relocate == 'yes' %}selected{% endif %}>Willing</option>
-          <option value="no"  {% if filters.relocate == 'no'  %}selected{% endif %}>Not willing</option>
+          <option value="no" {% if filters.relocate == 'no' %}selected{% endif %}>Not willing</option>
         </select>
 
-
         <!-- Date range -->
-        <input type="date" name="date_from" value="{{ filters.date_from }}" onchange="document.getElementById('filterForm').submit()" title="From date" style="padding:.6rem .9rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.82rem; font-family:'Syne',sans-serif; font-weight:600; color:#6B7280; outline:none;" />
-        <input type="date" name="date_to" value="{{ filters.date_to }}" onchange="document.getElementById('filterForm').submit()" title="To date" style="padding:.6rem .9rem; border:1.5px solid #EDE8E3; border-radius:10px; font-size:.82rem; font-family:'Syne',sans-serif; font-weight:600; color:#6B7280; outline:none;" />
+        <input type="date" name="date_from" value="{{ filters.date_from }}" onchange="document.getElementById('filterForm').submit()" title="From date" class="toolbar-date" />
+        <input type="date" name="date_to" value="{{ filters.date_to }}" onchange="document.getElementById('filterForm').submit()" title="To date" class="toolbar-date" />
 
         <!-- preserve sort -->
         <input type="hidden" name="sort" value="{{ sort_by }}" />
 
         <button type="submit" class="btn-primary grad" style="white-space:nowrap;">Search</button>
+
         {% if filters.q or filters.position or filters.nysc or filters.education or filters.relocate or filters.date_from or filters.date_to %}
-        <a href="{% url 'corefrontend:admin_applications' %}" class="btn-ghost" style="white-space:nowrap;">Clear</a>
+          <a href="{% url 'corefrontend:admin_applications' %}" class="btn-ghost" style="white-space:nowrap;">Clear</a>
         {% endif %}
       </form>
 
-      <!-- Bulk actions (shown when rows selected) -->
-      <div id="bulkBar" style="display:none; align-items:center; gap:.75rem; margin-left:auto;">
+      <!-- Bulk actions -->
+      <div id="bulkBar">
         <span id="selCount" style="font-size:.82rem; font-weight:700; color:#DC3005;"></span>
         <button onclick="openEmailModal('bulk')" class="btn-primary grad">
           <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,12 2,6"/></svg>
@@ -203,8 +664,8 @@
     </div>
 
     <!-- Table -->
-    <div style="overflow-x:auto;">
-      <table style="width:100%; border-collapse:collapse;">
+    <div class="table-wrap">
+      <table>
         <thead>
           <tr>
             <th style="width:40px; padding:.75rem 1rem;">
@@ -233,24 +694,32 @@
             {% endwith %}
           </tr>
         </thead>
+
         <tbody>
           {% for app in applications %}
           <tr>
-            <td><input type="checkbox" class="row-check" value="{{ app.pk }}" data-email="{{ app.email }}" data-name="{{ app.full_name }}" /></td>
-            <td>
+            <td data-label="Select">
+              <input type="checkbox" class="row-check" value="{{ app.pk }}" data-email="{{ app.email }}" data-name="{{ app.full_name }}" />
+            </td>
+
+            <td data-label="Name">
               <div style="font-weight:700; font-size:.875rem;">{{ app.full_name|default:"—" }}</div>
               <div class="mono" style="font-size:.7rem; color:#9A8F86;">{{ app.phone|default:"" }}</div>
             </td>
-            <td>
-              <a href="mailto:{{ app.email }}" class="mono" style="font-size:.78rem; color:#DC3005; text-decoration:none; font-weight:600;">{{ app.email }}</a>
+
+            <td data-label="Email">
+              <a href="mailto:{{ app.email }}" class="mono" style="font-size:.78rem; color:#DC3005; text-decoration:none; font-weight:600; word-break:break-word;">{{ app.email }}</a>
             </td>
-            <td>
+
+            <td data-label="Position">
               <span class="badge badge-red">{{ app.get_position_display }}</span>
             </td>
-            <td>
+
+            <td data-label="Education">
               <span class="badge badge-gray" style="text-transform:uppercase;">{{ app.education_level|upper|default:"—" }}</span>
             </td>
-            <td>
+
+            <td data-label="NYSC">
               {% if app.nysc_status == 'completed' %}
                 <span class="badge badge-green">✓ Done</span>
               {% elif app.nysc_status == 'serving' %}
@@ -259,21 +728,29 @@
                 <span class="badge badge-gray">N/A</span>
               {% endif %}
             </td>
-            <td>
+
+            <td data-label="Relocate">
               {% if app.willing_to_relocate == 'yes' %}
                 <span class="badge badge-green">Yes</span>
               {% else %}
                 <span class="badge badge-gray">No</span>
               {% endif %}
             </td>
-            <td style="font-size:.82rem; color:#6B7280; font-weight:600;">{{ app.state_residence|default:"—" }}</td>
-            <td class="mono" style="font-size:.75rem; color:#9A8F86; white-space:nowrap;">{{ app.updated_at|date:"d M Y" }}</td>
-            <td>
-              <div style="display:flex; gap:.5rem;">
-                <a href="{% url 'corefrontend:admin_application_detail' app.pk %}" style="display:inline-flex; align-items:center; gap:.3rem; padding:.35rem .75rem; border-radius:8px; background:#F7F4F1; border:1px solid #EDE8E3; font-size:.75rem; font-weight:700; color:#6B7280; text-decoration:none; transition:all .15s;" onmouseover="this.style.background='#EDE8E3'" onmouseout="this.style.background='#F7F4F1'">
+
+            <td data-label="State" style="font-size:.82rem; color:#6B7280; font-weight:600;">
+              {{ app.state_residence|default:"—" }}
+            </td>
+
+            <td data-label="Submitted" class="mono" style="font-size:.75rem; color:#9A8F86; white-space:nowrap;">
+              {{ app.updated_at|date:"d M Y" }}
+            </td>
+
+            <td data-label="Actions">
+              <div class="row-actions">
+                <a href="{% url 'corefrontend:admin_application_detail' app.pk %}" class="action-link">
                   View
                 </a>
-                <button onclick="openEmailModal('individual', {{ app.pk }}, '{{ app.email }}', '{{ app.full_name|escapejs }}')" style="display:inline-flex; align-items:center; gap:.3rem; padding:.35rem .75rem; border-radius:8px; background:#FEF2F0; border:1px solid #FECACA; font-size:.75rem; font-weight:700; color:#DC3005; cursor:pointer; transition:all .15s;" onmouseover="this.style.background='#FEE2DE'" onmouseout="this.style.background='#FEF2F0'">
+                <button onclick="openEmailModal('individual', {{ app.pk }}, '{{ app.email }}', '{{ app.full_name|escapejs }}')" class="action-button">
                   Email
                 </button>
               </div>
@@ -298,23 +775,26 @@
 <div class="modal-overlay" id="emailModal">
   <div class="modal">
     <div class="modal-header">
-      <div style="display:flex; align-items:center; justify-content:space-between;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
         <div>
           <h2 style="font-size:1.1rem; font-weight:800; margin:0 0 .25rem;">Compose Email</h2>
           <p id="emailModalSubtitle" style="font-size:.82rem; color:#9A8F86; margin:0; font-weight:600;"></p>
         </div>
-        <button onclick="closeEmailModal()" style="background:#F7F4F1; border:none; border-radius:8px; width:32px; height:32px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:#6B7280; font-size:1.1rem;">✕</button>
+        <button onclick="closeEmailModal()" style="background:#F7F4F1; border:none; border-radius:8px; width:32px; height:32px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:#6B7280; font-size:1.1rem; flex-shrink:0;">✕</button>
       </div>
     </div>
+
     <div class="modal-body">
       <div style="margin-bottom:1rem;">
         <label style="display:block; font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#9A8F86; margin-bottom:.5rem;">Recipients</label>
-        <div id="recipientTags" style="display:flex; flex-wrap:wrap; gap:.4rem; padding:.6rem .75rem; border:1.5px solid #EDE8E3; border-radius:10px; min-height:40px; background:#F7F4F1; font-size:.8rem; font-weight:600; color:#6B7280;"></div>
+        <div id="recipientTags" style="display:flex; flex-wrap:wrap; gap:.4rem; padding:.6rem .75rem; border:1.5px solid #EDE8E3; border-radius:10px; min-height:40px; background:#F7F4F1; font-size:.8rem; font-weight:600; color:#6B7280; word-break:break-word;"></div>
       </div>
+
       <div style="margin-bottom:1rem;">
         <label style="display:block; font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#9A8F86; margin-bottom:.5rem;">Subject *</label>
         <input id="emailSubject" class="field" type="text" placeholder="e.g. Your Techxagon Application Update" />
       </div>
+
       <div>
         <label style="display:block; font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#9A8F86; margin-bottom:.5rem;">
           Message *
@@ -323,13 +803,14 @@
         <textarea id="emailBody" class="field" placeholder="Dear {{name}},&#10;&#10;Thank you for applying to Techxagon Academy..."></textarea>
       </div>
     </div>
+
     <div class="modal-footer">
       <button onclick="closeEmailModal()" class="btn-ghost">Cancel</button>
       <button onclick="openMailApp()" class="btn-ghost" id="mailAppBtn" title="Open in device mail app">
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,12 2,6"/></svg>
         Open in Mail App
       </button>
-      <button onclick="sendEmail()" class="btn grad" style="color:#fff;" id="sendBtn">
+      <button onclick="sendEmail()" class="btn-primary grad" style="color:#fff;" id="sendBtn">
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         Send
       </button>
@@ -344,68 +825,67 @@
 </div>
 
 <script>
-
-  const CSRF    = document.cookie.split('; ').find(r => r.startsWith('csrftoken='))?.split('=')[1] ?? '';
+  const CSRF = document.cookie.split('; ').find(r => r.startsWith('csrftoken='))?.split('=')[1] ?? '';
   const SEND_URL = "{% url 'corefrontend:admin_send_email' %}";
 
   /* ── Sort ─────────────────────────────────────────────────────────────── */
   function sortBy(field) {
     const current = '{{ sort_by }}';
-    const next    = current === field ? '-' + field : field;
-    const url     = new URL(window.location.href);
+    const next = current === field ? '-' + field : field;
+    const url = new URL(window.location.href);
     url.searchParams.set('sort', next);
     window.location.href = url.toString();
   }
 
   /* ── Select all checkboxes ───────────────────────────────────────────── */
-  document.getElementById('selectAll').addEventListener('change', function () {
+  document.getElementById('selectAll')?.addEventListener('change', function () {
     document.querySelectorAll('.row-check').forEach(c => c.checked = this.checked);
     updateBulkBar();
   });
+
   document.querySelectorAll('.row-check').forEach(c =>
     c.addEventListener('change', updateBulkBar)
   );
+
   function updateBulkBar() {
     const checked = document.querySelectorAll('.row-check:checked');
-    const bar     = document.getElementById('bulkBar');
-    const count   = document.getElementById('selCount');
+    const bar = document.getElementById('bulkBar');
+    const count = document.getElementById('selCount');
+
     if (checked.length > 0) {
-      bar.style.display   = 'flex';
-      count.textContent   = `${checked.length} selected`;
+      bar.style.display = 'flex';
+      count.textContent = `${checked.length} selected`;
     } else {
       bar.style.display = 'none';
     }
   }
 
   /* ── Email modal state ───────────────────────────────────────────────── */
-  let emailMode    = 'individual';  // 'individual' | 'bulk' | 'all'
-  let emailAppIds  = [];
+  let emailMode = 'individual'; // 'individual' | 'bulk' | 'all'
+  let emailAppIds = [];
 
   function openEmailModal(mode, appId = null, email = '', name = '') {
-    emailMode   = mode;
+    emailMode = mode;
     emailAppIds = [];
 
     const subtitle = document.getElementById('emailModalSubtitle');
-    const tags     = document.getElementById('recipientTags');
+    const tags = document.getElementById('recipientTags');
     tags.innerHTML = '';
 
     if (mode === 'individual') {
       emailAppIds = [appId];
       subtitle.textContent = `Sending to 1 applicant`;
-      tags.innerHTML = `<span style="background:#FEF2F0;color:#DC3005;padding:.2rem .6rem;border-radius:6px;font-weight:700;">${email}</span>`;
-
+      tags.innerHTML = `<span style="background:#FEF2F0;color:#DC3005;padding:.2rem .6rem;border-radius:6px;font-weight:700;max-width:100%;word-break:break-word;">${email}</span>`;
     } else if (mode === 'bulk') {
       const checked = document.querySelectorAll('.row-check:checked');
       checked.forEach(c => {
         emailAppIds.push(c.value);
-        tags.innerHTML += `<span style="background:#FEF2F0;color:#DC3005;padding:.2rem .6rem;border-radius:6px;font-weight:700;">${c.dataset.email}</span>`;
+        tags.innerHTML += `<span style="background:#FEF2F0;color:#DC3005;padding:.2rem .6rem;border-radius:6px;font-weight:700;max-width:100%;word-break:break-word;">${c.dataset.email}</span>`;
       });
       subtitle.textContent = `Sending to ${emailAppIds.length} selected applicant${emailAppIds.length > 1 ? 's' : ''}`;
-
     } else {
-      // all
       subtitle.textContent = `Sending to all {{ stats.total }} submitted applicants`;
-      tags.innerHTML = `<span style="background:#FEF2F0;color:#DC3005;padding:.2rem .6rem;border-radius:6px;font-weight:700;">All {{ stats.total }} applicants</span>`;
+      tags.innerHTML = `<span style="background:#FEF2F0;color:#DC3005;padding:.2rem .6rem;border-radius:6px;font-weight:700;max-width:100%;word-break:break-word;">All {{ stats.total }} applicants</span>`;
     }
 
     document.getElementById('emailModal').classList.add('open');
@@ -415,13 +895,13 @@
   function closeEmailModal() {
     document.getElementById('emailModal').classList.remove('open');
     document.getElementById('emailSubject').value = '';
-    document.getElementById('emailBody').value    = '';
+    document.getElementById('emailBody').value = '';
   }
 
   /* ── Send ─────────────────────────────────────────────────────────────── */
   async function sendEmail() {
     const subject = document.getElementById('emailSubject').value.trim();
-    const body    = document.getElementById('emailBody').value.trim();
+    const body = document.getElementById('emailBody').value.trim();
 
     if (!subject || !body) {
       showToast('Please fill in both subject and message.', 'error');
@@ -429,18 +909,18 @@
     }
 
     const btn = document.getElementById('sendBtn');
-    btn.disabled    = true;
+    btn.disabled = true;
     btn.textContent = 'Sending…';
 
     const fd = new FormData();
     fd.append('csrfmiddlewaretoken', CSRF);
     fd.append('subject', subject);
-    fd.append('body',    body);
-    fd.append('mode',    emailMode === 'all' ? 'bulk' : emailMode);
+    fd.append('body', body);
+    fd.append('mode', emailMode === 'all' ? 'bulk' : emailMode);
     emailAppIds.forEach(id => fd.append('app_ids', id));
 
     try {
-      const res  = await fetch(SEND_URL, { method: 'POST', body: fd });
+      const res = await fetch(SEND_URL, { method: 'POST', body: fd });
       const data = await res.json();
 
       if (data.success) {
@@ -453,8 +933,8 @@
       showToast('Network error. Please try again.', 'error');
     }
 
-    btn.disabled    = false;
-    btn.innerHTML   = '<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send Email';
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send';
   }
 
   /* ── Close modal on overlay click ───────────────────────────────────── */
@@ -464,36 +944,32 @@
 
   /* ── Toast ───────────────────────────────────────────────────────────── */
   function showToast(msg, type = 'success') {
-    const t    = document.getElementById('toast');
+    const t = document.getElementById('toast');
     const icon = document.getElementById('toastIcon');
     document.getElementById('toastMsg').textContent = msg;
     icon.setAttribute('stroke', type === 'success' ? '#4ADE80' : '#F87171');
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 3500);
   }
-    function openMailApp() {
-        const subject = encodeURIComponent(document.getElementById('emailSubject').value.trim());
-        const body    = encodeURIComponent(document.getElementById('emailBody').value.trim());
 
-        let emails = [];
+  function openMailApp() {
+    const subject = encodeURIComponent(document.getElementById('emailSubject').value.trim());
+    const body = encodeURIComponent(document.getElementById('emailBody').value.trim());
 
-        if (emailMode === 'individual') {
-        // grab from the recipient tag
-        document.querySelectorAll('#recipientTags span').forEach(s => emails.push(s.textContent.trim()));
+    let emails = [];
 
-        } else if (emailMode === 'bulk') {
-        document.querySelectorAll('.row-check:checked').forEach(c => emails.push(c.dataset.email));
-
-        } else {
-        // all — collect every email in the table
-        document.querySelectorAll('.row-check').forEach(c => emails.push(c.dataset.email));
-        }
-
-        // Use BCC so recipients don't see each other's addresses
-        const bcc  = encodeURIComponent(emails.join(','));
-        const link = `mailto:?bcc=${bcc}${subject ? '&subject=' + subject : ''}${body ? '&body=' + body : ''}`;
-        window.location.href = link;
+    if (emailMode === 'individual') {
+      document.querySelectorAll('#recipientTags span').forEach(s => emails.push(s.textContent.trim()));
+    } else if (emailMode === 'bulk') {
+      document.querySelectorAll('.row-check:checked').forEach(c => emails.push(c.dataset.email));
+    } else {
+      document.querySelectorAll('.row-check').forEach(c => emails.push(c.dataset.email));
     }
+
+    const bcc = encodeURIComponent(emails.join(','));
+    const link = `mailto:?bcc=${bcc}${subject ? '&subject=' + subject : ''}${body ? '&body=' + body : ''}`;
+    window.location.href = link;
+  }
 </script>
 </body>
 </html>
