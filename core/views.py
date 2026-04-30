@@ -5,7 +5,7 @@ import traceback
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q, Count, Max
-from django.shortcuts import get_object_or_404
+from django.shortcuts import render,get_object_or_404
 from django.utils.text import slugify
 
 from rest_framework import status
@@ -76,6 +76,32 @@ from django.http import HttpResponse
 
 
 User = get_user_model()
+
+
+
+def school_students_view(request, org_id):
+    organization = get_object_or_404(
+        Organization,
+        pk=org_id
+    )
+
+    students = (
+        StudentProfile.objects
+        .select_related("user")
+        .filter(organization=organization)
+        .order_by("user__first_name", "user__last_name")
+    )
+
+    context = {
+        "organization": organization,
+        "students": students,
+    }
+
+    return render(
+        request,
+        "academics/school_students.html",
+        context
+    )
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
@@ -616,9 +642,6 @@ def course_pass_criteria_view(request, course_id: int):
             {"detail": "Unexpected error", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-
-
-
 
 
 

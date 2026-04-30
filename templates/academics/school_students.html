@@ -1,0 +1,105 @@
+<!-- templates/academics/school_students.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>
+        {{ organization.name }} Students
+    </title>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+
+    <div class="max-w-7xl mx-auto">
+
+        <div class="mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">
+                {{ organization.name }}
+            </h1>
+
+            <p class="text-gray-600 mt-2">
+                Total Students:
+                {{ students.count }}
+            </p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow overflow-hidden">
+
+            <div class="overflow-x-auto">
+
+                <table class="min-w-full divide-y divide-gray-200">
+
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                                S/N
+                            </th>
+
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                                Full Name
+                            </th>
+
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                                Email
+                            </th>
+
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                                Admission No
+                            </th>
+                        </tr>
+                    </thead>
+
+                    <tbody class="divide-y divide-gray-100 bg-white">
+
+                        {% for student in students %}
+
+                        <tr class="hover:bg-gray-50">
+
+                            <td class="px-6 py-4 text-sm text-gray-700">
+                                {{ forloop.counter }}
+                            </td>
+
+                            <td class="px-6 py-4 text-sm font-medium text-gray-900">
+                                {{ student.user.first_name }}
+                                {{ student.user.last_name }}
+                            </td>
+
+                            <td class="px-6 py-4 text-sm text-gray-700">
+                                {{ student.user.email }}
+                            </td>
+
+                            <td class="px-6 py-4 text-sm text-gray-700">
+                                {{ student.admission_no }}
+                            </td>
+
+                        </tr>
+
+                        {% empty %}
+
+                        <tr>
+                            <td
+                                colspan="4"
+                                class="px-6 py-10 text-center text-gray-500"
+                            >
+                                No students found.
+                            </td>
+                        </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</body>
+</html>
