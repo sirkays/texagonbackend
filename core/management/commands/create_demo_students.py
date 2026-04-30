@@ -32,7 +32,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--password",
             type=str,
-            default="Demo@123",
+            default="Techxagon@2026",
             help="Default password for all students",
         )
 
