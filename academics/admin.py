@@ -6,6 +6,33 @@ from .models import (Language, Classroom, Subject, StudentProfile,
 from django.utils import timezone
 from django.utils.html import format_html
 
+@admin.register(StudentProfile)
+class StudentProfileAdmin(admin.ModelAdmin):
+    # Use method names instead of user__firstname
+    list_display = (
+        "user", 
+        "get_firstname", 
+        "get_lastname", 
+        "organization", 
+        "current_classroom", 
+        "admission_no", 
+        "dob", 
+        "created_at"
+    )
+    list_filter = ("organization", "current_classroom")
+    search_fields = ("user__username", "user__email", "admission_no", "organization__name", "current_classroom__name")
+    autocomplete_fields = ("user", "organization", "current_classroom")
+
+    # Define the methods to access related data
+    @admin.display(ordering='user__first_name', description='First Name')
+    def get_firstname(self, obj):
+        return obj.user.first_name
+
+    @admin.display(ordering='user__last_name', description='Last Name')
+    def get_lastname(self, obj):
+        return obj.user.last_name
+
+
 @admin.register(Classroom)
 class ClassroomAdmin(admin.ModelAdmin):
     list_display = ("name", "organization", "code", "created_at")
@@ -19,12 +46,7 @@ class SubjectAdmin(admin.ModelAdmin):
     list_filter = ("organization",)
     search_fields = ("name", "code", "organization__name")
 
-@admin.register(StudentProfile)
-class StudentProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "organization", "current_classroom", "admission_no", "dob", "created_at")
-    list_filter = ("organization", "current_classroom")
-    search_fields = ("user__username", "user__email", "admission_no", "organization__name", "current_classroom__name")
-    autocomplete_fields = ("user", "organization", "current_classroom")
+
 
 @admin.register(TeacherProfile)
 class TeacherProfileAdmin(admin.ModelAdmin):
