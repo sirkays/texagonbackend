@@ -18,6 +18,10 @@ from django.db import models, transaction
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from orgs.models import OrganizationMembership, Organization
+from accounts.models import User
+from django.db.models import Max
+from django.utils.dateparse import parse_datetime
+from nanoid import generate
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db.models import Q
 import random
@@ -43,7 +47,6 @@ from core.utils import (
     _avatar_url_for,_get_or_create_parent_membership,_is_admin
 )
 from django.db import transaction
-from accounts.models import User
 from orgs.models import (
     Organization,
     OrganizationMembership,
@@ -119,28 +122,831 @@ from academics.models import (
     Language
 )
 from academics.models import StudentProfile
-from nanoid import generate
 from gamification.services.streaks import build_streak
 from cloudinary_storage.storage import RawMediaCloudinaryStorage
 from django.db.models import F
 from store.models import Review
+from django.db.models import (
+    Sum,
+)
+from .models import Test
+from django.db import IntegrityError, models, transaction
+from django.core.exceptions import ObjectDoesNotExist
+from django.utils.text import slugify
+from core.models import NamedModel
+from .models import KonnectRoom
+from cloudinary_storage.storage import RawMediaCloudinaryStorage,MediaCloudinaryStorage
+from .utils.image import convert_to_webp
+from core.storage_backends import lesson_file_storage, dynamic_storage
+from store.models import Review, Category, Product, ProductImage
 
 
 # --- Model classes collected from project ---
 
 class Classroom(NamedModel):
+    USAGE_CHOICE = (
+        ('public','public'),
+        ('private','private'),
+    )
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="classrooms")
     code = models.CharField(max_length=32, blank=True)
     teachers = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="teaching_classrooms", blank=True)
+    class_type = models.CharField(
+        max_length=20,
+        choices=USAGE_CHOICE,
+        default='public',
+    )
 
     class Meta:
-        unique_together = ("organization", "name")
+        unique_together = ("organization", "name", "code")
 
 
 
 class Subject(NamedModel):
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="subjects")
     code = models.CharField(max_length=32, blank=True)
+
+    class Meta:
+        unique_together = ("organization", "name")
+
+
+
+class Language(models.Model):
+    language_name = models.CharField(max_length=225)
+    active = models.BooleanField(default=False)
+
+
+
+class StudentProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="students", blank=True, null=True)
+    current_classroom = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True)
+    
+    # Keeping unique=True is highly recommended if you enforce uniqueness
+    admission_no = models.CharField(max_length=64, blank=True, null=True) 
+    dob = models.DateField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        # Only generate if admission_no is empty AND an organization is attached
+        if not self.admission_no and self.organization:
+            
+            org_year = self.organization.year
+            # Custom alphabet: Numbers + Uppercase letters (removed lookalikes like 0, O, I, 1 for clarity if desired, but here is a standard alphanumeric mix)
+            alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' 
+            
+            while True:
+                # Generate a 6-character random string
+                unique_str = generate(alphabet, 6)
+                
+                # Format: e.g., 2026/A4K9X2
+                new_admission_no = f"{org_year}/{unique_str}"
+                
+                # Check for collisions; break the loop if unique
+                if not StudentProfile.objects.filter(admission_no=new_admission_no).exists():
+                    self.admission_no = new_admission_no
+                    break
+
+        # Call the parent class's save method
+        super().save(*args, **kwargs)
+
+
+    def __str__(self):
+        return f"Student: {self.user.get_full_name() or self.user.username}"
+
+
+
+    def check_session_data(self, request, _retry=False):
+        from billing.models import UserAccountSubscription
+
+        if UserAccountSubscription.has_subscription(self.user, self.organization):
+            return True
+
+        session_key = "allowed_courses_cache"
+
+        # Load cache (populate if missing)
+        cached_data = request.session.get(session_key)
+        if cached_data is None:
+            self.get_course_allowed(request)
+            cached_data = request.session.get(session_key)
+
+        if not cached_data:
+            return False
+
+        cached_date = cached_data.get("general_activation_date")
+        date_cached_str = cached_data.get("date_cached")  # e.g. "2026-01-20T12:34:56Z" or similar
+
+        # If either is missing, treat as invalid
+        if not (cached_date and date_cached_str):
+            return False
+
+        # Parse date_cached (prefer ISO-8601)
+        try:
+            # If you store it as ISO 8601, Django can parse it nicely:
+            # from django.utils.dateparse import parse_datetime
+            from django.utils.dateparse import parse_datetime
+            date_cached_dt = parse_datetime(date_cached_str)
+
+            # If it parsed but is naive, make it aware in current timezone
+            if date_cached_dt is None:
+                raise ValueError("Could not parse date_cached")
+            if timezone.is_naive(date_cached_dt):
+                date_cached_dt = timezone.make_aware(date_cached_dt, timezone.get_current_timezone())
+
+        except Exception:
+            # If parsing fails, invalidate cache
+            request.session.pop(session_key, None)
+            return False
+
+        # Expire after 1 hour
+        if timezone.now() - date_cached_dt > timedelta(hours=1):
+            # delete and re-run ONCE (second call is the last)
+            request.session.pop(session_key, None)
+            if _retry:
+                return False
+            return self.check_session_data(request, _retry=True)
+
+        return True
+
+
+
+    def get_course_allowed(self, request, **kwargs):
+        from core.utils import resolve_season
+        from billing.models import UserAccountSubscription
+
+        is_session = kwargs.get("is_session", False)
+        is_general_activation = kwargs.get("is_general_activation", False)
+
+        now = timezone.now()
+        session_key = "allowed_courses_cache"
+
+        # 1️⃣ Check session cache
+        cached_data = request.session.get(session_key)
+
+        course_ids = []
+        cached_date = None
+        returned_count = 0
+
+        # 2️⃣ User has active subscription or unrestricted access
+        if (
+            UserAccountSubscription.has_subscription(self.user, self.organization)
+        ):
+            returned_count = 1
+            return True, returned_count
+
+        # 3️⃣ Use cached data if still valid
+        if cached_data:
+            cached_date = cached_data.get("general_activation_date")
+            course_ids = cached_data.get("course_ids", [])
+
+            if isinstance(cached_date, str):
+                cached_date = parse_datetime(cached_date)
+
+            if cached_date and cached_date > now:
+                if is_session:
+                    returned_count = 2
+                    return (course_ids, cached_date), returned_count
+                return self.enrollments.filter(course_id__in=course_ids)
+
+        # 4️⃣ Compute fresh queryset
+        leaderboard_season = resolve_season(self.organization, now)
+
+        queryset = self.enrollments.filter(
+            leaderboard_season=leaderboard_season,
+            course__course_type="public",
+            completed_at__isnull=True,
+            status="active",
+            course__general_activation_date__isnull=False,
+        )
+
+        if is_general_activation:
+            queryset = queryset.filter(course__general_activation=True)
+
+        # 5️⃣ Extract course IDs and latest activation date
+        course_ids = list(queryset.values_list("course_id", flat=True))
+
+        max_activation_date = queryset.aggregate(
+            Max("course__general_activation_date")
+        )["course__general_activation_date__max"]
+
+        # 6️⃣ Cache safely (serialize datetime)
+        if max_activation_date:
+            request.session[session_key] = {
+                "course_ids": course_ids,
+                "general_activation_date": max_activation_date.isoformat(),
+                "date_cached":timezone.now().isoformat(),
+            }
+
+            #print(request.session.get("allowed_courses_cache"))
+
+        # 7️⃣ Return based on mode
+        if is_session:
+            returned_count = 2
+            return (course_ids, max_activation_date), returned_count
+
+        return queryset
+
+
+
+class TeacherProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="teachers")
+    bio = models.TextField(blank=True)
+    experience = models.PositiveIntegerField(default=0)
+    languages = models.ManyToManyField(Language, blank=True)
+    specialties = models.ManyToManyField(Subject, blank=True)
+
+    def __str__(self):
+        return f"Teacher: {self.user.get_full_name() or self.user.username} Email: {self.user.email}"
+
+
+
+class ParentProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="parent_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="parents",
+    blank=True, null=True)
+    organization_subscription = models.ForeignKey(
+        OrganizationSubscription,
+        on_delete=models.CASCADE,
+        related_name="parent_subs",
+        blank=True,
+        null=True,
+    )
+    user_subscription = models.ForeignKey("billing.UserAccountSubscription", on_delete=models.CASCADE, related_name="parent_subs",
+    blank=True, null=True)
+    address = models.TextField(blank=True)
+
+    # use TimeStampedModel.created_at (no new field needed)
+    last_billed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Parent: {self.user.get_full_name() or self.user.username}"
+
+    def _billing_period_days(self):
+        """Return billing period in days (int). default to 30 if parsing fails."""
+        plan = getattr(self.organization_subscription, "plan", None)
+        if not plan:
+            return 30
+        try:
+            return int(plan.billing_period)
+        except Exception:
+            return 30
+
+    def _invoice_number_for(self, issued_at):
+        """Generate a unique invoice number — change format if desired."""
+        ts = int(time.time())
+        token = secrets.token_hex(4)
+        sub_id = self.organization_subscription.id if self.organization_subscription else "none"
+        return f"PINV-{sub_id}-{self.id}-{ts}-{token}"
+
+    def generate_subscription_invoices(self, now=None):
+        now = now or timezone.now()
+
+        subscription = self.organization_subscription
+        if not subscription:
+            return []
+
+        if subscription.status != OrganizationSubscription.Status.ACTIVE:
+            return []
+
+        plan = subscription.plan
+        billing_days = self._billing_period_days()
+
+        if self.last_billed_at:
+            next_due = self.last_billed_at + timedelta(days=billing_days)
+        else:
+            next_due = getattr(self, "created_at", None) or now
+
+        if timezone.is_naive(next_due):
+            next_due = timezone.make_aware(next_due)
+
+        created_invoices = []
+        max_iterations = 24
+        iterations = 0
+        
+        """
+        sub_end_datetime = None
+        if subscription.end_date:
+            sub_end_datetime = timezone.make_aware(
+                datetime.datetime.combine(subscription.end_date, datetime.time.max)
+            )
+
+        """
+        # Prepare/get parent membership once (we'll attach it to all created invoices)
+        # Option: create membership automatically if not present.
+        membership, _ = OrganizationMembership.objects.get_or_create(
+            user=self.user,
+            organization=self.organization,
+            role=OrganizationMembership.Role.PARENT,
+            defaults={"is_active": True}
+        )
+        # Note: get_or_create honors the unique_together ("user","organization","role")
+        while iterations < max_iterations and next_due <= now:
+            #if sub_end_datetime and next_due > sub_end_datetime:
+                #break
+
+            issued_at = next_due
+            amount = Decimal(getattr(plan, "price", 0) or 0)
+
+            inv = SubscriptionInvoice(
+                organization_membership=membership,   # attach parent membership
+                subscription=subscription,
+                number=self._invoice_number_for(issued_at),
+                amount=amount,
+                currency=getattr(subscription, "currency", "NGN") if hasattr(subscription, "currency") else "NGN",
+                issued_at=issued_at,
+                due_at=issued_at + timedelta(days=billing_days),
+                status=SubscriptionInvoice.Status.ACTIVE,
+                meta={"generated_for": "parent_profile", "parent_profile_id": self.id},
+            )
+
+            with transaction.atomic():
+                inv.save()                    # validation will now accept parent role
+                created_invoices.append(inv)
+                self.last_billed_at = issued_at
+                self.save(update_fields=["last_billed_at"])
+
+            next_due = next_due + timedelta(days=billing_days)
+            iterations += 1
+
+        return created_invoices
+
+
+
+class ParentChildLink(TimeStampedModel):
+    parent = models.ForeignKey(ParentProfile, on_delete=models.CASCADE, related_name="children_links")
+    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="parent_links")
+    relationship = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        unique_together = ("parent", "student")
+
+
+
+class EnrollmentCertificate(models.Model):
+    """
+    Certificate issued for a student's Enrollment in a Course.
+    Download becomes available ONLY after 7 days from acquired_at (issued_at).
+    """
+
+    class Status(models.TextChoices):
+        ISSUED = "issued", "Issued"
+        REVOKED = "revoked", "Revoked"
+
+    # Core links
+    organization = models.ForeignKey(
+        "orgs.Organization",
+        on_delete=models.CASCADE,
+        related_name="enrollment_certificates",
+        db_index=True,
+    )
+    enrollment = models.OneToOneField(
+        "learning.Enrollment",
+        on_delete=models.CASCADE,
+        related_name="certificate",
+        help_text="One certificate per enrollment.",
+    )
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="enrollment_certificates",
+        db_index=True,
+    )
+    course = models.ForeignKey(
+        "learning.Course",
+        on_delete=models.CASCADE,
+        related_name="enrollment_certificates",
+        db_index=True,
+    )
+
+
+    leaderboard_season = models.ForeignKey(
+        "gamification.LeaderboardSeason",
+        on_delete=models.CASCADE,
+        related_name="season_certificates",
+        blank=True, null=True
+    )
+
+    # Display fields
+    title = models.CharField(max_length=255, default="Certificate of Completion")
+    description = models.TextField(blank=True)
+
+    # Public identifiers
+    number = models.CharField(max_length=32, unique=True, db_index=True, editable=False)
+    verification_token = models.CharField(max_length=64, unique=True, db_index=True, editable=False)
+
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ISSUED, db_index=True)
+
+    # When the student "acquired" (earned) the certificate
+    acquired_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    # Download rule (7 days)
+    download_after_days = models.PositiveSmallIntegerField(default=7)
+
+    # Optional generated file
+    pdf_file = models.FileField(upload_to=certificate_pdf_upload_to, blank=True, null=True)
+
+    # Issuer info (optional)
+    issued_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="issued_enrollment_certificates",
+    )
+
+    meta = models.JSONField(default=dict, blank=True)
+
+    # Revocation fields
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_reason = models.CharField(max_length=255, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+    # academics/models.py (inside EnrollmentCertificate)
+
+    def is_teacher_approved(self, user=None) -> bool:
+        if user:
+            return self.approvals.filter(user_type="teacher", approval=True, user=user).exists()
+        return self.approvals.filter(user_type="teacher", approval=True).exists()
+
+    def is_admin_approved(self, user=None) -> bool:
+        if user:
+            return self.approvals.filter(user_type="admin", approval=True, user=user).exists()
+        return self.approvals.filter(user_type="admin", approval=True).exists()
+
+    @property
+    def fully_approved(self) -> bool:
+        return self.is_teacher_approved() and self.is_admin_approved()
+
+    @property
+    def can_download(self) -> bool:
+        if self.status != self.Status.ISSUED:
+            return False
+        if timezone.now() < self.downloadable_at:
+            return False
+        return self.fully_approved
+
+
+    class Meta:
+        ordering = ["-acquired_at"]
+        indexes = [
+            models.Index(fields=["organization", "course", "acquired_at"]),
+            models.Index(fields=["student", "acquired_at"]),
+            models.Index(fields=["status", "acquired_at"]),
+        ]
+        constraints = [
+            # Ensure revoked_at is set iff status == revoked (soft safety)
+            models.CheckConstraint(
+                name="enroll_cert_revoked_requires_timestamp",
+                check=models.Q(status="issued", revoked_at__isnull=True)
+                | models.Q(status="revoked", revoked_at__isnull=False),
+            ),
+            # Unique certificate per (student, course) per enrollment is already enforced by OneToOne enrollment.
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.number} — enrollment={self.enrollment_id} ({self.status})"
+
+    @staticmethod
+    def _generate_number() -> str:
+        return f"CERT-{secrets.token_hex(4).upper()}-{secrets.token_hex(2).upper()}"
+
+    @staticmethod
+    def _generate_verification_token() -> str:
+        return secrets.token_urlsafe(32)[:64]
+
+    def clean(self):
+        super().clean()
+
+        # Keep data consistent with enrollment
+        if self.enrollment_id:
+            # enrollment.student is a StudentProfile per your model
+            if self.student_id and self.enrollment.student_id != self.student_id:
+                raise ValidationError({"student": "student must match enrollment.student."})
+
+            if self.course_id and self.enrollment.course_id != self.course_id:
+                raise ValidationError({"course": "course must match enrollment.course."})
+
+        # Ensure org matches student/course if those have organization
+        if self.organization_id:
+            if getattr(self.student, "organization_id", None) and self.student.organization_id != self.organization_id:
+                raise ValidationError({"organization": "organization must match student.organization."})
+            if getattr(self.course, "organization_id", None) and self.course.organization_id != self.organization_id:
+                raise ValidationError({"organization": "organization must match course.organization."})
+
+        # Download delay must be >= 0
+        if self.download_after_days is not None and self.download_after_days < 0:
+            raise ValidationError({"download_after_days": "Must be >= 0."})
+
+        if self.status == self.Status.REVOKED and not self.revoked_at:
+            raise ValidationError({"revoked_at": "revoked_at is required when status is REVOKED."})
+
+    def save(self, *args, **kwargs):
+        # Auto-fill from enrollment if not provided (nice DX)
+        if self.enrollment_id:
+            if not self.student_id:
+                self.student_id = self.enrollment.student_id
+            if not self.course_id:
+                self.course_id = self.enrollment.course_id
+
+            # If your Course has organization, prefer it. Else fall back to student org.
+            if not self.organization_id:
+                org_id = getattr(self.enrollment.course, "organization_id", None) or getattr(
+                    getattr(self.enrollment.student, "organization", None), "id", None
+                )
+                if org_id:
+                    self.organization_id = org_id
+
+        if not self.number:
+            for _ in range(5):
+                cand = self._generate_number()
+                if not EnrollmentCertificate.objects.filter(number=cand).exists():
+                    self.number = cand
+                    break
+
+        if not self.verification_token:
+            for _ in range(5):
+                cand = self._generate_verification_token()
+                if not EnrollmentCertificate.objects.filter(verification_token=cand).exists():
+                    self.verification_token = cand
+                    break
+
+        if self.status == self.Status.REVOKED and self.revoked_at is None:
+            self.revoked_at = timezone.now()
+
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    # --- Download gating ---
+
+    @property
+    def downloadable_at(self):
+        return self.acquired_at + timedelta(days=int(self.download_after_days or 0))
+
+    @property
+    def can_download(self) -> bool:
+        if self.status != self.Status.ISSUED:
+            return False
+        return timezone.now() >= self.downloadable_at
+
+    def assert_can_download(self):
+        """
+        Call this in your download view before serving the pdf.
+        """
+        if self.status != self.Status.ISSUED:
+            raise ValidationError("Certificate is not available (revoked).")
+        if not self.can_download:
+            raise ValidationError(
+                f"Certificate will be downloadable on {timezone.localtime(self.downloadable_at):%Y-%m-%d %H:%M}."
+            )
+
+    def revoke(self, reason: str = "", by_user=None):
+        self.status = self.Status.REVOKED
+        self.revoked_at = timezone.now()
+        self.revoked_reason = (reason or "")[:255]
+        if by_user is not None:
+            self.issued_by_user = by_user
+        self.save(update_fields=["status", "revoked_at", "revoked_reason", "issued_by_user", "updated_at"])
+
+
+
+class StudentEnrollmentCertificateApproval(TimeStampedModel):
+    class UserType(models.TextChoices):
+        TEACHER = "teacher", "teacher"
+        ADMIN = "admin", "admin"
+
+    certificate = models.ForeignKey(EnrollmentCertificate, on_delete=models.CASCADE, related_name="approvals")
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    approval = models.BooleanField(default=False)
+    user_type = models.CharField(max_length=25, choices=UserType.choices, default=UserType.TEACHER)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["certificate", "user_type"],
+                name="unique_approval_per_cert_per_role",
+            )
+        ]
+
+
+
+class OrganizationCertificateSignatures(models.Model):
+    """
+    Stores certificate director signatures for an organization.
+    Exactly one row per organization.
+    """
+    organization = models.OneToOneField(
+        "orgs.Organization",
+        on_delete=models.CASCADE,
+        related_name="certificate_signatures",
+        db_index=True,
+    )
+
+    # Director 1
+    director_1_name = models.CharField(max_length=255, blank=True)
+    director_1_title = models.CharField(max_length=255, blank=True, default="Director")
+    director_1_signature = models.ImageField(
+        upload_to=org_cert_signature_upload_to, blank=True, null=True
+    )
+
+    # Director 2
+    director_2_name = models.CharField(max_length=255, blank=True)
+    director_2_title = models.CharField(max_length=255, blank=True, default="Director")
+    director_2_signature = models.ImageField(
+        upload_to=org_cert_signature_upload_to, blank=True, null=True
+    )
+
+    meta = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Certificate Signatures — Org {self.organization_id}"
+
+
+
+class UserManager(BaseUserManager):
+    use_in_migrations = True
+
+    def _generate_unique_username(self, email):
+        base_username = (email.split("@")[0] if email else "user").strip()
+        base_username = base_username[:150] or "user"
+
+        username = base_username
+        counter = 1
+
+        while self.model.objects.filter(username=username).exists():
+            suffix = str(counter)
+            username = f"{base_username[:150 - len(suffix)]}{suffix}"
+            counter += 1
+
+        return username
+
+    def create_user(self, email, password=None, username=None, **extra_fields):
+        if not email:
+            raise ValueError("Email must be set")
+
+        email = self.normalize_email(email)
+
+        if not username:
+            username = self._generate_unique_username(email)
+
+        user = self.model(email=email, username=username, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, username=None, **extra_fields):
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        extra_fields.setdefault("is_active", True)
+
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Superuser must have is_staff=True.")
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Superuser must have is_superuser=True.")
+
+        return self.create_user(email=email, password=password, username=username, **extra_fields)
+
+
+
+class User(AbstractUser):
+    username = models.CharField(max_length=150, unique=True)
+    email = models.EmailField(unique=True)
+
+    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
+    phone = models.CharField(max_length=32, blank=True)
+    primary_org = models.ForeignKey(
+        "orgs.Organization",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="primary_users",
+    )
+    is_generated = models.BooleanField(default=False)
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = ["username"]
+
+    objects = UserManager()
+
+
+
+class AdminAccess(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        limit_choices_to=Q(is_staff=True) | Q(is_superuser=True),
+    )
+    organizations = models.ManyToManyField("orgs.Organization", blank=True)
+    selected_organization = models.ForeignKey(
+        "orgs.Organization",
+        related_name="adminaccess_all",
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+    )
+    active = models.BooleanField(default=True)
+    super_user = models.BooleanField(default=False)
+
+    def clean(self):
+        if self.user and not (self.user.is_staff or self.user.is_superuser):
+            raise ValidationError({
+                "user": "AdminAccess can only be granted to staff or superusers."
+            })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def user_has_admin_access(cls, user):
+        if not user or not user.is_authenticated:
+            return False
+        return cls.objects.filter(user=user, active=True).exists()
+
+
+
+class EmailOTP(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="email_otps",
+    )
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "code", "used"]),
+        ]
+
+    @classmethod
+    def generate_code(cls, length=6) -> str:
+        return "".join(random.choices(string.digits, k=length))
+
+    @classmethod
+    def create_for_user(cls, user, minutes_valid=10):
+        code = cls.generate_code()
+        expires_at = timezone.now() + timedelta(minutes=minutes_valid)
+        return cls.objects.create(
+            user=user,
+            code=code,
+            expires_at=expires_at,
+        )
+
+    def is_valid(self) -> bool:
+        return (not self.used) and (self.expires_at >= timezone.now())
+
+
+
+class EmailChangeRequest(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="email_change_requests",
+    )
+    new_email = models.EmailField()
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "code", "used"]),
+            models.Index(fields=["new_email", "code", "used"]),
+        ]
+
+    @classmethod
+    def generate_code(cls, length=6) -> str:
+        return "".join(random.choices(string.digits, k=length))
+
+    @classmethod
+    def create_request(cls, user, new_email, minutes_valid=15):
+        code = cls.generate_code()
+        expires_at = timezone.now() + timedelta(minutes=minutes_valid)
+        return cls.objects.create(
+            user=user,
+            new_email=new_email,
+            code=code,
+            expires_at=expires_at,
+        )
+
+    def is_valid(self) -> bool:
+        return (not self.used) and (self.expires_at >= timezone.now())
+
+
+
+class Classroom(NamedModel):
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="classrooms")
+    code = models.CharField(max_length=32, blank=True)
+    teachers = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="teaching_classrooms", blank=True)
 
     class Meta:
         unique_together = ("organization", "name")
@@ -156,25 +962,6 @@ class StudentProfile(TimeStampedModel):
 
     def __str__(self):
         return f"Student: {self.user.get_full_name() or self.user.username}"
-
-
-
-class Language(models.Model):
-    language_name = models.CharField(max_length=225)
-    active = models.BooleanField(default=False)
-
-
-
-class TeacherProfile(TimeStampedModel):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher_profile")
-    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="teachers")
-    bio = models.TextField(blank=True)
-    experience = models.PositiveIntegerField(default=0)
-    languages = models.ManyToManyField(Language, blank=True)
-    specialties = models.ManyToManyField(Subject, blank=True)
-
-    def __str__(self):
-        return f"Teacher: {self.user.get_full_name() or self.user.username} Email: {self.user.email}"
 
 
 
@@ -286,16 +1073,6 @@ class ParentProfile(TimeStampedModel):
             iterations += 1
 
         return created_invoices
-
-
-
-class ParentChildLink(TimeStampedModel):
-    parent = models.ForeignKey(ParentProfile, on_delete=models.CASCADE, related_name="children_links")
-    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="parent_links")
-    relationship = models.CharField(max_length=64, blank=True)
-
-    class Meta:
-        unique_together = ("parent", "student")
 
 
 
@@ -492,66 +1269,6 @@ class EnrollmentCertificate(models.Model):
         if by_user is not None:
             self.issued_by_user = by_user
         self.save(update_fields=["status", "revoked_at", "revoked_reason", "issued_by_user", "updated_at"])
-
-
-
-class OrganizationCertificateSignatures(models.Model):
-    """
-    Stores certificate director signatures for an organization.
-    Exactly one row per organization.
-    """
-    organization = models.OneToOneField(
-        "orgs.Organization",
-        on_delete=models.CASCADE,
-        related_name="certificate_signatures",
-        db_index=True,
-    )
-
-    # Director 1
-    director_1_name = models.CharField(max_length=255, blank=True)
-    director_1_title = models.CharField(max_length=255, blank=True, default="Director")
-    director_1_signature = models.ImageField(
-        upload_to=org_cert_signature_upload_to, blank=True, null=True
-    )
-
-    # Director 2
-    director_2_name = models.CharField(max_length=255, blank=True)
-    director_2_title = models.CharField(max_length=255, blank=True, default="Director")
-    director_2_signature = models.ImageField(
-        upload_to=org_cert_signature_upload_to, blank=True, null=True
-    )
-
-    meta = models.JSONField(default=dict, blank=True)
-
-    created_at = models.DateTimeField(default=timezone.now, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"Certificate Signatures — Org {self.organization_id}"
-
-
-
-class UserManager(BaseUserManager):
-    use_in_migrations = True
-
-    def create_user(self, email, password=None, **extra_fields):
-        if not email:
-            raise ValueError("Email must be set")
-        email = self.normalize_email(email)
-        user = self.model(email=email, **extra_fields)
-        user.set_password(password)
-        user.save(using=self._db)
-        return user
-
-    def create_superuser(self, email, password=None, **extra_fields):
-        extra_fields.setdefault("is_staff", True)
-        extra_fields.setdefault("is_superuser", True)
-        extra_fields.setdefault("is_active", True)
-        if extra_fields.get("is_staff") is not True:
-            raise ValueError("Superuser must have is_staff=True.")
-        if extra_fields.get("is_superuser") is not True:
-            raise ValueError("Superuser must have is_superuser=True.")
-        return self.create_user(email, password, **extra_fields)
 
 
 
@@ -4109,58 +4826,6 @@ class StudentUpdateSubmissionSerializer(serializers.ModelSerializer):
 
 
 
-class TieringService:
-    """
-    Helper you can call from anywhere (views/serializers/model methods).
-    """
-    @staticmethod
-    def level_for_xp(xp: int) -> dict:
-        xp = max(int(xp or 0), 0)
-
-        # Current tier = highest threshold <= xp
-        current = (
-            Tier.objects
-            .filter(threshold_xp__lte=xp)
-            .order_by("-threshold_xp")
-            .first()
-        )
-
-        # If DB empty, fallback
-        if not current:
-            return {
-                "level_name": "Newbie",
-                "next_threshold": None,
-                "xp_to_next": 0,
-                "progress_to_next_pct": 100,
-            }
-
-        # Next tier = smallest threshold > xp
-        nxt = (
-            Tier.objects
-            .filter(threshold_xp__gt=current.threshold_xp)
-            .order_by("threshold_xp")
-            .first()
-        )
-
-        next_threshold = nxt.threshold_xp if nxt else None
-        xp_to_next = max(next_threshold - xp, 0) if next_threshold is not None else 0
-
-        floor = current.threshold_xp
-        if next_threshold is None:
-            pct = 100
-        else:
-            span = max(next_threshold - floor, 1)
-            pct = int(((xp - floor) / span) * 100)
-
-        return {
-            "level_name": current.name,
-            "next_threshold": next_threshold,
-            "xp_to_next": xp_to_next,
-            "progress_to_next_pct": pct,
-        }
-
-
-
 class Course(NamedModel):
     USAGE_CHOICE = (
         ('public','public'),
@@ -4464,3 +5129,1751 @@ class ReviewSerializer(serializers.ModelSerializer):
     def get_user_name(self, obj):
         u = obj.user
         return getattr(u, "get_full_name", lambda: "")() or getattr(u, "username", "") or getattr(u, "email", "")
+
+
+
+class Test(TimeStampedModel):
+    class Visibility(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        PUBLISHED = "published", "Published"
+        CLOSED = "closed", "Closed"
+
+    # ✅ NEW
+    class Mode(models.TextChoices):
+        ONLINE = "online", "Online"
+        OFFLINE = "offline", "Offline"
+
+    course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="tests")
+    title = models.CharField(max_length=255)
+    duration_minutes = models.PositiveIntegerField(default=30)
+    total_marks = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    visibility = models.CharField(max_length=16, choices=Visibility.choices, default=Visibility.DRAFT)
+
+    # ✅ NEW (teacher sets this)
+    mode = models.CharField(max_length=16, choices=Mode.choices, default=Mode.ONLINE, db_index=True)
+
+    instructions = models.TextField(blank=True)
+    start_at = models.DateTimeField(null=True, blank=True)
+    end_at = models.DateTimeField(null=True, blank=True)
+    settings = models.JSONField(default=dict, blank=True)
+    excluded_users = models.ManyToManyField("academics.StudentProfile",blank=True)
+    require_browser_code = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.title
+
+
+    def update_total_marks(self):
+        total = self.questions.aggregate(
+            total=Sum("points")
+        )["total"] or 0
+        self.total_marks = total
+        self.save(update_fields=["total_marks"])
+
+
+
+class StudentProfileMiniSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    is_exclude = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentProfile
+        fields = ("id", "admission_no", "dob", "full_name", "is_exclude")
+
+    def get_full_name(self, obj):
+        u = obj.user
+        return f"{u.first_name} {u.last_name}".strip()
+
+    def get_is_exclude(self, obj):
+        test = self.context.get("test")
+        if not test:
+            return False
+        return obj.id in self.context.get("excluded_ids", set())
+
+
+
+class SubscriptionPlan(NamedModel):
+    price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    billing_period = models.CharField(max_length=8, default="30") # BILLING PERIOD IS CALCULATED IN DAYS. DEFAULT IS 30 DAYS
+    features = models.JSONField(default=list, blank=True)
+    student_limit = models.PositiveIntegerField(default=0)  # 0 = unlimited
+    is_test = models.BooleanField(default=False)
+
+
+
+class OrganizationSubscription(TimeStampedModel):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        EXPIRED = "expired", "Expired"
+        CANCELLED = "cancelled", "Cancelled"
+        PAST_DUE = "past_due", "Past Due"
+
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="subscriptions")
+    plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT, related_name="subscriptions")
+    start_date = models.DateField(blank=True, null=True)
+    end_date = models.DateField(blank=True, null=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+    auto_renew = models.BooleanField(default=True)
+    payment_method = models.CharField(max_length=64, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
+
+    @classmethod
+    def get_lastest_org_sub(cls, organization):
+        sub = cls.objects.filter(organization=organization)
+        if sub.exists():
+            return sub.last()
+        plan = SubscriptionPlan.objects.all()
+        if not plan:
+            plan = SubscriptionPlan.objects.create(
+                price=10000,
+            )
+        else:
+            plan = plan.last()
+        return cls.objects.create(
+            organization=organization,
+            plan=plan
+        )
+
+
+
+class SubscriptionInvoice(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "pending"
+        OPEN = "open", "open"
+        PAID = "paid", "paid"
+        VOID = "void", "void"
+        UNCOLLECTIBLE = "uncollectible", "uncollectible"
+        ACTIVE = "active", "active"
+
+
+    def invoice_number():
+        return f"INV-{generate('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 10)}"
+
+    organization_membership = models.ForeignKey(OrganizationMembership, on_delete=models.CASCADE, 
+    related_name="my_invoices", blank=True, null=True)
+    subscription = models.ForeignKey(OrganizationSubscription, on_delete=models.CASCADE, related_name="invoices",
+    blank=True, null=True)
+    user_subscription = models.ForeignKey("UserAccountSubscription", on_delete=models.CASCADE, related_name="sub_invoices",
+    blank=True, null=True)
+    number = models.CharField(
+        max_length=20,
+        unique=True,
+        default=invoice_number,
+        editable=False
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=8, default="NGN")
+    issued_at = models.DateTimeField(default=timezone.now)
+    due_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)  # open, paid, void, 
+    meta = models.JSONField(default=dict, blank=True)
+    transaction_id = models.CharField(max_length=450, blank=True, null=True)
+
+    def clean(self):
+        super().clean()
+        membership = self.organization_membership
+        # Allow invoices attached to either teachers or parents
+        allowed_roles = {
+            OrganizationMembership.Role.PARENT,
+        }
+        if membership and membership.role not in allowed_roles:
+            raise ValidationError({ # type: ignore
+                'organization_membership': 'organization_membership must be a Teacher or a Parent.'
+            })
+
+    def save(self, *args, **kwargs):
+        # ensure full_clean runs before saving (so DB never gets invalid data)
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def get_name_from_obj(self):
+        invoicetype = getattr(self, "invoicetype", None)
+
+        if invoicetype.invoice_type == 'tutor':
+            try:
+                obj = TutoringBooking.objects.get(pk=invoicetype.object_id)
+            except ObjectDoesNotExist:
+                return "Name not available"
+            if obj:
+                return obj.student.user.get_full_name()
+        else:
+            return "Store Payment (Name not available)"
+
+
+
+class SubscriptionPayment(TimeStampedModel):
+    class Provider(models.TextChoices):
+        FLUTTERWAVE = "flutterwave", _("Flutterwave")
+        PAYSTACK = "paystack", _("Paystack")
+
+    class Status(models.TextChoices):
+        SUCCESS = "success", "success"
+        FAILED = "failed", "failed"
+        CANCELLED = "cancelled", "cancelled"
+        INPROGRESS = "inprogress", "inprogress"
+        CREATED = "created", "created"
+        ERROR = "error", "error"              # ✅ network/verify errors
+        UNKNOWN = "unknown", "unknown"        # ✅ any unrecognized provider status
+
+    invoice = models.ForeignKey(
+        SubscriptionInvoice, on_delete=models.CASCADE, related_name="payments",
+    )
+    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.FLUTTERWAVE)
+    reference = models.CharField(max_length=128, unique=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=8, default="NGN")
+    method = models.CharField(max_length=32, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.CREATED)  # success, failed, pending
+    paid_at = models.DateTimeField(default=timezone.now)
+    meta = models.JSONField(default=dict, blank=True)
+    transaction_id = models.CharField(max_length=450, blank=True, null=True)
+    redirect_url =  models.URLField(max_length=1250, blank=True, null=True)
+    provider_status = models.CharField(max_length=32, blank=True, null=True, db_index=True)
+    provider_event = models.CharField(max_length=64, blank=True, null=True)
+    last_verified_at = models.DateTimeField(blank=True, null=True)
+
+    def change_current_trans(self, status, *, provider_status=None, meta_patch=None):
+        self.status = status
+        self.paid_at = timezone.now()
+        if provider_status is not None:
+            self.provider_status = provider_status
+        if meta_patch:
+            m = self.meta or {}
+            m.update(meta_patch)
+            self.meta = m
+        self.save()
+
+
+
+class UserAccountSubscription(TimeStampedModel):
+    """
+    Tracks subscription at the USER level (student/parent/etc), scoped to an organization.
+    This is your source of truth for: is this user subscribed? is it expired?
+    """
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        EXPIRED = "expired", "Expired"
+        CANCELLED = "cancelled", "Cancelled"
+        PAST_DUE = "past_due", "Past Due"
+
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="user_subscriptions"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="subscriptions"
+    )
+
+    # plan controls pricing + billing period (days)
+    plan = models.ForeignKey(
+        SubscriptionPlan, on_delete=models.PROTECT, related_name="user_subscriptions"
+    )
+
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.ACTIVE, db_index=True
+    )
+
+    start_at = models.DateTimeField(default=timezone.now, db_index=True)
+    end_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    auto_renew = models.BooleanField(default=True)
+
+    # Optional: who pays (useful for your parent->child billing)
+    billed_to_parent = models.ForeignKey(
+        "academics.ParentProfile",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="billed_child_subscriptions",
+    )
+
+    # Optional: amounts “locked” per subscription (if you want plan changes not to affect existing subs)
+    amount = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        validators=[MinValueValidator(0)],
+        default=Decimal("0.00")
+    )
+    currency = models.CharField(max_length=8, default="NGN")
+
+    meta = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "user", "-start_at"]),
+            models.Index(fields=["organization", "user", "status", "-start_at"]),
+            models.Index(fields=["organization", "user", "status", "end_at"]),
+        ]
+        constraints = [
+            # One active subscription per user per org (prevents duplicates)
+            models.UniqueConstraint(
+                fields=["organization", "user"],
+                condition=Q(status="active"),
+                name="uniq_active_user_subscription_per_org",
+            )
+        ]
+
+
+    def __str__(self):
+        return f"{self.user_id} @ org {self.organization_id} ({self.status})"
+
+    @property
+    def is_expired(self) -> bool:
+        if self.status in {self.Status.EXPIRED, self.Status.CANCELLED}:
+            return True
+        if self.end_at and timezone.now() >= self.end_at:
+            return True
+        return False
+
+
+    @classmethod
+    def has_subscription(cls, user, organization):
+        now = timezone.now()
+        return cls.objects.filter(
+            organization=organization,
+            user=user,
+            status=cls.Status.ACTIVE,
+        ).filter(
+            Q(end_at__isnull=True) | Q(end_at__gt=now)
+        ).exists()
+
+    @classmethod
+    def student_subscription_is_expired(cls, student) -> bool:
+        org = student.organization
+        sub = (
+            cls.objects
+            .filter(organization=org, user=student.user)
+            .order_by("-start_at")
+            .first()
+        )
+        if not sub:
+            return True  # no subscription => treat as expired/not subscribed
+        return sub.is_expired
+
+    def refresh_status(self, save=True) -> str:
+        """
+        Update status based on end_at.
+        """
+        if self.status == self.Status.CANCELLED:
+            return self.status
+
+        if self.end_at and timezone.now() >= self.end_at:
+            self.status = self.Status.EXPIRED
+        else:
+            self.status = self.Status.ACTIVE
+
+        if save:
+            self.save(update_fields=["status", "updated_at"])
+        return self.status
+
+
+
+class Complaint(models.Model):  # or inherit your TimeStampedModel
+    class Status(models.TextChoices):
+        OPEN = "open", _("Open")
+        IN_PROGRESS = "in_progress", _("In Progress")
+        RESOLVED = "resolved", _("Resolved")
+        CLOSED = "closed", _("Closed")
+
+    class Priority(models.TextChoices):
+        LOW = "low", _("Low")
+        MEDIUM = "medium", _("Medium")
+        HIGH = "high", _("High")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Human-friendly code like COMP-000123 (unique, indexed)
+    code = models.CharField(max_length=32, unique=True, db_index=True, editable=False)
+
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.OPEN, db_index=True
+    )
+    priority = models.CharField(
+        max_length=10, choices=Priority.choices, default=Priority.MEDIUM, db_index=True
+    )
+
+    # Link to either a one-off Payment (e.g., product order) OR a SubscriptionPayment (invoice payment)
+    payment = models.ForeignKey(
+        Payment, null=True, blank=True, on_delete=models.SET_NULL, related_name="complaints"
+    )
+    subscription_payment = models.ForeignKey(
+        SubscriptionPayment, null=True, blank=True, on_delete=models.SET_NULL, related_name="complaints"
+    )
+
+    # Who raised the complaint and who is assigned to handle it
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_complaints"
+    )
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="assigned_complaints"
+    )
+
+    # Timestamps (aligning with your React component fields)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        constraints = [
+            # Ensure at most ONE of the two payment links is set
+            models.CheckConstraint(
+                name="complaint_single_transaction_link",
+                check=(
+                    # (payment is null AND subscription is null) OR (exactly one is not null)
+                    (models.Q(payment__isnull=True) & models.Q(subscription_payment__isnull=True)) |
+                    (models.Q(payment__isnull=False) & models.Q(subscription_payment__isnull=True)) |
+                    (models.Q(payment__isnull=True) & models.Q(subscription_payment__isnull=False))
+                ),
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.code} — {self.title}"
+
+    @property
+    def transaction_identifier(self) -> str | None:
+        """
+        A small helper to mirror the UI's 'transactionId' chip.
+        Returns something like payment.provider_ref or subscription reference.
+        """
+        if self.payment:
+            return self.payment.provider_ref or str(self.payment.id)
+        if self.subscription_payment:
+            return self.subscription_payment.reference
+        return None
+
+    @property
+    def responses_count(self) -> int:
+        return self.responses.count()
+
+    def save(self, *args, **kwargs):
+        if not self.code:
+            for _ in range(5):
+                try:
+                    self.code = f"COMP-{generate(size=8).upper()}"
+                    return super().save(*args, **kwargs)
+                except IntegrityError:
+                    self.code = None
+            raise IntegrityError("Could not generate unique complaint code")
+        else:
+            super().save(*args, **kwargs)
+
+
+
+class Category(models.Model):
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(unique=True, max_length=120)
+
+    class Meta:
+        verbose_name_plural = "categories"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+
+
+class Tag(models.Model):
+    name = models.CharField(max_length=50)
+    slug = models.SlugField(unique=True, max_length=70)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+
+
+class AuthorProfile(models.Model):
+    user = models.OneToOneField(
+        User, on_delete=models.CASCADE, related_name="author_profile"
+    )
+    bio = models.TextField(blank=True)
+    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
+    title = models.CharField(max_length=100, blank=True)
+
+    def __str__(self):
+        return self.user.get_full_name() or self.user.username
+
+    @property
+    def display_name(self):
+        return self.user.get_full_name() or self.user.username
+
+
+
+class BlogPost(models.Model):
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(unique=True, max_length=250)
+    featured_image = models.ImageField(upload_to="blog/", blank=True, null=True)
+    excerpt = models.TextField(max_length=300, help_text="Short summary shown in listings")
+    content = models.TextField()
+    category = models.ForeignKey(
+        Category, on_delete=models.SET_NULL, null=True, related_name="posts"
+    )
+    tags = models.ManyToManyField(Tag, blank=True, related_name="posts")
+    author = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, related_name="blog_posts"
+    )
+    read_time = models.PositiveIntegerField(
+        default=5, help_text="Estimated read time in minutes"
+    )
+    is_featured = models.BooleanField(
+        default=False, help_text="Show as the featured post at the top of the blog"
+    )
+    is_published = models.BooleanField(default=False)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-published_at"]
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.title)
+        # Auto-set published_at when first published
+        if self.is_published and not self.published_at:
+            self.published_at = timezone.now()
+        super().save(*args, **kwargs)
+
+
+
+class NewsletterSubscriber(models.Model):
+    email = models.EmailField(unique=True)
+    subscribed_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.email
+
+
+
+class CodeSnippet(TimeStampedModel):
+    """
+    Saved code drafts (student only). Not necessarily submitted.
+    """
+    class LANGUAGE_TYPE(models.TextChoices):
+        JAVASCRIPT = "javascript", "javascript"
+        HTML = "html", "html"
+        CSS = "css", "css"
+        PYTHON = "python", "python"
+        JAVA = "java", "java"
+    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="code_snippets")
+    lesson = models.ForeignKey(Lesson, on_delete=models.SET_NULL, null=True, blank=True, related_name="code_snippets")
+    title = models.CharField(max_length=255, blank=True)
+    language = models.CharField(max_length=64, choices=LANGUAGE_TYPE.choices, default=LANGUAGE_TYPE.HTML)  # e.g. 'python', 'javascript', 'java', ...
+    code_text = models.TextField()
+    meta = models.JSONField(default=dict, blank=True)
+    
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"[Snippet] {self.student_id} {self.language} {self.created_at:%Y-%m-%d}"
+
+
+
+class CodeSubmission(TimeStampedModel):
+    """
+    Submitted code by lesson (student). A teacher can grade/correct.
+    """
+    class LANGUAGE_TYPE(models.TextChoices):
+        JAVASCRIPT = "javascript", "javascript"
+        HTML = "html", "html"
+        CSS = "css", "css"
+        PYTHON = "python", "python"
+        JAVA = "java", "java"
+    class Status(models.TextChoices):
+        SUBMITTED = "submitted", "Submitted"
+        GRADED = "graded", "Graded"
+        REVISED = "revised", "Revised"
+    title = models.CharField(max_length=255, blank=True, null=True)
+    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="code_submissions")
+    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="code_submissions")
+
+    language = models.CharField(max_length=64, choices=LANGUAGE_TYPE.choices, default=LANGUAGE_TYPE.HTML) 
+    code_text = models.TextField()
+
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.SUBMITTED)
+
+    # grading / corrections
+    score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    feedback = models.TextField(blank=True)
+    correction_code = models.TextField(blank=True)  # teacher-proposed corrected solution
+    graded_by = models.ForeignKey(TeacherProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="graded_code_submissions")
+    graded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["lesson", "student"])]
+
+    def __str__(self):
+        return f"[Submission] lesson={self.lesson_id} student={self.student_id} status={self.status}"
+
+
+
+class CodeSubmissionSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    comments = CodeCommentSerializer(many=True, read_only=True)
+
+    graded_by_name = serializers.SerializerMethodField()
+    latest_same_title_submission = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id", "title", "lesson", "student", "language", "code_text",
+            "status", "score", "feedback", "correction_code",
+            "graded_by", "graded_by_name", "graded_at",
+            "created_at", "updated_at", "comments",
+            "latest_same_title_submission",
+        ]
+
+    def get_graded_by_name(self, obj):
+        if not obj.graded_by:
+            return None
+        user = getattr(obj.graded_by, "user", None)
+        if user:
+            return user.get_full_name() or user.username or user.email
+        return str(obj.graded_by)
+
+
+    def get_latest_same_title_submission(self, obj):
+        """
+        Return the newest *other* submission with the same title,
+        for EACH language (javascript/python/html/css/...)
+        keyed by language.
+        """
+        if not obj.title:
+            return {}
+
+        base = (
+            CodeSubmission.objects
+            .filter(
+                student=obj.student,
+                lesson=obj.lesson,   # remove if you want across lessons
+                title=obj.title,
+            )
+            .exclude(id=obj.id)
+        )
+
+        # For each language, find the newest created_at
+        latest_times = (
+            base.values("language")
+            .annotate(latest_created_at=Max("created_at"))
+        )
+
+        if not latest_times:
+            return {}
+
+        out = {}
+        for row in latest_times:
+            lang = row["language"]
+            dt = row["latest_created_at"]
+
+            # Get the actual latest submission row for that language
+            latest_obj = (
+                base.filter(language=lang, created_at=dt)
+                .order_by("-created_at", "-id")
+                .first()
+            )
+            if latest_obj:
+                out[lang] = CodeSubmissionMiniSerializer(latest_obj).data
+
+        return out
+
+
+
+class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    student_id = serializers.IntegerField(source="student.id", read_only=True)
+
+    # ✅ include title (since you want to match by title)
+    title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    lesson = serializers.SerializerMethodField()
+    course = serializers.SerializerMethodField()
+    classroom = serializers.SerializerMethodField()
+    comments = TeacherCodeCommentSerializer(many=True, read_only=True)
+
+    # ✅ add latest same-title submission
+    latest_same_title_submission = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id", "title", "created_at", "updated_at",
+            "status", "language", "code_text",
+            "score", "feedback", "correction_code",
+            "graded_at", "graded_by_id",
+            "student_id", "student_name",
+            "lesson", "course", "classroom",
+            "comments",
+            "latest_same_title_submission",
+        ]
+
+
+    def get_latest_same_title_submission(self, obj: CodeSubmission):
+        title = (obj.title or "").strip()
+        if not title:
+            return {}
+
+        base = CodeSubmission.objects.filter(
+            student=obj.student,
+            lesson=obj.lesson,
+            title=title,
+        )
+
+        latest_times = base.values("language").annotate(
+            latest_created_at=Max("created_at")
+        )
+
+        out = {}
+        for row in latest_times:
+            lang = row["language"]
+            dt = row["latest_created_at"]
+
+            latest_obj = (
+                base.filter(language=lang, created_at=dt)
+                .order_by("-created_at", "-id")
+                .first()
+            )
+
+            # ✅ IMPORTANT: don't return the same object again
+            if not latest_obj or latest_obj.id == obj.id:
+                continue
+
+            out[lang] = TeacherCodeSubmissionMiniSerializer(latest_obj).data
+
+        return out
+
+
+    def get_student_name(self, obj: CodeSubmission) -> str:
+        u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
+        if u.strip():
+            return u
+        return getattr(getattr(obj.student, "user", None), "email", "") or f"student-{obj.student_id}"
+
+    def get_lesson(self, obj):
+        l = obj.lesson
+        return {"id": getattr(l, "id", None), "title": getattr(l, "name", "")} if l else {"id": None, "title": ""}
+
+    def get_course(self, obj):
+        try:
+            c = obj.lesson.module.course
+        except Exception:
+            c = None
+        return {"id": getattr(c, "id", None), "name": getattr(c, "name", "")} if c else {"id": None, "name": ""}
+
+    def get_classroom(self, obj):
+        try:
+            room = obj.lesson.module.course.classroom
+            if room:
+                return {"id": room.id, "name": room.name}
+        except Exception:
+            pass
+        try:
+            room = obj.student.classroom
+            if room:
+                return {"id": room.id, "name": room.name}
+        except Exception:
+            pass
+        return {"id": None, "name": ""}
+
+
+
+class TieringService:
+    """
+    Helper you can call from anywhere (views/serializers/model methods).
+    """
+    @staticmethod
+    def level_for_xp(xp: int) -> dict:
+        xp = max(int(xp or 0), 0)
+
+        # Current tier = highest threshold <= xp
+        current = (
+            Tier.objects
+            .filter(threshold_xp__lte=xp)
+            .order_by("-threshold_xp")
+            .first()
+        )
+
+        # If DB empty, fallback
+        if not current:
+            return {
+                "level_name": "Newbie",
+                "next_threshold": None,
+                "xp_to_next": 0,
+                "progress_to_next_pct": 100,
+            }
+
+        # Next tier = smallest threshold > xp
+        nxt = (
+            Tier.objects
+            .filter(threshold_xp__gt=current.threshold_xp)
+            .order_by("threshold_xp")
+            .first()
+        )
+
+        next_threshold = nxt.threshold_xp if nxt else None
+        xp_to_next = max(next_threshold - xp, 0) if next_threshold is not None else 0
+
+        floor = current.threshold_xp
+        if next_threshold is None:
+            pct = 100
+        else:
+            span = max(next_threshold - floor, 1)
+            pct = int(((xp - floor) / span) * 100)
+
+        return {
+            "level_name": current.name,
+            "next_threshold": next_threshold,
+            "xp_to_next": xp_to_next,
+            "progress_to_next_pct": pct,
+        }
+
+
+
+class OurProgram(models.Model):
+    name = models.CharField(max_length=225)
+    active = models.BooleanField(default=True)
+
+
+
+class TutorApplication(models.Model):
+    POSITION_CHOICES = [
+        ('robotics', 'Robotics & AI Tutor'),
+        # Add more as they open
+    ]
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('submitted', 'Submitted'),
+    ]
+
+    # ── Identity ──────────────────────────────────────────────
+    email    = models.EmailField()
+    position = models.CharField(max_length=50, choices=POSITION_CHOICES)
+    status   = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    current_step = models.PositiveSmallIntegerField(default=1)
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
+
+    # ── Step 1 · Personal ─────────────────────────────────────
+    full_name       = models.CharField(max_length=255, blank=True)
+    dob             = models.DateField(null=True, blank=True)
+    gender          = models.CharField(max_length=20, blank=True)
+    phone           = models.CharField(max_length=30, blank=True)
+    address         = models.TextField(blank=True)
+    state_residence = models.CharField(max_length=60, blank=True)
+    state_origin    = models.CharField(max_length=60, blank=True)
+    nationality     = models.CharField(max_length=60, blank=True)
+    identification  = models.CharField(max_length=20, blank=True)
+    id_upload       = models.FileField(upload_to='applications/ids/', blank=True, null=True)
+
+    # ── Step 2 · Education ────────────────────────────────────
+    education_level  = models.CharField(max_length=20, blank=True)
+    course_of_study  = models.CharField(max_length=255, blank=True)
+    institution      = models.CharField(max_length=255, blank=True)
+    graduation_year  = models.PositiveIntegerField(null=True, blank=True)
+    nysc_status      = models.CharField(max_length=20, blank=True)
+    degree_fields    = models.JSONField(default=list, blank=True)   # list of strings
+    other_degree     = models.CharField(max_length=255, blank=True)
+    cv_upload        = models.FileField(upload_to='applications/cvs/', blank=True, null=True)
+
+    # ── Step 3 · Skills ───────────────────────────────────────
+    skills           = models.JSONField(default=list, blank=True)   # list of strings
+    years_experience = models.CharField(max_length=10, blank=True)
+    has_taught       = models.CharField(max_length=5, blank=True)
+    teaching_location = models.CharField(max_length=255, blank=True)
+    has_laptop       = models.CharField(max_length=5, blank=True)
+    has_internet     = models.CharField(max_length=5, blank=True)
+
+    # ── Step 4 · Availability ─────────────────────────────────
+    attend_training    = models.CharField(max_length=5, blank=True)
+    willing_to_relocate = models.CharField(max_length=5, blank=True)
+    work_fulltime      = models.CharField(max_length=5, blank=True)
+    start_date         = models.DateField(null=True, blank=True)
+    preferred_states   = models.JSONField(default=list, blank=True) # list of strings
+
+    # ── Step 5 · Screening ────────────────────────────────────
+    why_techxagon    = models.TextField(blank=True)
+    why_select       = models.TextField(blank=True)
+    future_robotics  = models.TextField(blank=True)
+    service_agreement = models.CharField(max_length=5, blank=True)
+    video_upload     = models.FileField(upload_to='applications/videos/', blank=True, null=True)
+
+    class Meta:
+        unique_together = ['email', 'position']
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.email} — {self.get_position_display()} [{self.status}]"
+
+    def to_dict(self):
+        """Serialise all fields for JSON delivery to the frontend."""
+        return {
+            'email':    self.email,
+            'position': self.position,
+            'status':   self.status,
+            'current_step': self.current_step,
+            # step 1
+            'fullName':       self.full_name,
+            'dob':            str(self.dob) if self.dob else '',
+            'gender':         self.gender,
+            'phone':          self.phone,
+            'address':        self.address,
+            'stateResidence': self.state_residence,
+            'stateOrigin':    self.state_origin,
+            'nationality':    self.nationality,
+            'identification': self.identification,
+            'hasIdUpload':    bool(self.id_upload),
+            # step 2
+            'education':   self.education_level,
+            'courseStudy': self.course_of_study,
+            'institution': self.institution,
+            'graduation':  str(self.graduation_year) if self.graduation_year else '',
+            'nyscStatus':  self.nysc_status,
+            'degree':      self.degree_fields,
+            'otherDegree': self.other_degree,
+            'hasCvUpload': bool(self.cv_upload),
+            # step 3
+            'skills':           self.skills,
+            'yearsExp':         self.years_experience,
+            'hasTaught':        self.has_taught,
+            'teachingLocation': self.teaching_location,
+            'laptop':           self.has_laptop,
+            'internet':         self.has_internet,
+            # step 4
+            'training':         self.attend_training,
+            'relocation':       self.willing_to_relocate,
+            'fulltime':         self.work_fulltime,
+            'startDate':        str(self.start_date) if self.start_date else '',
+            'preferredStates':  self.preferred_states,
+            # step 5
+            'whyTechxagon':    self.why_techxagon,
+            'whySelect':       self.why_select,
+            'futureRobotics':  self.future_robotics,
+            'serviceAgreement': self.service_agreement,
+            'hasVideoUpload':  bool(self.video_upload),
+        }
+
+
+
+class ApplicationsDashboardAccess(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='applications_dashboard_access'
+    )
+    can_view_dashboard = models.BooleanField(default=True)
+    can_export_csv = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Applications Dashboard Access'
+        verbose_name_plural = 'Applications Dashboard Access'
+
+    def __str__(self):
+        return f"{self.user.username} | dashboard={self.can_view_dashboard} | export={self.can_export_csv}"
+
+
+
+class LeaderboardSeason(models.Model):
+    """
+    A season/session that leaderboards can be based on.
+    Examples:
+      - 2025 Academic Year
+      - 2026 Academic Year
+      - Term 1 2026
+      - Summer Bootcamp 2026
+    """
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="leaderboard_seasons"
+    )
+
+    name = models.CharField(max_length=128)          # "2025", "2026", "Term 1 - 2026"
+    slug = models.SlugField(max_length=128)          # "2025", "2026-term-1"
+    start_at = models.DateTimeField(db_index=True)
+    end_at = models.DateTimeField(db_index=True)
+    is_active = models.BooleanField(default=False, db_index=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "slug"],
+                name="uniq_org_season_slug",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["organization", "is_active"]),
+            models.Index(fields=["organization", "start_at", "end_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.organization_id}:{self.name}"
+
+    @classmethod
+    def get_active(cls, org=None):
+        # If multiple active exist, newest wins (or enforce one active in admin)
+        if org:
+            return cls.objects.filter(organization=org, is_active=True).order_by("-start_at").first()
+        return cls.objects.filter(is_active=True).order_by("-start_at").first()
+
+    def contains(self, dt):
+        return self.start_at <= dt < self.end_at
+
+
+
+class ActivityEvent(TimeStampedModel):
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="activity_events"
+    )
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="activity_events",
+    )
+
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activity_events",
+        db_index=True,
+    )
+
+    event_type = models.CharField(max_length=64, db_index=True)
+    value = models.IntegerField(default=1)
+    meta = models.JSONField(default=dict, blank=True)
+    dedupe_key = models.CharField(max_length=128, unique=True, db_index=True, blank=True, null=True)
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization", "season", "event_type", "occurred_at"]),
+            models.Index(fields=["student", "season", "event_type", "occurred_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} ({self.student_id})"
+
+
+
+class AchievementAcquired(TimeStampedModel):
+    """
+    Created automatically when an achievement is unlocked.
+    """
+    definition = models.ForeignKey(
+        AchievementDefinition,
+        on_delete=models.CASCADE,
+        related_name="acquired",
+    )
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="achievements_acquired",
+    )
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="achievement_acquired",
+        db_index=True,
+    )
+    acquired_at = models.DateTimeField(default=timezone.now)
+
+    # store computed progress at time of unlock (useful for debugging)
+    value_at_unlock = models.IntegerField(default=0)
+    meta = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        unique_together = ("definition", "student")
+        indexes = [
+            models.Index(fields=["student", "definition"]),
+            models.Index(fields=["definition", "acquired_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.student_id} → {self.definition.code}"
+
+
+
+class Badge(NamedModel):
+    """
+    Dynamic badges based on points threshold.
+    Admin can add new badges anytime.
+    """
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="badges",
+        blank=True,
+        null=True,
+    )
+    icon_name = models.CharField(max_length=64, default="medal")
+    color = models.CharField(max_length=64, default="bg-gray-400")
+    points = models.PositiveIntegerField(default=0)  # threshold
+    criteria = models.TextField(blank=True)
+    rules = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)  # ✅ add this
+
+    class Meta:
+        verbose_name = "Badge"
+        verbose_name_plural = "Badges"
+        indexes = [models.Index(fields=["organization", "points"])]
+
+    def __str__(self):
+        return self.name
+
+
+
+class BadgeAward(TimeStampedModel):
+    badge = models.ForeignKey(Badge, on_delete=models.CASCADE, related_name="awards")
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="badge_awards",
+    )
+    awarded_at = models.DateTimeField(auto_now_add=True)
+    reason = models.CharField(max_length=255, blank=True)
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="badges_awarded",
+        db_index=True,
+    )
+    class Meta:
+        unique_together = ("badge", "student")
+        indexes = [models.Index(fields=["student", "badge"])]
+
+
+
+class PointTransaction(TimeStampedModel):
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="point_transactions",
+    )
+
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="point_transactions",
+        db_index=True,
+    )
+
+    points = models.IntegerField()
+    reason = models.CharField(max_length=255, blank=True)
+    balance_after = models.IntegerField(default=0)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["student", "season", "created_at"]),
+            models.Index(fields=["season", "created_at"]),
+        ]
+
+
+
+class Streak(TimeStampedModel):
+    """
+    Optional: keep streak calculated from daily activity,
+    or update it directly when logging 'daily_active' events.
+    """
+    student = models.OneToOneField(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="streak",
+    )
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="season_streaks",
+        db_index=True,
+    )
+    current_days = models.PositiveIntegerField(default=0)
+    longest_days = models.PositiveIntegerField(default=0)
+    last_activity = models.DateField(null=True, blank=True)
+
+    @classmethod
+    def set_student_streak(cls, student, org, event_type, code):
+
+        ev_qs = ActivityEvent.objects.filter(
+            student=student,
+            organization=org,
+            event_type=event_type,
+        )
+        if event_type == "daily_active" and code == "streak_champion":
+            total = build_streak(ev_qs).count()
+            
+            occurred_at = timezone.now()
+
+            # 1) Prefer active season if it contains the date
+            active = LeaderboardSeason.get_active(None)
+            if active and active.contains(occurred_at):
+                return active
+
+            # 2) Otherwise find by date range
+            season =  (LeaderboardSeason.objects
+                    .filter(start_at__lte=occurred_at, end_at__gt=occurred_at)
+            .order_by("-start_at")
+            .first())
+
+            streak, is_created = Streak.objects.update_or_create(
+                student=student,
+                season=season,
+                defaults={
+                    "current_days":total,
+                    "last_activity":timezone.localdate()
+                }
+            )
+
+            if streak.longest_days < total:
+                streak.longest_days = total
+                streak.save()
+
+
+
+class KonnectRoom(NamedModel):
+    class STAT(models.TextChoices):
+        CLOSED = "closed", "closed"
+        DISABLED = "disabled", "disabled"
+        OPEN = "open", "open"
+
+    creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='konnect_rooms')
+    room_id = models.CharField(max_length=255)
+    welcome_message = models.CharField(max_length=1200)
+    message = models.CharField(max_length=1200)
+    room_url = models.URLField(
+        max_length=1200,
+        blank=True,
+        null=True,
+        unique=True
+    )
+    status = models.CharField(max_length=16, choices=STAT.choices, default=STAT.CLOSED)
+    allowed_courses = models.ManyToManyField(Course, blank=True)
+    allowed_users = models.ManyToManyField(User, blank=True)
+    last_update = models.DateTimeField(blank=True, null=True)
+
+    @classmethod
+    def oldest_room(cls):
+        """
+        Returns the KonnectRoom object with the earliest (oldest) last_update
+        that is at least 12 hours old (i.e., last_update <= now - 12 hours).
+        If no such room exists, returns None.
+        """
+        threshold = timezone.now() - timedelta(hours=12)
+        return cls.objects.filter(
+            last_update__isnull=False,
+            last_update__lte=threshold
+        ).order_by('last_update').first()
+
+
+
+class KonnectRoomUser(NamedModel):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='konnect_room_users')
+    konnect_room = models.ForeignKey(KonnectRoom, on_delete=models.CASCADE, related_name="konnect_users")
+    active = models.BooleanField(default=False)
+
+
+
+class KonnectRoomListSerializer(serializers.ModelSerializer):
+    creator_name = serializers.SerializerMethodField()
+    allowed_courses_count = serializers.IntegerField(source="allowed_courses.count", read_only=True)
+    allowed_users_count = serializers.IntegerField(source="allowed_users.count", read_only=True)
+
+    class Meta:
+        model = KonnectRoom
+        fields = [
+            "id",
+            "name",
+            "room_id",
+            "room_url",
+            "status",
+            "creator_name",
+            "allowed_courses_count",
+            "allowed_users_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_creator_name(self, obj):
+        return f"{obj.creator.first_name} {obj.creator.last_name}".strip()
+
+
+
+class Course(NamedModel):
+    USAGE_CHOICE = (
+        ('public','public'),
+        ('private','private'),
+    )
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="courses")
+    subject = models.ForeignKey("academics.Subject", on_delete=models.PROTECT)
+    classroom = models.ForeignKey("academics.Classroom", on_delete=models.PROTECT)
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="courses")
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    general_activation = models.BooleanField(default=False)
+    general_activation_date = models.DateTimeField(blank=True, null=True)
+    course_type = models.CharField(
+        max_length=20,
+        choices=USAGE_CHOICE,
+        default='public',
+    )
+    freeze_code_submission = models.BooleanField(default=False)
+    parent_course = models.ForeignKey("Course", on_delete=models.CASCADE, blank=True, null=True)
+
+
+    def __str__(self):
+        return f"{self.subject.name} Teacher: {self.teacher.user.email}, Name: {self.name}"
+
+    class Meta:
+        unique_together = ("organization", "subject", "classroom", "teacher")
+
+
+
+class CoursePassCriteria(models.Model):
+    course = models.OneToOneField(Course, on_delete=models.CASCADE, related_name="pass_criteria")
+    no_of_cbt = models.PositiveIntegerField(default=10)
+    no_of_code_submission = models.PositiveIntegerField(default=10)
+    total_pass_mark_cbt = models.PositiveIntegerField(default=500)
+    total_pass_mark_code = models.PositiveIntegerField(default=500)
+
+
+
+class Enrollment(TimeStampedModel):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        COMPLETED = "completed", "Completed"
+        DROPPED = "dropped", "Dropped"
+
+    leaderboard_season = models.ForeignKey(
+        "gamification.LeaderboardSeason",
+        on_delete=models.CASCADE,
+        related_name="season_enrollments",
+        blank=True, null=True
+    )
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="enrollments")
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="enrollments")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+    progress_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    
+
+    class Meta:
+        unique_together = ("student", "course")
+
+
+
+class Lesson(NamedModel):
+    class ContentType(models.TextChoices):
+        VIDEO = "video", "Video"
+        AUDIO = "audio", "Audio"
+        PDF = "pdf", "PDF"
+        DOC = "doc", "Document"
+        LINK = "link", "External Link"
+
+    module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name="lessons")
+    cover_image = models.ImageField(
+        upload_to="texagon/covers/",
+        storage=dynamic_storage(),
+        blank=True,
+        null=True
+    )
+
+
+    order = models.PositiveIntegerField(default=1)
+    content_type = models.CharField(max_length=16, choices=ContentType.choices)
+    file = models.FileField(
+        upload_to="texagon/lessons/files/",
+        storage=lesson_file_storage(),
+        blank=True,
+        null=True
+    )
+    url = models.URLField(blank=True)
+    duration_seconds = models.PositiveIntegerField(default=0)
+    meta = models.JSONField(default=dict, blank=True)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["order"]
+        unique_together = ("module", "order")
+
+    def save(self, *args, **kwargs):
+        if self.cover_image and not self.cover_image.name.endswith(".webp"):
+            self.cover_image = convert_to_webp(self.cover_image)
+        super().save(*args, **kwargs)
+
+
+
+class Material(TimeStampedModel):
+    class Kind(models.TextChoices):
+        VIDEO = "video", "Video"
+        AUDIO = "audio", "Audio"
+        PDF = "pdf", "PDF"
+        DOC = "doc", "Document"
+        IMAGE = "image", "Image"
+        OTHER = "other", "Other"
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="materials")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="materials")
+    title = models.CharField(max_length=255)
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    file = models.FileField(
+        upload_to="texagon/materials/files/", 
+        storage=lesson_file_storage(),
+        blank=True, null=True
+    )
+    cover_image = models.ImageField(upload_to="texagon/materials/covers/", blank=True, null=True)
+    url = models.URLField(blank=True)
+    tags = models.JSONField(default=list, blank=True)
+    is_public = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="materials", 
+        blank=True, null=True
+    )
+
+    def __str__(self):
+        return self.title
+
+
+
+class CourseGeneralActivationSerializer(serializers.ModelSerializer):
+    # accept ISO string or null from frontend
+    general_activation_date = serializers.DateTimeField(required=False, allow_null=True)
+
+    class Meta:
+        model = Course
+        fields = ("general_activation", "general_activation_date")
+
+    def validate(self, attrs):
+        ga = attrs.get("general_activation", getattr(self.instance, "general_activation", False))
+        gad = attrs.get("general_activation_date", getattr(self.instance, "general_activation_date", None))
+
+        # If turning off, clear date
+        if ga is False:
+            attrs["general_activation_date"] = None
+            return attrs
+
+        # If turning on and date provided, ensure aware
+        if ga is True and gad:
+            if timezone.is_naive(gad):
+                attrs["general_activation_date"] = timezone.make_aware(gad, timezone.get_current_timezone())
+
+        # You can enforce "must provide date when enabled" if you want:
+        # if ga is True and not gad:
+        #     raise serializers.ValidationError({"general_activation_date": "Required when general_activation is true."})
+
+        return attrs
+
+
+
+class Organization(NamedModel):
+    slug = models.SlugField(unique=True)
+    logo = models.ImageField(upload_to="org_logos/", blank=True, null=True)
+    address = models.TextField(blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    contact_email = models.EmailField(blank=True)
+    contact_phone = models.CharField(max_length=32, blank=True)
+    is_active = models.BooleanField(default=True)
+    year = models.CharField(default="2026")
+
+    class Meta:
+        indexes = [models.Index(fields=["slug"])]
+
+    @property
+    def active_subscription(self):
+        return self.subscriptions.filter(status="active").order_by("-end_date").first()
+
+
+
+class TeacherListSerializer(serializers.ModelSerializer):
+    # flat UI fields
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.SerializerMethodField()
+    email = serializers.EmailField(source="user.email", read_only=True)
+    phone = serializers.CharField(source="user.phone", read_only=True)
+    experience = serializers.IntegerField()
+    bio = serializers.CharField()
+    specialties = serializers.SerializerMethodField()
+    courses = serializers.IntegerField(source="courses_count", read_only=True)
+    avatarUrl = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TeacherProfile
+        fields = ["id", "name", "email", "phone", "experience", "bio", "specialties", "courses", "avatarUrl", "status"]
+
+    def get_name(self, obj):
+        u = obj.user
+        return (u.get_full_name() or u.email or str(u.pk))
+
+    def get_specialties(self, obj):
+        return list(obj.specialties.values_list("name", flat=True))
+
+    def get_avatarUrl(self, obj):
+        u = obj.user
+        return u.avatar.url if getattr(u, "avatar", None) else ""
+
+    def get_status(self, obj):
+        org = obj.organization
+        mem = OrganizationMembership.objects.filter(
+            user=obj.user, organization=org, role=OrganizationMembership.Role.TEACHER
+        ).first()
+        return _status_from_user_membership(obj.user, mem)
+
+
+
+class ProjectCategory(models.Model):
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(unique=True, max_length=120)
+    colour = models.CharField(
+        max_length=40,
+        default="red",
+        help_text="Tailwind-compatible label: red, orange, blue, purple, green…",
+    )
+
+    class Meta:
+        verbose_name_plural = "project categories"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+
+
+class ProjectTag(models.Model):
+    name = models.CharField(max_length=60)
+    slug = models.SlugField(unique=True, max_length=80)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+
+
+class StudentProject(models.Model):
+    # ── Core identity ──────────────────────────────────────────────
+    title       = models.CharField(max_length=200)
+    slug        = models.SlugField(unique=True, max_length=250)
+    subtitle    = models.CharField(
+        max_length=200, blank=True,
+        help_text="One-line tagline shown on cards and the hero.",
+    )
+    description = models.TextField(
+        help_text="Full project description (supports HTML)."
+    )
+    excerpt     = models.CharField(
+        max_length=300,
+        help_text="Short summary shown on listing cards (~120 chars).",
+    )
+
+    # ── Taxonomy ───────────────────────────────────────────────────
+    category    = models.ForeignKey(
+        ProjectCategory,
+        on_delete=models.SET_NULL, null=True, related_name="projects",
+    )
+    tags        = models.ManyToManyField(ProjectTag, blank=True, related_name="projects")
+    difficulty  = models.CharField(
+        max_length=20, choices=DIFFICULTY_CHOICES, default="beginner"
+    )
+
+    # ── Media ──────────────────────────────────────────────────────
+    thumbnail   = models.ImageField(
+        upload_to="projects/thumbnails/", blank=True, null=True,
+        help_text="Card thumbnail. If blank the emoji + gradient fallback is used.",
+    )
+    # Extra gallery images
+    image_1     = models.ImageField(upload_to="projects/gallery/", blank=True, null=True)
+    image_2     = models.ImageField(upload_to="projects/gallery/", blank=True, null=True)
+    image_3     = models.ImageField(upload_to="projects/gallery/", blank=True, null=True)
+
+    # Fallback display when no thumbnail
+    thumb_emoji    = models.CharField(
+        max_length=8, choices=THUMB_EMOJI_CHOICES, default="💻",
+        help_text="Emoji shown in card when no thumbnail is uploaded.",
+    )
+    thumb_gradient = models.CharField(
+        max_length=20, choices=THUMB_GRADIENT_CHOICES, default="red-orange",
+    )
+
+    # Optional video embed (YouTube/Vimeo full URL)
+    video_url   = models.URLField(blank=True)
+
+    # Optional live demo / repo links
+    demo_url    = models.URLField(blank=True, verbose_name="Live demo URL")
+    repo_url    = models.URLField(blank=True, verbose_name="Source code / repo URL")
+
+    # ── Authorship ─────────────────────────────────────────────────
+    student_name   = models.CharField(max_length=200)
+    student_school = models.CharField(max_length=200, blank=True)
+    student_photo  = models.ImageField(
+        upload_to="projects/students/", blank=True, null=True
+    )
+    # Optional: link to a Django user if the student has an account
+    student_user   = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="student_projects",
+    )
+
+    # ── Status + meta ──────────────────────────────────────────────
+    is_published  = models.BooleanField(default=False)
+    is_featured   = models.BooleanField(
+        default=False,
+        help_text="Pin to the top of the homepage projects strip.",
+    )
+    completed_at  = models.DateField(
+        null=True, blank=True,
+        help_text="When the project was finished / showcased.",
+    )
+    created_at    = models.DateTimeField(auto_now_add=True)
+    updated_at    = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-is_featured", "-completed_at", "-created_at"]
+
+    def __str__(self):
+        return f"{self.title} — {self.student_name}"
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = slugify(f"{self.title}-{self.student_name}")
+            slug = base
+            n = 1
+            while StudentProject.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                slug = f"{base}-{n}"
+                n += 1
+            self.slug = slug
+        super().save(*args, **kwargs)
+
+    # ── Helpers ────────────────────────────────────────────────────
+    @property
+    def gallery_images(self):
+        """Non-null gallery images as a list."""
+        return [img for img in [self.image_1, self.image_2, self.image_3] if img]
+
+    GRADIENT_CSS = {
+        "red-orange":   "linear-gradient(135deg,rgba(232,41,28,.12),rgba(249,115,22,.12))",
+        "orange-slate": "linear-gradient(135deg,rgba(249,115,22,.12),rgba(100,116,139,.1))",
+        "slate-red":    "linear-gradient(135deg,rgba(100,116,139,.1),rgba(232,41,28,.1))",
+        "blue-teal":    "linear-gradient(135deg,rgba(59,130,246,.12),rgba(20,184,166,.1))",
+        "purple-pink":  "linear-gradient(135deg,rgba(168,85,247,.12),rgba(236,72,153,.1))",
+        "green-teal":   "linear-gradient(135deg,rgba(34,197,94,.12),rgba(20,184,166,.1))",
+    }
+
+    @property
+    def thumb_gradient_css(self):
+        return self.GRADIENT_CSS.get(self.thumb_gradient, self.GRADIENT_CSS["red-orange"])
+
+
+
+class ProductImageSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductImage
+        fields = ["id", "product", "product_image", "url", "alt_text", "sort_order", "created_at"]
+
+    def get_url(self, obj):
+        req = self.context.get("request")
+        return obj.get_absolute_url(req)
+
+
+
+class ProductAdminSerializer(serializers.ModelSerializer):
+    category_obj = CategorySerializer(source="category", read_only=True)
+    images = ProductImageSerializer(many=True, read_only=True)
+    pay_in_4_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+
+    class Meta:
+        model = Product
+        fields = [
+            "id",
+            "title",
+            "slug",
+            "product_type",
+            "category",
+            "category_obj",
+            "description",
+            "price",
+            "pay_in_4_amount",
+            "bnpl_enabled",
+            "default_bnpl_plan",
+            "rating",
+            "rating_count",
+            "is_digital",
+            "sku",
+            "stock",
+            "is_active",
+            "images",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        is_digital = attrs.get("is_digital", getattr(self.instance, "is_digital", True))
+        sku = attrs.get("sku", getattr(self.instance, "sku", ""))
+
+        if not is_digital and not sku:
+            raise serializers.ValidationError({"sku": "SKU is required for physical items."})
+
+        price = attrs.get("price", getattr(self.instance, "price", None))
+        if price is not None and Decimal(price) < Decimal("0.00"):
+            raise serializers.ValidationError({"price": "Price must be >= 0.00"})
+        return attrs
+
+    def create(self, validated_data):
+        # Ensure slug uniqueness (simple strategy)
+        slug = validated_data.get("slug") or slugify(validated_data.get("title") or "")
+        if slug:
+            base = slug
+            i = 1
+            while Product.objects.filter(slug=slug).exists():
+                i += 1
+                slug = f"{base}-{i}"
+            validated_data["slug"] = slug or "slug001"
+
+        return super().create(validated_data)

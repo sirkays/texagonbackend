@@ -208,7 +208,6 @@ def submission_detail(request, submission_id: int):
     # permission: owner student OR the lesson's teacher
     if not (user_is_submission_student(request.user, submission) or user_teaches_lesson(request.user, submission.lesson)):
         return Response({"detail": "Not allowed."}, status=403)
-    
     return Response(CodeSubmissionSerializer(submission).data)
 
 

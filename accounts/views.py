@@ -199,6 +199,8 @@ def resend_email_otp_view(request):
 
     return generic_ok
 
+
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([])

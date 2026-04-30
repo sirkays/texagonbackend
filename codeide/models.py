@@ -1,4 +1,4 @@
-# ide/models.py
+# codeide/models.py
 
 import os
 from django.conf import settings
