@@ -74,6 +74,9 @@ from api.authentication import SessionTokenAuthentication
 from rest_framework_api_key.permissions import HasAPIKey
 from .serializers import TestAttemptSerializer, TestMiniSerializer,StudentProfileMiniSerializer
 from api.permissions import RequiresActiveStudentSubscription
+import uuid
+from .errors import CBTError, err
+
 
 logger = logging.getLogger(__name__)
 
@@ -622,65 +625,185 @@ def toggle_require_browser_code(request):
     )
 
 
+@api_view(["GET"])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@authentication_classes([SessionTokenAuthentication])
+def cbt_heartbeat(request, test_id: int):
+    """
+    GET /api/tests/<test_id>/heartbeat/
+
+    Lets the client check whether an in-progress online attempt is still alive.
+    Use case: client comes back from suspend/sleep, doesn't know if its
+    timer is still valid. Asks the server.
+
+    Response:
+      {
+        "status": "in_progress" | "expired" | "submitted" | "no_attempt",
+        "attempt_id": int | null,
+        "started_at": ISO | null,
+        "expires_at_ms": int | null,
+        "server_now_ms": int,
+        "remaining_seconds": int
+      }
+    """
+    student = _get_student_for_user(request.user)
+    if not student:
+        return err(CBTError.NO_STUDENT_PROFILE, "Student profile not found.",
+                   status_code=403)
+
+    try:
+        test = Test.objects.get(pk=test_id)
+    except Test.DoesNotExist:
+        return err(CBTError.TEST_NOT_FOUND, "Test not found.", status_code=404)
+
+    now = timezone.now()
+    server_now_ms = int(now.timestamp() * 1000)
+
+    submitted = (TestAttempt.objects
+                 .filter(test=test, student=student,
+                         status__in=["submitted", "graded"])
+                 .first())
+    if submitted:
+        return Response({
+            "status": "submitted",
+            "attempt_id": submitted.id,
+            "started_at": submitted.started_at.isoformat() if submitted.started_at else None,
+            "expires_at_ms": None,
+            "server_now_ms": server_now_ms,
+            "remaining_seconds": 0,
+        })
+
+    in_progress = (TestAttempt.objects
+                   .filter(test=test, student=student, status="in_progress")
+                   .order_by("-started_at")
+                   .first())
+    if not in_progress or not in_progress.started_at:
+        return Response({
+            "status": "no_attempt",
+            "attempt_id": None,
+            "started_at": None,
+            "expires_at_ms": None,
+            "server_now_ms": server_now_ms,
+            "remaining_seconds": 0,
+        })
+
+    duration_seconds = int(getattr(test, "duration_minutes", 30) or 30) * 60
+    expires_at = in_progress.started_at + timedelta(seconds=duration_seconds)
+    expires_at_ms = int(expires_at.timestamp() * 1000)
+    remaining = max(0, int((expires_at - now).total_seconds()))
+
+    if remaining <= 0:
+        return Response({
+            "status": "expired",
+            "attempt_id": in_progress.id,
+            "started_at": in_progress.started_at.isoformat(),
+            "expires_at_ms": expires_at_ms,
+            "server_now_ms": server_now_ms,
+            "remaining_seconds": 0,
+        })
+
+    return Response({
+        "status": "in_progress",
+        "attempt_id": in_progress.id,
+        "started_at": in_progress.started_at.isoformat(),
+        "expires_at_ms": expires_at_ms,
+        "server_now_ms": server_now_ms,
+        "remaining_seconds": remaining,
+    })
+
+
+
 @api_view(["POST"])
 @authentication_classes([SessionTokenAuthentication])
-@permission_classes([HasAPIKey, IsAuthenticated, RequiresActiveStudentSubscription()])  # << add IsAuthenticated
+@permission_classes([HasAPIKey, IsAuthenticated, RequiresActiveStudentSubscription()])
 @transaction.atomic
 def submit_test(request, test_id: int):
     """
     Submit a completed test with all answers.
 
-    Expected JSON body (examples):
+    Expected JSON body examples:
 
-    - SCQ/TF (single choice):
-      {"answers":[{"question":101,"choice":555}, ...]}
+    SCQ/TF:
+    {"answers":[{"question":101,"choice":555}]}
 
-    - MCQ (multiple choices):
-      {"answers":[{"question":102,"choices":[561,562]}, ...]}
+    MCQ:
+    {"answers":[{"question":102,"choices":[561,562]}]}
 
-    - Short/Essay (free text):
-      {"answers":[{"question":103,"text":"your answer"}, ...]}
+    Short/Essay:
+    {"answers":[{"question":103,"text":"your answer"}]}
 
     Optional meta:
-      "started_at": "2025-08-23T12:00:00Z",
-      "duration_seconds": 1760,
-      "suspicious_activity": 2
+    {
+        "started_at": "2025-08-23T12:00:00Z",
+        "duration_seconds": 1760,
+        "suspicious_activity": 2,
+        "attempt_id": 123,
+        "client_submission_id": "uuid-from-client",
+        "auto_submitted": false
+    }
     """
     try:
-        # Extra safety, though IsAuthenticated already enforced
         if not getattr(request.user, "is_authenticated", False):
-            return Response(
-                {"detail": "Authentication required."},
-                status=status.HTTP_401_UNAUTHORIZED,
+            return err(
+                CBTError.AUTH_REQUIRED,
+                "Authentication required.",
+                status_code=401,
             )
 
         user = request.user
         student = _get_student_for_user(user)
+
         if not student:
-            return Response(
-                {"detail": "Student profile not found for user."},
-                status=status.HTTP_400_BAD_REQUEST,
+            return err(
+                CBTError.NO_STUDENT_PROFILE,
+                "Student profile not found for user.",
             )
-        
+
         try:
             test = Test.objects.get(pk=test_id)
         except Test.DoesNotExist:
-            return Response(
-                {"detail": "Test not found."},
-                status=status.HTTP_404_NOT_FOUND,
+            return err(
+                CBTError.TEST_NOT_FOUND,
+                "Test not found.",
+                status_code=404,
             )
 
         payload: Dict[str, Any] = request.data or {}
 
+        # ---------- IDEMPOTENCY CHECK FIRST ----------
+        raw_csid = payload.get("client_submission_id")
+        client_submission_id = None
+
+        if raw_csid:
+            try:
+                client_submission_id = uuid.UUID(str(raw_csid))
+            except (ValueError, TypeError):
+                return err(
+                    CBTError.INVALID_PAYLOAD,
+                    "client_submission_id must be a valid UUID.",
+                )
+
+        if client_submission_id:
+            existing = (
+                TestAttempt.objects.filter(
+                    student=student,
+                    client_submission_id=client_submission_id,
+                )
+                .select_related("test")
+                .first()
+            )
+
+            if existing:
+                return _build_submission_response(existing, replayed=True)
+
         mode = getattr(test, "mode", "online") or "online"
 
-
         raw_answers = payload.get("answers", [])
-        # Allow no answers, but enforce that if provided, it must be a list
+
         if not isinstance(raw_answers, list):
-            return Response(
-                {"detail": "answers must be a list."},
-                status=status.HTTP_400_BAD_REQUEST,
+            return err(
+                CBTError.INVALID_PAYLOAD,
+                "answers must be a list.",
             )
 
         answers_in: List[Dict[str, Any]] = raw_answers
@@ -688,71 +811,111 @@ def submit_test(request, test_id: int):
         started_at_iso = payload.get("started_at")
         duration_seconds = payload.get("duration_seconds")  # currently unused
         suspicious_activity = payload.get("suspicious_activity")  # currently unused
+        auto_submitted = bool(payload.get("auto_submitted", False))
 
-        # Normalize started_at to a timezone-aware datetime for idempotency
         now = timezone.now()
+
+        # Normalize started_at to a timezone-aware datetime.
         if started_at_iso:
             dt = parse_datetime(started_at_iso)
+
             if dt is None:
                 started_at = now
             else:
                 if timezone.is_naive(dt):
-                    started_at = timezone.make_aware(dt, timezone.get_current_timezone())
+                    started_at = timezone.make_aware(
+                        dt,
+                        timezone.get_current_timezone(),
+                    )
                 else:
                     started_at = dt
         else:
             started_at = now
-            
+
+        active_attempt = None
+        allowed_duration_seconds = None
+
         if mode == "online":
-            allowed_duration_seconds = int(getattr(test, "duration_minutes", 30) or 30) * 60
+            allowed_duration_seconds = (
+                int(getattr(test, "duration_minutes", 30) or 30) * 60
+            )
 
             attempt_id = payload.get("attempt_id")
 
-            attempt = None
-
-            # ✅ 1) If frontend sent attempt_id, trust it (most accurate)
+            # 1) If frontend sent attempt_id, use it.
             if attempt_id:
-                attempt = TestAttempt.objects.filter(
-                    id=attempt_id, test=test, student=student
+                active_attempt = TestAttempt.objects.filter(
+                    id=attempt_id,
+                    test=test,
+                    student=student,
                 ).first()
 
-            # ✅ 2) Fallback: latest in_progress attempt
-            if not attempt:
-                attempt = TestAttempt.objects.filter(
-                    test=test, student=student, status="in_progress"
-                ).order_by("-started_at").first()
+            # 2) Fallback: latest in-progress attempt.
+            if not active_attempt:
+                active_attempt = (
+                    TestAttempt.objects.filter(
+                        test=test,
+                        student=student,
+                        status="in_progress",
+                    )
+                    .order_by("-started_at")
+                    .first()
+                )
 
-            if not attempt or not attempt.started_at:
-                return Response({"detail": "No active online attempt found."}, status=400)
+            if not active_attempt or not active_attempt.started_at:
+                return err(
+                    CBTError.NO_ACTIVE_ATTEMPT,
+                    "No active online attempt found.",
+                )
 
-
-            started_at = attempt.started_at
+            started_at = active_attempt.started_at
 
             if started_at + timedelta(seconds=allowed_duration_seconds) < now:
-                return Response({"detail": "Time elapsed. Submission rejected."}, status=400)
+                # ✅ Mark the active attempt as expired so it shows in past attempts
+                # and doesn't keep appearing in available tests.
+                if active_attempt and active_attempt.status == "in_progress":
+                    active_attempt.status = "expired"
+                    active_attempt.submitted_at = now
+                    active_attempt.score = Decimal("0")
+                    active_attempt.auto_submitted = True
+                    if client_submission_id and not active_attempt.client_submission_id:
+                        active_attempt.client_submission_id = client_submission_id
+                    active_attempt.save(update_fields=[
+                        "status",
+                        "submitted_at",
+                        "score",
+                        "auto_submitted",
+                        "client_submission_id",
+                        "updated_at",
+                    ])
 
-        # Membership check: accept only questions that belong to this test
+                return err(
+                    CBTError.TIME_ELAPSED,
+                    "Time elapsed. Submission rejected.",
+                )
+
+        # Membership check: accept only questions that belong to this test.
         test_question_ids = set(
             Question.objects.filter(test=test).values_list("id", flat=True)
         )
 
-        # Total points from Questions
         total_points = (
             Question.objects.filter(test=test).aggregate(total=Sum("points"))["total"]
             or Decimal(0)
         )
 
-        # Preload all correct choice ids per question
+        # Preload all correct choice ids per question.
         correct_map: Dict[int, set[int]] = {
             qid: set(
-                Choice.objects.filter(question_id=qid, is_correct=True).values_list(
-                    "id", flat=True
-                )
+                Choice.objects.filter(
+                    question_id=qid,
+                    is_correct=True,
+                ).values_list("id", flat=True)
             )
             for qid in test_question_ids
         }
 
-        # Preload points per question
+        # Preload points per question.
         points_map: Dict[int, Decimal] = dict(
             Question.objects.filter(test=test).values_list("id", "points")
         )
@@ -767,6 +930,17 @@ def submit_test(request, test_id: int):
         # ------------- GRADING LOOP -------------
         for item in answers_in:
             qid = item.get("question")
+
+            try:
+                qid = int(qid)
+            except (ValueError, TypeError):
+                logger.info(
+                    "Ignoring answer with invalid question id: item=%s test=%s",
+                    item,
+                    test_id,
+                )
+                continue
+
             if qid not in test_question_ids:
                 logger.info(
                     "Ignoring answer for question not in test: question=%s test=%s",
@@ -791,6 +965,7 @@ def submit_test(request, test_id: int):
                     selected_choice_id = None
 
                 auto_graded = True
+
                 if selected_choice_id in correct_map.get(qid, set()):
                     awarded = q_points
 
@@ -800,14 +975,17 @@ def submit_test(request, test_id: int):
                     selected_choice_ids = [int(x) for x in item["choices"]]
                 except Exception:
                     selected_choice_ids = []
+
                 auto_graded = True
-                # all-or-nothing
+
+                # All-or-nothing MCQ grading.
                 if set(selected_choice_ids) == correct_map.get(qid, set()):
                     awarded = q_points
 
             # ----- SHORT / ESSAY -----
             elif "text" in item:
                 answer_text = (item.get("text") or "").strip()
+
                 try:
                     q = Question.objects.only("id", "meta").get(id=qid)
                     correct_text = (q.meta or {}).get("correct_text")
@@ -818,18 +996,21 @@ def submit_test(request, test_id: int):
 
                 if correct_text:
                     auto_graded = True
+
                     if str(correct_text).lower() in answer_text.lower():
                         awarded = q_points
                 else:
-                    # needs manual grading
                     pending_manual += 1
 
             else:
                 logger.info(
-                    "No recognizable answer format for question id=%s item=%s", qid, item
+                    "No recognizable answer format for question id=%s item=%s",
+                    qid,
+                    item,
                 )
 
             score += awarded
+
             if auto_graded:
                 auto_graded_count += 1
 
@@ -854,32 +1035,33 @@ def submit_test(request, test_id: int):
                 }
             )
 
-            # Prepare TestAnswer row (FKs set via *_id)
-            ans = TestAnswer(
-                attempt=None,  # set later
-                question_id=qid,
-                selected_choice_id=selected_choice_id,
-                selected_choice_ids=selected_choice_ids,
-                answer_text=answer_text,
-                awarded_points=awarded,
-                is_auto_graded=auto_graded,
+            answer_rows.append(
+                TestAnswer(
+                    attempt=None,
+                    question_id=qid,
+                    selected_choice_id=selected_choice_id,
+                    selected_choice_ids=selected_choice_ids,
+                    answer_text=answer_text,
+                    awarded_points=awarded,
+                    is_auto_graded=auto_graded,
+                )
             )
-            answer_rows.append(ans)
 
         answered = len(answer_rows)
+
         percentage = (
             int(round((float(score) / float(total_points)) * 100))
             if total_points
             else 0
         )
 
-        # Optional: read pass_mark from Test.settings if present
         pass_mark = (
             test.settings.get("pass_mark")
             if isinstance(getattr(test, "settings", {}), dict)
             and "pass_mark" in test.settings
             else 50
         )
+
         try:
             pass_mark = int(pass_mark)
         except (ValueError, TypeError):
@@ -887,45 +1069,23 @@ def submit_test(request, test_id: int):
 
         result = "PASS" if percentage >= pass_mark else "FAIL"
 
-        # ------------- ATTEMPT HANDLING (IDEMPOTENT) -------------
-        # First: does this exact "run" (same started_at) already exist & submitted?
+        # ------------- ATTEMPT HANDLING -------------
         existing_same_run = TestAttempt.objects.filter(
-            test=test, student=student, started_at=started_at
+            test=test,
+            student=student,
+            started_at=started_at,
         ).first()
 
         if existing_same_run and existing_same_run.status in ("submitted", "graded"):
-            # 🔁 This is an idempotent retry of an already-submitted run
-            existing_score = existing_same_run.score or Decimal(0)
-            existing_percentage = (
-                int(
-                    round(
-                        (float(existing_score) / float(total_points)) * 100
-                    )
-                )
-                if total_points
-                else 0
-            )
-            existing_result = (
-                "PASS" if existing_percentage >= pass_mark else "FAIL"
+            return _build_submission_response(
+                existing_same_run,
+                replayed=True,
+                breakdown=breakdown,
+                answered=answered,
+                auto_graded=auto_graded_count,
+                pending_manual=pending_manual,
             )
 
-            return Response(
-                {
-                    "attempt_id": existing_same_run.id,
-                    "score": float(existing_score),
-                    "total_points": float(total_points),
-                    "percentage": existing_percentage,
-                    "result": existing_result,
-                    "answered": existing_same_run.answers_rows.count(),
-                    "auto_graded": auto_graded_count,  # from this grading pass
-                    "pending_manual": pending_manual,
-                    "breakdown": breakdown,
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        # Second: if there is another submitted attempt for this test/student (different started_at),
-        # we treat it as a new attempt and block it.
         other_submitted = (
             TestAttempt.objects.filter(
                 test=test,
@@ -937,14 +1097,12 @@ def submit_test(request, test_id: int):
         )
 
         if other_submitted:
-            return Response(
-                {"detail": "User already performed this test."},
-                status=status.HTTP_400_BAD_REQUEST,
+            return err(
+                CBTError.ALREADY_SUBMITTED,
+                "User already performed this test.",
+                existing_attempt_id=other_submitted.id,
             )
 
-        # Now we either:
-        # - update an existing in-progress / quit attempt for this run, or
-        # - create a new attempt
         try:
             if existing_same_run and existing_same_run.status in (
                 "in_progress",
@@ -955,12 +1113,16 @@ def submit_test(request, test_id: int):
                 attempt.score = score
                 attempt.answers = normalized_answers
                 attempt.status = "submitted"
+                attempt.client_submission_id = client_submission_id
+                attempt.auto_submitted = auto_submitted
                 attempt.save()
 
-                # Replace previous answer rows with new ones
+                # Replace previous answer rows with the submitted rows.
                 attempt.answers_rows.all().delete()
-                for a in answer_rows:
-                    a.attempt = attempt
+
+                for answer in answer_rows:
+                    answer.attempt = attempt
+
                 TestAnswer.objects.bulk_create(answer_rows, ignore_conflicts=True)
 
             else:
@@ -972,31 +1134,55 @@ def submit_test(request, test_id: int):
                     score=score,
                     answers=normalized_answers,
                     status="submitted",
+                    client_submission_id=client_submission_id,
+                    auto_submitted=auto_submitted,
                 )
-                for a in answer_rows:
-                    a.attempt = attempt
+
+                for answer in answer_rows:
+                    answer.attempt = attempt
+
                 TestAnswer.objects.bulk_create(answer_rows, ignore_conflicts=True)
 
-        except (IntegrityError, DataError):
-            logger.exception("Failed creating or updating TestAttempt")
-
-            # Try to recover by fetching an existing attempt for this run
-            attempt = TestAttempt.objects.filter(
-                test=test, student=student, started_at=started_at
-            ).first()
-            if not attempt:
-                return Response(
-                    {"detail": "Server error creating attempt."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        except IntegrityError:
+            # If the unique constraint on student + client_submission_id fires,
+            # another request completed first. Re-fetch and return that result.
+            if client_submission_id:
+                existing = (
+                    TestAttempt.objects.filter(
+                        student=student,
+                        client_submission_id=client_submission_id,
+                    )
+                    .select_related("test")
+                    .first()
                 )
-        # ------------- FINAL RESPONSE -------------
-        # ---------- GAMIFICATION EVENT LOG (AFTER FACT) ----------
+
+                if existing:
+                    return _build_submission_response(existing, replayed=True)
+
+            logger.exception("IntegrityError in submit_test")
+
+            return err(
+                CBTError.SERVER_ERROR,
+                "Server error creating attempt.",
+                status_code=500,
+            )
+
+        except DataError:
+            logger.exception("DataError in submit_test")
+
+            return err(
+                CBTError.SERVER_ERROR,
+                "Server error creating attempt.",
+                status_code=500,
+            )
+
+        # ---------- GAMIFICATION EVENT LOG ----------
         org = getattr(student, "organization", None)
         today = timezone.localdate()
 
         def _log_after_commit():
             try:
-                # 1) quiz attempted (always)
+                # 1) quiz attempted
                 log_event(
                     student=student,
                     org=org,
@@ -1014,7 +1200,7 @@ def submit_test(request, test_id: int):
                     dedupe_key=f"quiz_attempted:{attempt.id}",
                 )
 
-                # 2) quiz passed (based on pass_mark)
+                # 2) quiz passed
                 if result == "PASS":
                     log_event(
                         student=student,
@@ -1029,7 +1215,7 @@ def submit_test(request, test_id: int):
                         dedupe_key=f"quiz_passed:{attempt.id}",
                     )
 
-                # 3) quiz 90%+ (achievement-friendly event)
+                # 3) quiz 90%+
                 if percentage >= 90:
                     log_event(
                         student=student,
@@ -1044,53 +1230,133 @@ def submit_test(request, test_id: int):
                         dedupe_key=f"quiz_90_plus:{attempt.id}",
                     )
 
-                # 4) daily activity (streak-safe)
+                # 4) daily activity
                 log_event(
                     student=student,
                     org=org,
                     event_type="daily_active",
                     value=1,
-                    meta={"source": "submit_test", "attempt_id": attempt.id},
+                    meta={
+                        "source": "submit_test",
+                        "attempt_id": attempt.id,
+                    },
                     dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
                 )
 
-                Streak.set_student_streak(student, org, 'daily_active', 'streak_champion')
+                Streak.set_student_streak(
+                    student,
+                    org,
+                    "daily_active",
+                    "streak_champion",
+                )
 
             except Exception:
                 logger.exception(
-                    "Gamification on_commit failed (non-fatal)",
-                    extra={"attempt_id": attempt.id, "test_id": test.id},
+                    "Gamification on_commit failed non-fatally",
+                    extra={
+                        "attempt_id": attempt.id,
+                        "test_id": test.id,
+                    },
                 )
-                return
 
-
-        if test.course.course_type == 'public':
+        if test.course.course_type == "public":
             transaction.on_commit(_log_after_commit)
-            # --------------------------------------------------------
 
-        return Response(
-            {
-                "attempt_id": attempt.id,
-                "score": float(score),
-                "total_points": float(total_points),
-                "percentage": percentage,
-                "result": result,
-                "answered": answered,
-                "auto_graded": auto_graded_count,
-                "pending_manual": pending_manual,
-                "breakdown": breakdown,
-            },
-            status=status.HTTP_200_OK,
+        return _build_submission_response(
+            attempt,
+            replayed=False,
+            breakdown=breakdown,
+            answered=answered,
+            auto_graded=auto_graded_count,
+            pending_manual=pending_manual,
         )
 
     except Exception:
         logger.exception("Unexpected error in submit_test")
-        return Response(
-            {"detail": "Unexpected server error while submitting test."},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+
+        return err(
+            CBTError.SERVER_ERROR,
+            "Unexpected server error while submitting test.",
+            status_code=500,
         )
 
 
+def _build_submission_response(
+    attempt: TestAttempt,
+    *,
+    replayed: bool,
+    breakdown=None,
+    answered=None,
+    auto_graded=None,
+    pending_manual=None,
+):
+    """
+    Single source of truth for submission response shape.
+    """
+    test = attempt.test
+
+    total_points = (
+        Question.objects.filter(test=test).aggregate(total=Sum("points"))["total"]
+        or Decimal(0)
+    )
+
+    score = attempt.score or Decimal(0)
+
+    percentage = (
+        int(round((float(score) / float(total_points)) * 100))
+        if total_points
+        else 0
+    )
+
+    pass_mark = (
+        test.settings.get("pass_mark")
+        if isinstance(getattr(test, "settings", {}), dict)
+        and "pass_mark" in test.settings
+        else 50
+    )
+
+    try:
+        pass_mark = int(pass_mark)
+    except (ValueError, TypeError):
+        pass_mark = 45
+
+    result = "PASS" if percentage >= pass_mark else "FAIL"
+
+    answers = attempt.answers or []
+
+    if auto_graded is None:
+        auto_graded = sum(
+            1 for item in answers if item.get("auto_graded")
+        )
+
+    if pending_manual is None:
+        pending_manual = sum(
+            1 for item in answers if not item.get("auto_graded")
+        )
+
+    if answered is None:
+        answered = attempt.answers_rows.count()
+
+    return Response(
+        {
+            "attempt_id": attempt.id,
+            "client_submission_id": (
+                str(attempt.client_submission_id)
+                if getattr(attempt, "client_submission_id", None)
+                else None
+            ),
+            "score": float(score),
+            "total_points": float(total_points),
+            "percentage": percentage,
+            "result": result,
+            "answered": answered,
+            "auto_graded": auto_graded,
+            "pending_manual": pending_manual,
+            "breakdown": breakdown or [],
+            "replayed": replayed,
+        },
+        status=status.HTTP_200_OK,
+    )
 
 def _get_teacher_for_user(user) -> Optional[TeacherProfile]:
     """Get teacher profile for the authenticated user."""

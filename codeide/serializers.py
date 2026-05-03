@@ -1,10 +1,54 @@
-# app: ide
+# app: ide/serializers.py
 from rest_framework import serializers
-from .models import CodeSnippet, CodeSubmission, CodeComment,CodeFile
+from .models import CodeSnippet, CodeSubmission, CodeComment, CodeFile, Folder
 from academics.models import StudentProfile
 from learning.models import Lesson
 from django.db.models import Max
 
+
+# ---------------------------------------------------------------------------
+# Folder
+# ---------------------------------------------------------------------------
+class FolderSerializer(serializers.ModelSerializer):
+    path = serializers.CharField(read_only=True)
+    snippet_count = serializers.SerializerMethodField()
+    file_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Folder
+        fields = [
+            "id", "name", "parent", "path",
+            "snippet_count", "file_count",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "path", "snippet_count", "file_count", "created_at", "updated_at"]
+
+    def get_snippet_count(self, obj):
+        # Avoid extra queries if prefetched
+        if hasattr(obj, "_prefetched_snippets_count"):
+            return obj._prefetched_snippets_count
+        return obj.snippets.count()
+
+    def get_file_count(self, obj):
+        if hasattr(obj, "_prefetched_files_count"):
+            return obj._prefetched_files_count
+        return obj.files.count()
+
+    def validate_name(self, value):
+        v = (value or "").strip()
+        if not v:
+            raise serializers.ValidationError("Folder name is required.")
+        # Disallow path separators in the name itself
+        if "/" in v or "\\" in v:
+            raise serializers.ValidationError("Folder name cannot contain '/' or '\\'.")
+        if len(v) > 128:
+            raise serializers.ValidationError("Folder name too long.")
+        return v
+
+
+# ---------------------------------------------------------------------------
+# CodeFile
+# ---------------------------------------------------------------------------
 class CodeFileSerializer(serializers.ModelSerializer):
     url = serializers.SerializerMethodField(read_only=True)
 
@@ -12,7 +56,7 @@ class CodeFileSerializer(serializers.ModelSerializer):
         model = CodeFile
         fields = [
             "id", "created_at", "updated_at",
-            "student", "lesson", "label",
+            "student", "lesson", "folder", "label",
             "original_name", "content_type", "size_bytes",
             "url",
         ]
@@ -23,16 +67,22 @@ class CodeFileSerializer(serializers.ModelSerializer):
 
     def get_url(self, obj):
         request = self.context.get("request")
-        file_url = obj.url  # this gives "/media/...."
-        if request is not None:
+        file_url = obj.url
+        if request is not None and file_url:
             return request.build_absolute_uri(file_url)
         return file_url
 
 
+# ---------------------------------------------------------------------------
+# CodeSnippet
+# ---------------------------------------------------------------------------
 class CodeSnippetSerializer(serializers.ModelSerializer):
     class Meta:
         model = CodeSnippet
-        fields = ["id", "lesson", "title", "language", "code_text", "meta", "created_at", "updated_at"]
+        fields = [
+            "id", "lesson", "folder", "title", "language",
+            "code_text", "meta", "created_at", "updated_at",
+        ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
@@ -49,7 +99,6 @@ class CodeCommentSerializer(serializers.ModelSerializer):
         return (getattr(u, "get_full_name", lambda: "")() or u.email or str(u.pk))
 
 
-
 class CodeSubmissionMiniSerializer(serializers.ModelSerializer):
     class Meta:
         model = CodeSubmission
@@ -58,6 +107,7 @@ class CodeSubmissionMiniSerializer(serializers.ModelSerializer):
             "code_text", "created_at", "updated_at",
             "status", "score", "feedback", "correction_code",
         ]
+
 
 class CodeSubmissionSerializer(serializers.ModelSerializer):
     title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -84,13 +134,7 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
             return user.get_full_name() or user.username or user.email
         return str(obj.graded_by)
 
-
     def get_latest_same_title_submission(self, obj):
-        """
-        Return the newest *other* submission with the same title,
-        for EACH language (javascript/python/html/css/...)
-        keyed by language.
-        """
         if not obj.title:
             return {}
 
@@ -98,13 +142,12 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
             CodeSubmission.objects
             .filter(
                 student=obj.student,
-                lesson=obj.lesson,   # remove if you want across lessons
+                lesson=obj.lesson,
                 title=obj.title,
             )
             .exclude(id=obj.id)
         )
 
-        # For each language, find the newest created_at
         latest_times = (
             base.values("language")
             .annotate(latest_created_at=Max("created_at"))
@@ -117,8 +160,6 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
         for row in latest_times:
             lang = row["language"]
             dt = row["latest_created_at"]
-
-            # Get the actual latest submission row for that language
             latest_obj = (
                 base.filter(language=lang, created_at=dt)
                 .order_by("-created_at", "-id")
@@ -131,19 +172,13 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
 
 
 class TeacherUpdateSubmissionSerializer(serializers.ModelSerializer):
-    """
-    For teacher PATCH: allow grading or corrections (and—if you want—code update).
-    """
     class Meta:
         model = CodeSubmission
         fields = ["code_text", "score", "feedback", "correction_code", "status"]
 
 
-
 class SubmissionListSerializer(serializers.ModelSerializer):
-    # Add title but normalize empty/" " to None
     title = serializers.SerializerMethodField()
-
     student_name = serializers.SerializerMethodField()
     lesson_title = serializers.CharField(source="lesson.name", read_only=True)
     course_name = serializers.SerializerMethodField()
@@ -152,17 +187,9 @@ class SubmissionListSerializer(serializers.ModelSerializer):
     class Meta:
         model = CodeSubmission
         fields = [
-            "id",
-            "title",         # ✅ added
-            "created_at",    # ✅ already here, now frontend will display it
-            "updated_at",
-            "status",
-            "language",
-            "student_name",
-            "lesson_title",
-            "course_name",
-            "class_name",
-            "score",
+            "id", "title", "created_at", "updated_at",
+            "status", "language", "student_name",
+            "lesson_title", "course_name", "class_name", "score",
         ]
 
     def get_title(self, obj: CodeSubmission):
@@ -182,7 +209,6 @@ class SubmissionListSerializer(serializers.ModelSerializer):
             return ""
 
     def get_class_name(self, obj: CodeSubmission) -> str:
-        # Prefer course.classroom if available; fall back to student's classroom
         try:
             room = obj.lesson.module.course.classroom
             if room:
@@ -197,8 +223,10 @@ class SubmissionListSerializer(serializers.ModelSerializer):
             pass
         return ""
 
+
 class TeacherCodeCommentSerializer(serializers.ModelSerializer):
     author_name = serializers.SerializerMethodField()
+
     class Meta:
         model = CodeComment
         fields = ["id", "created_at", "author", "author_role", "author_name", "message"]
@@ -209,6 +237,7 @@ class TeacherCodeCommentSerializer(serializers.ModelSerializer):
             return ""
         full = (getattr(u, "get_full_name", lambda: "")() or "").strip()
         return full or u.email or f"user-{getattr(u, 'pk', '')}"
+
 
 class TeacherCodeSubmissionMiniSerializer(serializers.ModelSerializer):
     class Meta:
@@ -224,16 +253,12 @@ class TeacherCodeSubmissionMiniSerializer(serializers.ModelSerializer):
 class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     student_id = serializers.IntegerField(source="student.id", read_only=True)
-
-    # ✅ include title (since you want to match by title)
     title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     lesson = serializers.SerializerMethodField()
     course = serializers.SerializerMethodField()
     classroom = serializers.SerializerMethodField()
     comments = TeacherCodeCommentSerializer(many=True, read_only=True)
-
-    # ✅ add latest same-title submission
     latest_same_title_submission = serializers.SerializerMethodField()
 
     class Meta:
@@ -248,7 +273,6 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
             "comments",
             "latest_same_title_submission",
         ]
-
 
     def get_latest_same_title_submission(self, obj: CodeSubmission):
         title = (obj.title or "").strip()
@@ -269,21 +293,15 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
         for row in latest_times:
             lang = row["language"]
             dt = row["latest_created_at"]
-
             latest_obj = (
                 base.filter(language=lang, created_at=dt)
                 .order_by("-created_at", "-id")
                 .first()
             )
-
-            # ✅ IMPORTANT: don't return the same object again
             if not latest_obj or latest_obj.id == obj.id:
                 continue
-
             out[lang] = TeacherCodeSubmissionMiniSerializer(latest_obj).data
-
         return out
-
 
     def get_student_name(self, obj: CodeSubmission) -> str:
         u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
@@ -316,7 +334,6 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
         except Exception:
             pass
         return {"id": None, "name": ""}
-
 
 
 class StudentUpdateSubmissionSerializer(serializers.ModelSerializer):

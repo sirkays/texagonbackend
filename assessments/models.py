@@ -82,9 +82,18 @@ class TestAttempt(TimeStampedModel):
     score = models.DecimalField(max_digits=7, decimal_places=2, default=0)
     answers = models.JSONField(default=dict, blank=True)  # {question_id: ["A", ...] or "True"/"text"}
     status = models.CharField(max_length=16, default="in_progress")  # in_progress, submitted, graded
+    client_submission_id = models.UUIDField(null=True, blank=True, db_index=True)
+    auto_submitted = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ("test", "student", "started_at")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "client_submission_id"],
+                condition=models.Q(client_submission_id__isnull=False),
+                name="uniq_student_client_submission_id",
+            ),
+        ]
 
 class Assignment(TimeStampedModel):
     course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="assignments")

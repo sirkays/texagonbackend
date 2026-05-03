@@ -43,5 +43,7 @@ urlpatterns = [
     path('api/teacher/fetch-course-students/', views.fetch_course_students, name='fetch_course_students'),
 
     path('api/teacher/toggle-cbt-require-code/', views.toggle_require_browser_code, name='toggle_require_browser_code'),
+
+    path("api/tests/<int:test_id>/heartbeat/", views.cbt_heartbeat, name="cbt-heartbeat"),
 ]
 

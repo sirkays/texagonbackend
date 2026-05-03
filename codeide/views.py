@@ -3,7 +3,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from gamification.services.engine import log_event 
+from gamification.services.engine import log_event
 from gamification.models import Streak
 from rest_framework import status, pagination
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -17,7 +17,7 @@ import logging
 from core.utils import _get_student_for_user, _get_teacher_for_user, _resolve_org
 from learning.models import Lesson
 
-from .models import CodeSnippet, CodeSubmission, CodeComment, CodeFile
+from .models import CodeSnippet, CodeSubmission, CodeComment, CodeFile, Folder
 from .serializers import (
     CodeSnippetSerializer,
     CodeSubmissionSerializer,
@@ -28,21 +28,200 @@ from .serializers import (
     TeacherCodeSubmissionDetailSerializer,
     TeacherCodeCommentSerializer,
     StudentUpdateSubmissionSerializer,
+    FolderSerializer,
 )
 from .utils import user_is_submission_student, user_teaches_lesson, user_is_teacher
 from api.permissions import RequiresActiveStudentSubscription
 from django.db.models.functions import Lower, Trim
 
 logger = logging.getLogger(__name__)
-# ---------- SNIPPETS ----------
+
+
+# ===========================================================================
+# FOLDERS
+# ===========================================================================
+@api_view(["GET"])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@authentication_classes([SessionTokenAuthentication])
+def folder_list(request):
+    """
+    List all folders for the current student. The frontend builds the tree
+    from `parent` ids; we return a flat list because that's the cheapest
+    payload and the client already manages tree state.
+    """
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Student profile not found."}, status=403)
+
+    qs = Folder.objects.filter(student=student).select_related("parent")
+    parent_id = request.query_params.get("parent")
+    if parent_id == "null" or parent_id == "":
+        qs = qs.filter(parent__isnull=True)
+    elif parent_id:
+        qs = qs.filter(parent_id=parent_id)
+
+    return Response(FolderSerializer(qs, many=True).data)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@authentication_classes([SessionTokenAuthentication])
+def folder_create(request):
+    """
+    Create a new folder. Body: { name, parent (optional) }.
+    """
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Student profile not found."}, status=403)
+
+    name = (request.data.get("name") or "").strip()
+    parent_id = request.data.get("parent")
+
+    if not name:
+        return Response({"detail": "Folder name is required."}, status=400)
+    if "/" in name or "\\" in name:
+        return Response({"detail": "Folder name cannot contain '/' or '\\'."}, status=400)
+
+    parent = None
+    if parent_id:
+        try:
+            parent = Folder.objects.get(pk=parent_id, student=student)
+        except Folder.DoesNotExist:
+            return Response({"detail": "Parent folder not found."}, status=404)
+
+    # Enforce uniqueness (student, parent, name) at the app layer for a clean error msg
+    if Folder.objects.filter(student=student, parent=parent, name=name).exists():
+        return Response(
+            {"detail": "A folder with this name already exists here."},
+            status=409,
+        )
+
+    folder = Folder.objects.create(student=student, parent=parent, name=name)
+    return Response(FolderSerializer(folder).data, status=201)
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@authentication_classes([SessionTokenAuthentication])
+def folder_update(request, folder_id: int):
+    """
+    Rename or move a folder. Body: { name?, parent? }
+    """
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Student profile not found."}, status=403)
+
+    folder = get_object_or_404(Folder, pk=folder_id, student=student)
+
+    new_name = request.data.get("name")
+    if new_name is not None:
+        new_name = new_name.strip()
+        if not new_name:
+            return Response({"detail": "Folder name is required."}, status=400)
+        if "/" in new_name or "\\" in new_name:
+            return Response({"detail": "Folder name cannot contain '/' or '\\'."}, status=400)
+        folder.name = new_name
+
+    if "parent" in request.data:
+        parent_id = request.data.get("parent")
+        if parent_id in (None, "", "null"):
+            folder.parent = None
+        else:
+            try:
+                new_parent = Folder.objects.get(pk=parent_id, student=student)
+            except Folder.DoesNotExist:
+                return Response({"detail": "Parent folder not found."}, status=404)
+            # Prevent cycles: walk up from new_parent and ensure folder is not an ancestor
+            cursor = new_parent
+            for _ in range(64):
+                if cursor is None:
+                    break
+                if cursor.id == folder.id:
+                    return Response(
+                        {"detail": "Cannot move a folder into itself or its descendant."},
+                        status=400,
+                    )
+                cursor = cursor.parent
+            folder.parent = new_parent
+
+    # Uniqueness check on save
+    sibling_qs = Folder.objects.filter(
+        student=student, parent=folder.parent, name=folder.name
+    ).exclude(pk=folder.pk)
+    if sibling_qs.exists():
+        return Response(
+            {"detail": "A folder with this name already exists here."},
+            status=409,
+        )
+
+    folder.save()
+    return Response(FolderSerializer(folder).data)
+
 
 @api_view(["DELETE"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
+def folder_delete(request, folder_id: int):
+    """
+    Delete a folder. By default we only allow deleting empty folders.
+    Pass ?force=1 to recursively delete contents (snippets get deleted,
+    files get their stored blobs removed too).
+    """
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Student profile not found."}, status=403)
+
+    folder = get_object_or_404(Folder, pk=folder_id, student=student)
+    force = request.query_params.get("force") in ("1", "true", "True")
+
+    if not force:
+        has_children = folder.children.exists()
+        has_snippets = folder.snippets.exists()
+        has_files = folder.files.exists()
+        if has_children or has_snippets or has_files:
+            return Response(
+                {"detail": "Folder is not empty. Pass ?force=1 to delete with contents."},
+                status=400,
+            )
+        folder.delete()
+        return Response(status=204)
+
+    # Force: recursively delete. Walk the subtree and clean up file blobs first.
+    def _collect_descendants(root: Folder):
+        result = [root]
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for child in node.children.all():
+                result.append(child)
+                stack.append(child)
+        return result
+
+    descendants = _collect_descendants(folder)
+    descendant_ids = [f.id for f in descendants]
+
+    # Delete file blobs from storage explicitly (CASCADE won't remove S3 objects)
+    for f in CodeFile.objects.filter(student=student, folder_id__in=descendant_ids):
+        try:
+            f.file.delete(save=False)
+        except Exception:
+            logger.exception("Failed to delete file blob during folder cascade", extra={"file_id": f.id})
+
+    # CASCADE on Folder.parent removes children; SET_NULL on snippets/files
+    # would orphan them — but we want them gone, so delete explicitly first.
+    CodeSnippet.objects.filter(student=student, folder_id__in=descendant_ids).delete()
+    CodeFile.objects.filter(student=student, folder_id__in=descendant_ids).delete()
+    folder.delete()
+    return Response(status=204)
+
+
+# ===========================================================================
+# SNIPPETS
+# ===========================================================================
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@authentication_classes([SessionTokenAuthentication])
 def snippet_delete(request, snippet_id: int):
-    """
-    Delete a saved snippet belonging to the current student.
-    """
     student = _get_student_for_user(request.user)
     if not student:
         return Response({"detail": "Student profile not found."}, status=403)
@@ -63,48 +242,82 @@ def snippet_create(request):
     """
     Create or update a code snippet for the current student.
 
-    - If no `id` / `pk` is provided in the body → create a new snippet.
-    - If `id` / `pk` is provided → update the existing snippet (for this student).
+    Behavior (issue #4 — saving a file that already exists should update it):
+    - If `id` / `pk` is provided → update that specific snippet.
+    - Else, look up an existing snippet by (student, title, language, folder).
+      If found → update it. If not → create a new one.
     """
     student = _get_student_for_user(request.user)
     if not student:
         return Response({"detail": "Student profile not found."}, status=403)
 
     data = request.data.copy()
-    # Never allow student to be overridden from payload
     data.pop("student", None)
 
-    # accept either "id" or "pk"
     snippet_id = data.pop("id", None) or data.pop("pk", None)
 
+    # Resolve folder if provided (ensure it belongs to this student)
+    folder_id = data.get("folder")
+    folder = None
+    if folder_id not in (None, "", 0, "0"):
+        try:
+            folder = Folder.objects.get(pk=folder_id, student=student)
+        except Folder.DoesNotExist:
+            return Response({"detail": "Folder not found."}, status=404)
+    # Normalize folder field on the payload
+    data["folder"] = folder.id if folder else None
+
+    # ----- Explicit update by id -----
     if snippet_id:
-        # -------- UPDATE FLOW --------
         try:
             snippet = CodeSnippet.objects.get(pk=snippet_id, student=student)
         except CodeSnippet.DoesNotExist:
             return Response({"detail": "Snippet not found."}, status=404)
 
-        # partial update: they can send only some fields
         serializer = CodeSnippetSerializer(snippet, data=data, partial=True)
         if serializer.is_valid():
-            obj = serializer.save()  # student already set on instance
+            obj = serializer.save()
             return Response(CodeSnippetSerializer(obj).data, status=200)
         return Response(serializer.errors, status=400)
 
-    # -------- CREATE FLOW (no id/pk) --------
+    # ----- No id: try to find an existing snippet to update (dedupe) -----
+    title = (data.get("title") or "").strip()
+    language = data.get("language") or ""
+
+    if title and language:
+        existing = (
+            CodeSnippet.objects
+            .filter(
+                student=student,
+                title__iexact=title,
+                language=language,
+                folder=folder,
+            )
+            .order_by("-updated_at")
+            .first()
+        )
+        if existing:
+            serializer = CodeSnippetSerializer(existing, data=data, partial=True)
+            if serializer.is_valid():
+                obj = serializer.save()
+                return Response(CodeSnippetSerializer(obj).data, status=200)
+            return Response(serializer.errors, status=400)
+
+    # ----- Create new -----
     serializer = CodeSnippetSerializer(data=data)
     if serializer.is_valid():
         obj = serializer.save(student=student)
         return Response(CodeSnippetSerializer(obj).data, status=201)
     return Response(serializer.errors, status=400)
 
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def snippet_list(request):
     """
-    Student: list saved code (optionally filter by lesson).
-    Query: ?lesson=<id>
+    Student: list saved code.
+    Optional filters: ?lesson=<id>, ?folder=<id|null>
     """
     student = _get_student_for_user(request.user)
     if not student:
@@ -115,6 +328,14 @@ def snippet_list(request):
     if lesson_id:
         qs = qs.filter(lesson_id=lesson_id)
 
+    folder_id = request.query_params.get("folder")
+    if folder_id == "null" or folder_id == "":
+        # Explicit "no folder" filter — only honor if the param is actually present
+        if "folder" in request.query_params:
+            qs = qs.filter(folder__isnull=True)
+    elif folder_id:
+        qs = qs.filter(folder_id=folder_id)
+
     return Response(CodeSnippetSerializer(qs, many=True).data)
 
 
@@ -122,9 +343,6 @@ def snippet_list(request):
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def snippet_detail(request, snippet_id: int):
-    """
-    Student: fetch saved code detail.
-    """
     student = _get_student_for_user(request.user)
     if not student:
         return Response({"detail": "Student profile not found."}, status=403)
@@ -133,7 +351,9 @@ def snippet_detail(request, snippet_id: int):
     return Response(CodeSnippetSerializer(obj).data)
 
 
-# ---------- SUBMISSIONS ----------
+# ===========================================================================
+# SUBMISSIONS
+# ===========================================================================
 @api_view(["POST"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
@@ -142,7 +362,7 @@ def submission_create(request):
     if not student:
         return Response({"detail": "Student profile not found."}, status=403)
 
-    title = (request.data.get("title") or "").strip() or None  # ✅ normalize
+    title = (request.data.get("title") or "").strip() or None
     lesson_id = request.data.get("lesson")
     language = request.data.get("language")
     code_text = request.data.get("code_text")
@@ -151,7 +371,7 @@ def submission_create(request):
         return Response({"detail": "lesson, language and code_text are required."}, status=400)
     lesson = get_object_or_404(Lesson, id=lesson_id)
     submission = CodeSubmission.objects.create(
-        title=title,  # ✅ saved
+        title=title,
         student=student,
         lesson=lesson,
         language=language,
@@ -195,17 +415,13 @@ def submission_create(request):
 
     return Response(CodeSubmissionSerializer(submission).data, status=201)
 
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def submission_detail(request, submission_id: int):
-    """
-    Student or course teacher: fetch submission detail (with comments).
-    """
-
     submission = get_object_or_404(CodeSubmission, id=submission_id)
 
-    # permission: owner student OR the lesson's teacher
     if not (user_is_submission_student(request.user, submission) or user_teaches_lesson(request.user, submission.lesson)):
         return Response({"detail": "Not allowed."}, status=403)
     return Response(CodeSubmissionSerializer(submission).data)
@@ -215,15 +431,8 @@ def submission_detail(request, submission_id: int):
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def submission_teacher_update(request, submission_id: int):
-    """
-    Teacher: grade code or make corrections (update submission fields).
-    Body (any subset):
-      - code_text (optional, to supply a corrected version yourself)
-      - score (decimal), feedback (text), correction_code (text), status ("graded" or "revised")
-    """
     submission = get_object_or_404(CodeSubmission, id=submission_id)
 
-    # must be this lesson's teacher
     if not user_teaches_lesson(request.user, submission.lesson):
         return Response({"detail": "Only the course teacher can update/grade."}, status=403)
 
@@ -234,7 +443,6 @@ def submission_teacher_update(request, submission_id: int):
     serializer = TeacherUpdateSubmissionSerializer(submission, data=request.data, partial=True)
     if serializer.is_valid():
         instance = serializer.save()
-        # mark graded fields when score/feedback/correction provided
         if any(k in request.data for k in ["score", "feedback", "correction_code"]):
             instance.graded_by = teacher
             instance.graded_at = timezone.now()
@@ -245,15 +453,13 @@ def submission_teacher_update(request, submission_id: int):
     return Response(serializer.errors, status=400)
 
 
-# ---------- COMMENTS ----------
+# ===========================================================================
+# COMMENTS
+# ===========================================================================
 @api_view(["POST"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def submission_comment_create(request, submission_id: int):
-    """
-    Student (owner) or Teacher (of the lesson) can comment on a submission.
-    Body: {message}
-    """
     submission = get_object_or_404(CodeSubmission, id=submission_id)
     can_student = user_is_submission_student(request.user, submission)
     can_teacher = user_teaches_lesson(request.user, submission.lesson)
@@ -275,39 +481,31 @@ def submission_comment_create(request, submission_id: int):
     return Response(CodeCommentSerializer(comment).data, status=201)
 
 
-
-
-
-MAX_UPLOAD_MB = getattr(settings, "IDE_MAX_UPLOAD_MB", 25)  # override in settings if you like
+# ===========================================================================
+# CODE FILES
+# ===========================================================================
+MAX_UPLOAD_MB = getattr(settings, "IDE_MAX_UPLOAD_MB", 25)
 ALLOWED_EXTENSIONS = getattr(
     settings,
     "IDE_ALLOWED_EXTENSIONS",
-    # keep liberal; IDE often needs these
     {"py", "txt", "csv", "json", "xml", "yaml", "yml", "md", "html", "css", "js", "ts", "jsx", "tsx", "java", "kt", "c", "cpp", "h", "hpp", "cs", "go", "rs", "php", "sql", "sh", "ipynb", "png", "jpg", "jpeg", "gif", "svg", "pdf"}
 )
+
 
 def _ext_ok(name: str) -> bool:
     import os
     ext = os.path.splitext(name)[1].lower().lstrip(".")
     return (not ALLOWED_EXTENSIONS) or (ext in ALLOWED_EXTENSIONS)
 
-# -------- FILES --------
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def codefile_upload(request):
     """
-    Student: upload a file for IDE.
-    Content-Type: multipart/form-data
-      - file: (required) binary content
-      - lesson: <id|nullable>
-      - label: short description (optional)
-    Response: CodeFileSerializer (includes .url)
+    Student: upload a file for IDE (multipart/form-data).
+    Fields: file (required), lesson (optional), folder (optional), label (optional)
     """
-    parser_classes = (MultiPartParser, FormParser)  # DRF respects view.attr too
-    for p in parser_classes:
-        pass  # attribute marker; not used programmatically
-
     student = _get_student_for_user(request.user)
     if not student:
         return Response({"detail": "Student profile not found."}, status=403)
@@ -316,22 +514,29 @@ def codefile_upload(request):
     if not up:
         return Response({"detail": "file field is required (multipart/form-data)."}, status=400)
 
-    # size check
     if up.size > MAX_UPLOAD_MB * 1024 * 1024:
         return Response({"detail": f"File too large. Limit is {MAX_UPLOAD_MB} MB."}, status=413)
 
     if not _ext_ok(up.name):
         return Response({"detail": "File type not allowed."}, status=400)
 
-    # lesson (optional)
     lesson = None
     lesson_id = request.data.get("lesson")
     if lesson_id:
         lesson = get_object_or_404(Lesson, id=lesson_id)
 
+    folder = None
+    folder_id = request.data.get("folder")
+    if folder_id not in (None, "", 0, "0"):
+        try:
+            folder = Folder.objects.get(pk=folder_id, student=student)
+        except Folder.DoesNotExist:
+            return Response({"detail": "Folder not found."}, status=404)
+
     obj = CodeFile.objects.create(
         student=student,
         lesson=lesson,
+        folder=folder,
         label=(request.data.get("label") or "").strip()[:255],
         file=up,
         original_name=up.name[:255],
@@ -346,10 +551,7 @@ def codefile_upload(request):
 @authentication_classes([SessionTokenAuthentication])
 def codefile_list(request):
     """
-    Student: list own files (optional: filter by lesson).
-    Teachers: if ?lesson=<id> and user teaches that lesson, will list those students' files? -> NO.
-    Only the authenticated student can see their own files. Teachers can only view by direct id if teaches the lesson.
-    Query: ?lesson=<id>
+    Student: list own files. Optional filters: ?lesson=<id>, ?folder=<id|null>
     """
     student = _get_student_for_user(request.user)
     if not student:
@@ -359,72 +561,86 @@ def codefile_list(request):
     lesson_id = request.query_params.get("lesson")
     if lesson_id:
         qs = qs.filter(lesson_id=lesson_id)
+
+    if "folder" in request.query_params:
+        folder_id = request.query_params.get("folder")
+        if folder_id in ("null", ""):
+            qs = qs.filter(folder__isnull=True)
+        elif folder_id:
+            qs = qs.filter(folder_id=folder_id)
+
     return Response(CodeFileSerializer(qs, many=True, context={"request": request}).data)
 
 
-# ide/views.py
-@api_view(["GET"])
+@api_view(["GET", "PATCH"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def codefile_detail(request, file_id: int):
     """
-    Student: fetch own file metadata.
-    Teacher: can view metadata if they teach the attached lesson (if any).
+    GET: return file metadata.
+    PATCH: student-only — update the file's label or folder.
     """
     obj = get_object_or_404(CodeFile, id=file_id)
-
-    # owner student can view
     student = _get_student_for_user(request.user)
-    if student and obj.student_id == student.id:
-        return Response(CodeFileSerializer(obj, context={"request": request}).data)
 
-    # teacher can read only if the file is tied to a lesson they teach
-    if obj.lesson and user_teaches_lesson(request.user, obj.lesson):
-        return Response(CodeFileSerializer(obj, context={"request": request}).data)
+    if request.method == "GET":
+        if student and obj.student_id == student.id:
+            return Response(CodeFileSerializer(obj, context={"request": request}).data)
+        if obj.lesson and user_teaches_lesson(request.user, obj.lesson):
+            return Response(CodeFileSerializer(obj, context={"request": request}).data)
+        return Response({"detail": "Not allowed."}, status=403)
 
-    return Response({"detail": "Not allowed."}, status=403)
+    # PATCH
+    if not student or obj.student_id != student.id:
+        return Response({"detail": "Not allowed."}, status=403)
+
+    label = request.data.get("label")
+    if label is not None:
+        obj.label = (label or "").strip()[:255]
+
+    if "folder" in request.data:
+        folder_id = request.data.get("folder")
+        if folder_id in (None, "", "null", 0, "0"):
+            obj.folder = None
+        else:
+            try:
+                obj.folder = Folder.objects.get(pk=folder_id, student=student)
+            except Folder.DoesNotExist:
+                return Response({"detail": "Folder not found."}, status=404)
+
+    obj.save(update_fields=["label", "folder", "updated_at"])
+    return Response(CodeFileSerializer(obj, context={"request": request}).data)
 
 
 @api_view(["DELETE"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def codefile_delete(request, file_id: int):
-    """
-    Student: delete own file (removes both DB row and stored file).
-    Teachers: cannot delete student files.
-    """
     student = _get_student_for_user(request.user)
     if not student:
         return Response({"detail": "Student profile not found."}, status=403)
 
     obj = get_object_or_404(CodeFile, id=file_id, student=student)
 
-    # delete removes file from storage as well
     obj.file.delete(save=False)
     obj.delete()
     return Response(status=204)
 
 
-
-
-
-# ---------- Pagination ----------
+# ===========================================================================
+# TEACHER VIEWS  (unchanged)
+# ===========================================================================
 class QuickPagination(pagination.PageNumberPagination):
     page_size = 20
     page_size_query_param = "page_size"
     max_page_size = 100
 
-# ---------- Helpers ----------
+
 def _teacher_scoped_queryset(request):
-    """
-    Limit submissions to courses taught by the authenticated teacher
-    and (optionally) to the selected organization.
-    """
     teacher = _get_teacher_for_user(request.user)
     if not teacher:
         return None, Response({"detail": "Teacher profile not found."}, status=403)
 
-    # Optional org resolution & enforcement
     org, org_err = _resolve_org(request)
     if org_err:
         return None, org_err
@@ -439,24 +655,15 @@ def _teacher_scoped_queryset(request):
         .prefetch_related("comments")
         .filter(lesson__module__course__teacher=teacher)
     )
-    # If your Course has organization, also scope to org
     try:
         qs = qs.filter(lesson__module__course__organization=org)
     except Exception:
-        # If no org relation on Course, you can remove this filter
         pass
 
     return qs, None
 
+
 def _apply_filters(request, qs):
-    """
-    Filters:
-      - q: text search across student name/email, lesson name, course name
-      - class_id, classroom_id
-      - course_id
-      - lesson_id
-      - status (single or CSV)
-    """
     q = request.query_params.get("search", "").strip()
     course_id = request.query_params.get("course_id")
     lesson_id = request.query_params.get("lesson_id")
@@ -480,7 +687,6 @@ def _apply_filters(request, qs):
         qs = qs.filter(lesson_id=lesson_id)
 
     if class_id:
-        # Prefer course.classroom
         qs = qs.filter(
             Q(lesson__module__course__classroom_id=class_id)
             | Q(student__classroom_id=class_id)
@@ -498,7 +704,7 @@ def _apply_filters(request, qs):
 
     return qs
 
-# ---------- 1) Teacher list ----------
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey, IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
@@ -508,12 +714,10 @@ def teacher_submissions_list(request):
         return err
 
     qs = _apply_filters(request, qs)
-    # normalize title: trim + lower
     qs = qs.annotate(
         title_norm=Lower(Trim("title"))
-    ).exclude(title_norm="")  # optional: drop empty titles
+    ).exclude(title_norm="")
 
-    # keep ONLY latest per (student, lesson, title_norm)
     qs = (
         qs.order_by("student_id", "lesson_id", "title_norm", "-created_at", "-id")
         .distinct("student_id", "lesson_id", "title_norm")
@@ -524,7 +728,6 @@ def teacher_submissions_list(request):
     return paginator.get_paginated_response(ser.data)
 
 
-# ---------- 2) Detail ----------
 @api_view(["GET"])
 @permission_classes([HasAPIKey, IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
@@ -534,11 +737,9 @@ def teacher_submission_detail(request, pk: int):
         return err
     obj = get_object_or_404(qs, pk=pk)
     ser = TeacherCodeSubmissionDetailSerializer(obj, context={"request": request})
-    data = ser.data
-    return Response(data)
+    return Response(ser.data)
 
 
-# ---------- 3) Comments list/create ----------
 @api_view(["GET", "POST"])
 @permission_classes([HasAPIKey, IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
@@ -553,7 +754,6 @@ def teacher_submission_comments(request, pk: int):
         ser = TeacherCodeCommentSerializer(comments, many=True)
         return Response(ser.data)
 
-    # POST: create comment
     message = (request.data.get("message") or "").strip()
     if not message:
         return Response({"detail": "Message is required."}, status=400)
@@ -566,7 +766,7 @@ def teacher_submission_comments(request, pk: int):
     )
     return Response(TeacherCodeCommentSerializer(c).data, status=201)
 
-# ---------- 4) Grade ----------
+
 @api_view(["POST"])
 @permission_classes([HasAPIKey, IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
@@ -578,12 +778,10 @@ def teacher_submission_grade(request, pk: int):
 
     was_graded_before = (submission.status == CodeSubmission.Status.GRADED)
 
-    # data
     score = request.data.get("score")
     feedback = request.data.get("feedback", "")
     correction_code = request.data.get("correction_code", "")
 
-    # Basic validation
     try:
         score_val = None if score in (None, "") else float(score)
         if score_val is not None and (score_val < 0 or score_val > 1000):
@@ -604,75 +802,63 @@ def teacher_submission_grade(request, pk: int):
     submission.save(update_fields=[
         "score", "feedback", "correction_code", "status", "graded_by", "graded_at", "updated_at"
     ])
-    # ---------- GAMIFICATION EVENT LOG (GRADE TRANSITION) ----------
+
     if not was_graded_before:
         student = submission.student
         org = getattr(student, "organization", None)
         today = timezone.localdate()
-    def _log_after_commit():
-        try:
-            log_event(
-                student=student,
-                org=org,
-                event_type="exercise_graded",
-                value=1,
-                meta={
-                    "submission_id": submission.id,
-                    "lesson_id": submission.lesson_id,
-                    "score": submission.score,
-                    "graded_by": getattr(teacher, "id", None),
-                },
-                dedupe_key=f"exercise_graded:{submission.id}",
-            )
-            # optional: mastery threshold
-            if submission.score is not None and float(submission.score) >= 80:
+
+        def _log_after_commit():
+            try:
                 log_event(
                     student=student,
                     org=org,
-                    event_type="exercise_mastered",
+                    event_type="exercise_graded",
                     value=1,
-                    meta={"submission_id": submission.id, "score": submission.score},
-                    dedupe_key=f"exercise_mastered:{submission.id}",
+                    meta={
+                        "submission_id": submission.id,
+                        "lesson_id": submission.lesson_id,
+                        "score": submission.score,
+                        "graded_by": getattr(teacher, "id", None),
+                    },
+                    dedupe_key=f"exercise_graded:{submission.id}",
                 )
-            log_event(
-                student=student,
-                org=org,
-                event_type="daily_active",
-                value=1,
-                meta={"source": "teacher_submission_grade", "submission_id": submission.id},
-                dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
-            )
-            Streak.set_student_streak(student, org, 'daily_active', 'streak_champion')
-        except Exception:
-            logger.exception(
-                "Gamification on_commit failed (non-fatal)",
-                extra={"submission_id": submission.id, "lesson_id": submission.lesson_id},
-            )
-            return
-    if submission.lesson.module.course.course_type == "public":
-        transaction.on_commit(_log_after_commit)
-    # --------------------------------------------------------------
+                if submission.score is not None and float(submission.score) >= 80:
+                    log_event(
+                        student=student,
+                        org=org,
+                        event_type="exercise_mastered",
+                        value=1,
+                        meta={"submission_id": submission.id, "score": submission.score},
+                        dedupe_key=f"exercise_mastered:{submission.id}",
+                    )
+                log_event(
+                    student=student,
+                    org=org,
+                    event_type="daily_active",
+                    value=1,
+                    meta={"source": "teacher_submission_grade", "submission_id": submission.id},
+                    dedupe_key=f"daily_active:{student.id}:{today.isoformat()}",
+                )
+                Streak.set_student_streak(student, org, 'daily_active', 'streak_champion')
+            except Exception:
+                logger.exception(
+                    "Gamification on_commit failed (non-fatal)",
+                    extra={"submission_id": submission.id, "lesson_id": submission.lesson_id},
+                )
+
+        if submission.lesson.module.course.course_type == "public":
+            transaction.on_commit(_log_after_commit)
 
     return Response(TeacherCodeSubmissionDetailSerializer(submission).data, status=200)
-
-
-
 
 
 @api_view(["GET"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def student_submission_list(request):
-    """
-    Student: list their code submissions.
-    Teacher: list submissions for lessons they teach (optional, if you want).
-    Optional query params:
-      - lesson: int (filter by lesson id)
-    """
     lesson_id = request.query_params.get("lesson")
 
-    # If your project has a helper like user_is_student_profile / user_is_teacher_profile,
-    # use that. Otherwise implement a safe lookup.
     student_profile = _get_student_for_user(request.user)
     qs = CodeSubmission.objects.select_related("lesson", "student").prefetch_related("comments", "comments__author")
 
@@ -687,28 +873,16 @@ def student_submission_list(request):
         except ValueError:
             return Response({"detail": "lesson must be an integer."}, status=400)
 
-    # ordered newest first by model Meta, but we can be explicit
     qs = qs.order_by("-created_at")
 
     data = CodeSubmissionSerializer(qs, many=True).data
     return Response(data, status=200)
 
 
-
 @api_view(["PATCH"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def student_update_submission(request, submission_id: int):
-    """
-    Student can update (resubmit) their own submission.
-    - PATCH /api/code-ide/submissions/<id>
-    Body: { "title": "...", "language": "...", "code_text": "..." }
-
-    Rules:
-    - Must be owner student
-    - Marks status as "revised"
-    - Optionally clears previous grading fields
-    """
     student_profile = _get_student_for_user(request.user)
     if not student_profile:
         return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
@@ -726,7 +900,6 @@ def student_update_submission(request, submission_id: int):
 
     updated = ser.save(
         status=CodeSubmission.Status.REVISED,
-        # If you want to “invalidate” grading on resubmission:
         score=None,
         feedback="",
         correction_code="",
@@ -737,19 +910,10 @@ def student_update_submission(request, submission_id: int):
     return Response(CodeSubmissionSerializer(updated).data, status=status.HTTP_200_OK)
 
 
-
-
-
 @api_view(["GET"])
 @permission_classes([HasAPIKey, IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
 def resolve_upload_by_label(request):
-    """
-    GET /code-ide/uploads/resolve/?label=<label>
-
-    Returns the most recent CodeFile belonging to the authenticated student
-    whose label (or original_name as fallback) matches the given query param.
-    """
     label = request.query_params.get("label", "").strip()
 
     if not label:
@@ -771,7 +935,6 @@ def resolve_upload_by_label(request):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Match on label first, fall back to original_name
         qs = CodeFile.objects.filter(
             student=student_profile
         ).filter(
@@ -784,7 +947,6 @@ def resolve_upload_by_label(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-
     file_obj = qs.first()
 
     if file_obj is None:
@@ -793,9 +955,8 @@ def resolve_upload_by_label(request):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # Build absolute file URL
     file_url = request.build_absolute_uri(file_obj.file.url)
-    
+
     return Response({
         "id":            file_obj.id,
         "label":         file_obj.label,
@@ -804,6 +965,7 @@ def resolve_upload_by_label(request):
         "content_type":  file_obj.content_type,
         "size_bytes":    file_obj.size_bytes,
         "lesson":        file_obj.lesson_id,
+        "folder":        file_obj.folder_id,
     })
 
-
+    
