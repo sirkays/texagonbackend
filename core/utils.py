@@ -686,7 +686,7 @@ def _clean_excluded_students(data, course):
     ).values_list("student_id", flat=True)
 
     allowed_profile_ids = set(
-        StudentProfile.objects.filter(user_id__in=enrolled_user_ids)
+        StudentProfile.objects.filter(pk__in=enrolled_user_ids)
         .values_list("id", flat=True)
     )
 

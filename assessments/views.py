@@ -459,10 +459,13 @@ def available_tests(request):
             #                 secure=not settings.DEBUG, max_age=60*60*24*365)
             return resp
 
-        qs = Test.objects.filter(course_id__in=course_ids, start_at__isnull=False, end_at__isnull=False)
+        qs = Test.objects.filter(course_id__in=course_ids, start_at__isnull=False, end_at__isnull=False,
+                                 visibility="published")
 
         if not is_allowed_device:
             qs = qs.filter(require_browser_code=False)
+
+        qs = qs.exclude(excluded_users=student)
 
         course_filter = request.query_params.get("course")
         if course_filter:
@@ -1557,7 +1560,7 @@ def update_test(request, test_id: int):
             return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
 
         data = request.data or {}
-
+        print(data, " data coming")
         # ✅ FIXED
         if "mode" in data or "test_type" in data:
             mode = (data.get("mode") or data.get("test_type") or "").strip().lower()
@@ -1606,8 +1609,9 @@ def update_test(request, test_id: int):
         try:
             excluded_ids = _clean_excluded_students(data, test.course)
         except ValueError as ve:
+            print(ve)
             return Response({"detail": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
-
+        
         if excluded_ids is not None:
             test.excluded_users.set(excluded_ids)
 
@@ -1922,8 +1926,9 @@ def publish_test(request, test_id: int):
         data = request.data or {}
 
 
-        is_published = data.get('published', True)
-        
+        is_published = data.get("published", data.get("isPublished", True))
+        is_published = bool(is_published)
+                
         # Validate test has questions before publishing
         if is_published and not test.questions.exists():
             return Response({
@@ -2908,12 +2913,6 @@ def teacher_module_analytics(request):
 
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
-
-
-
 
 
 
