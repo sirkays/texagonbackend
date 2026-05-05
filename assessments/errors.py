@@ -14,7 +14,7 @@ class CBTError:
     TEST_NOT_FOUND     = "TEST_NOT_FOUND"
     ATTEMPT_NOT_FOUND  = "ATTEMPT_NOT_FOUND"
     SERVER_ERROR       = "SERVER_ERROR"
-    NO_ACTIVE_ATTEMPT  =  "NO_ACTIVE_ATTEMPT"
+    NO_ACTIVE_ATTEMPT  = "NO_ACTIVE_ATTEMPT"
 
 
 def err(code: str, detail: str, *, status_code: int = 400, **extra):

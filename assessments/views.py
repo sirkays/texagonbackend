@@ -798,9 +798,9 @@ def submit_test(request, test_id: int):
 
             if existing:
                 return _build_submission_response(existing, replayed=True)
-
+            print(existing, " exist....")
         mode = getattr(test, "mode", "online") or "online"
-
+        print(mode, " mode")
         raw_answers = payload.get("answers", [])
 
         if not isinstance(raw_answers, list):
@@ -837,7 +837,7 @@ def submit_test(request, test_id: int):
 
         active_attempt = None
         allowed_duration_seconds = None
-
+        print("reached ", raw_answers)
         if mode == "online":
             allowed_duration_seconds = (
                 int(getattr(test, "duration_minutes", 30) or 30) * 60
@@ -866,13 +866,40 @@ def submit_test(request, test_id: int):
                 )
 
             if not active_attempt or not active_attempt.started_at:
+                terminal_attempt = (
+                    TestAttempt.objects
+                    .filter(
+                        test=test,
+                        student=student,
+                        status__in=["submitted", "graded", "expired"]
+                    )
+                    .order_by("-submitted_at", "-updated_at", "-id")
+                    .first()
+                )
+
+                if terminal_attempt:
+                    if terminal_attempt.status in ["submitted", "graded"]:
+                        return _build_submission_response(
+                            terminal_attempt,
+                            replayed=True,
+                        )
+                    
+                    print("TIME_ELAPSED ",CBTError.TIME_ELAPSED)
+
+                    return err(
+                        CBTError.TIME_ELAPSED,
+                        "Time elapsed. Attempt already expired.",
+                        attempt_id=terminal_attempt.id,
+                        status="expired",
+                    )
+                print("NOecdkcmdkvmkv ",CBTError.NO_ACTIVE_ATTEMPT)
                 return err(
                     CBTError.NO_ACTIVE_ATTEMPT,
                     "No active online attempt found.",
                 )
 
             started_at = active_attempt.started_at
-
+            print(started_at, " dmkfmlv")
             if started_at + timedelta(seconds=allowed_duration_seconds) < now:
                 # ✅ Mark the active attempt as expired so it shows in past attempts
                 # and doesn't keep appearing in available tests.
@@ -891,16 +918,19 @@ def submit_test(request, test_id: int):
                         "client_submission_id",
                         "updated_at",
                     ])
-
+                print(CBTError.TIME_ELAPSED, " smvdkvmkvm")
                 return err(
                     CBTError.TIME_ELAPSED,
                     "Time elapsed. Submission rejected.",
+                    attempt_id=active_attempt.id,
+                    status="expired",
                 )
-
         # Membership check: accept only questions that belong to this test.
         test_question_ids = set(
             Question.objects.filter(test=test).values_list("id", flat=True)
         )
+
+        print(test_question_ids, " ids")
 
         total_points = (
             Question.objects.filter(test=test).aggregate(total=Sum("points"))["total"]
@@ -1098,11 +1128,13 @@ def submit_test(request, test_id: int):
             .exclude(pk=getattr(existing_same_run, "pk", None))
             .first()
         )
+        print(other_submitted, " other_submitted")
 
         if other_submitted:
             return err(
                 CBTError.ALREADY_SUBMITTED,
                 "User already performed this test.",
+                attempt_id=other_submitted.id,
                 existing_attempt_id=other_submitted.id,
             )
 
