@@ -143,7 +143,7 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
             .filter(
                 student=obj.student,
                 lesson=obj.lesson,
-                title=obj.title,
+                title__iexact=obj.title.strip(),
             )
             .exclude(id=obj.id)
         )
@@ -282,7 +282,7 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
         base = CodeSubmission.objects.filter(
             student=obj.student,
             lesson=obj.lesson,
-            title=title,
+            title__iexact=title,
         )
 
         latest_times = base.values("language").annotate(
