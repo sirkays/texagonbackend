@@ -7,6 +7,24 @@ from django.db.models import Max
 from django.db.models.functions import Lower, Trim
 
 
+# Map language → default extension. Used everywhere a file_name is missing.
+LANG_EXT_MAP = {
+    "javascript": "js",
+    "python": "py",
+    "html": "html",
+    "css": "css",
+    "java": "java",
+    "cpp": "cpp",
+}
+
+
+def default_filename_for(language: str, idx: int = 0) -> str:
+    """Generate a stable default filename for a legacy submission with no file_name."""
+    ext = LANG_EXT_MAP.get(language, language or "txt")
+    suffix = "" if idx == 0 else f"-{idx}"
+    return f"untitled{suffix}.{ext}"
+
+
 # ---------------------------------------------------------------------------
 # Folder
 # ---------------------------------------------------------------------------
@@ -25,7 +43,6 @@ class FolderSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "path", "snippet_count", "file_count", "created_at", "updated_at"]
 
     def get_snippet_count(self, obj):
-        # Avoid extra queries if prefetched
         if hasattr(obj, "_prefetched_snippets_count"):
             return obj._prefetched_snippets_count
         return obj.snippets.count()
@@ -39,7 +56,6 @@ class FolderSerializer(serializers.ModelSerializer):
         v = (value or "").strip()
         if not v:
             raise serializers.ValidationError("Folder name is required.")
-        # Disallow path separators in the name itself
         if "/" in v or "\\" in v:
             raise serializers.ValidationError("Folder name cannot contain '/' or '\\'.")
         if len(v) > 128:
@@ -104,7 +120,7 @@ class CodeSubmissionMiniSerializer(serializers.ModelSerializer):
     class Meta:
         model = CodeSubmission
         fields = [
-            "id", "title", "lesson", "student", "language",
+            "id", "title", "file_name", "lesson", "student", "language",
             "code_text", "created_at", "updated_at",
             "status", "score", "feedback", "correction_code",
         ]
@@ -186,6 +202,7 @@ class SubmissionListSerializer(serializers.ModelSerializer):
     class_name = serializers.SerializerMethodField()
     file_count = serializers.SerializerMethodField()
     file_languages = serializers.SerializerMethodField()
+    file_names = serializers.SerializerMethodField()
 
     class Meta:
         model = CodeSubmission
@@ -193,35 +210,54 @@ class SubmissionListSerializer(serializers.ModelSerializer):
             "id", "title", "created_at", "updated_at",
             "status", "language", "student_name",
             "lesson_title", "course_name", "class_name", "score",
-            "file_count", "file_languages",
+            "file_count", "file_languages", "file_names",
         ]
 
     def _get_sibling_qs(self, obj: CodeSubmission):
-        """Return all submissions sharing the same (student, lesson, title)."""
+        """All submissions sharing the same (student, lesson, title)."""
         title = (obj.title or "").strip()
         if not title:
-            return CodeSubmission.objects.none()
-        return CodeSubmission.objects.filter(
-            student=obj.student,
-            lesson=obj.lesson,
-        ).annotate(
-            title_norm=Lower(Trim("title")),
-        ).filter(
-            title_norm=title.lower().strip(),
+            return CodeSubmission.objects.filter(pk=obj.pk)
+        return (
+            CodeSubmission.objects
+            .filter(student=obj.student, lesson=obj.lesson)
+            .annotate(title_norm=Lower(Trim("title")))
+            .filter(title_norm=title.lower())
         )
 
     def get_file_count(self, obj: CodeSubmission) -> int:
         siblings = self._get_sibling_qs(obj)
-        langs = siblings.values_list("language", flat=True).distinct()
-        count = langs.count()
-        return max(count, 1)
+        # Count distinct logical files: prefer file_name, fall back to language for legacy rows
+        named_count = (
+            siblings.exclude(file_name="")
+            .values("file_name").distinct().count()
+        )
+        unnamed_langs = (
+            siblings.filter(file_name="")
+            .values_list("language", flat=True).distinct()
+        )
+        # Don't double-count a language that already has a named file with the same ext
+        return max(named_count + len(set(unnamed_langs)), 1)
 
     def get_file_languages(self, obj: CodeSubmission) -> list:
+        langs = list(self._get_sibling_qs(obj).values_list("language", flat=True).distinct())
+        return sorted(set(langs)) if langs else [obj.language]
+
+    def get_file_names(self, obj: CodeSubmission) -> list:
+        """Return the actual list of file names in this project (handy for the list page)."""
         siblings = self._get_sibling_qs(obj)
-        langs = list(siblings.values_list("language", flat=True).distinct())
-        if not langs:
-            return [obj.language]
-        return sorted(set(langs))
+        names = []
+        seen = set()
+        for sub in siblings.order_by("-created_at", "-id"):
+            name = (sub.file_name or "").strip()
+            if not name:
+                name = default_filename_for(sub.language)
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            names.append(name)
+        return names
 
     def get_title(self, obj: CodeSubmission):
         t = (obj.title or "").strip()
@@ -271,6 +307,13 @@ class TeacherCodeCommentSerializer(serializers.ModelSerializer):
 
 
 class TeacherCodeSubmissionMiniSerializer(serializers.ModelSerializer):
+    """
+    Per-file payload used inside `all_project_files`. We always populate
+    `file_name` (filling in a sensible default for legacy rows) so the
+    frontend never has to guess.
+    """
+    file_name = serializers.SerializerMethodField()
+
     class Meta:
         model = CodeSubmission
         fields = [
@@ -280,11 +323,19 @@ class TeacherCodeSubmissionMiniSerializer(serializers.ModelSerializer):
             "graded_at", "graded_by_id",
         ]
 
+    def get_file_name(self, obj):
+        name = (obj.file_name or "").strip()
+        if name:
+            return name
+        idx = self.context.get("legacy_idx", {}).get(obj.language, 0)
+        return default_filename_for(obj.language, idx)
+
 
 class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     student_id = serializers.IntegerField(source="student.id", read_only=True)
     title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    file_name = serializers.SerializerMethodField()
 
     lesson = serializers.SerializerMethodField()
     course = serializers.SerializerMethodField()
@@ -296,7 +347,7 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = CodeSubmission
         fields = [
-            "id", "title", "created_at", "updated_at",
+            "id", "title", "file_name", "created_at", "updated_at",
             "status", "language", "code_text",
             "score", "feedback", "correction_code",
             "graded_at", "graded_by_id",
@@ -307,14 +358,26 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
             "all_project_files",
         ]
 
+    def get_file_name(self, obj):
+        name = (obj.file_name or "").strip()
+        return name or default_filename_for(obj.language)
+
     def get_all_project_files(self, obj: CodeSubmission):
         """
-        Return ALL submissions sharing the same (student, lesson, title).
-        Groups by file_name (or by language for legacy submissions without file_name)
-        and returns the latest version of each file.
+        Return ALL submissions sharing the same (student, lesson, title)
+        as a list of project files, with the latest version of each file.
+
+        Grouping rules (in order):
+        1. If a row has `file_name` set, group by file_name.lower().
+        2. Otherwise (legacy rows), group by language and synthesize a
+           file_name (untitled.html, untitled-1.html, ...).
+
+        Result is sorted: HTML first (so the entry page is obvious), then
+        CSS, JS, then everything else alphabetically by file_name.
         """
         title = (obj.title or "").strip()
         if not title:
+            # Single submission with no title — return just itself.
             return [TeacherCodeSubmissionMiniSerializer(obj).data]
 
         base = CodeSubmission.objects.filter(
@@ -323,37 +386,65 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
             title__iexact=title,
         )
 
-        # Group by file_name if available, else by language (legacy)
-        # Get unique file identifiers
-        files = []
-        seen_keys = set()
+        # Group named files by file_name (case-insensitive). Latest wins.
+        named_by_key = {}
+        for sub in base.exclude(file_name="").order_by("-created_at", "-id"):
+            key = sub.file_name.strip().lower()
+            if key and key not in named_by_key:
+                named_by_key[key] = sub
 
-        # First pass: submissions with file_name set
-        named = base.exclude(file_name="").order_by("-created_at", "-id")
-        for sub in named:
-            key = sub.file_name.lower()
-            if key not in seen_keys:
-                seen_keys.add(key)
-                files.append(TeacherCodeSubmissionMiniSerializer(sub).data)
+        # Group legacy (no file_name) rows by language. Latest wins per language.
+        # If a language already has named file(s), don't synthesize a duplicate
+        # unless the legacy row is genuinely newer with no file_name equivalent.
+        legacy_by_lang = {}
+        for sub in base.filter(file_name="").order_by("-created_at", "-id"):
+            if sub.language not in legacy_by_lang:
+                legacy_by_lang[sub.language] = sub
 
-        # Second pass: legacy submissions (no file_name) — group by language
-        unnamed = base.filter(file_name="").order_by("-created_at", "-id")
-        for sub in unnamed:
-            key = f"__lang__{sub.language}"
-            if key not in seen_keys:
-                seen_keys.add(key)
-                data = TeacherCodeSubmissionMiniSerializer(sub).data
-                # Auto-assign a file_name for the frontend
-                ext_map = {"javascript": "js", "python": "py", "html": "html",
-                           "css": "css", "java": "java", "cpp": "cpp"}
-                ext = ext_map.get(sub.language, sub.language)
-                data["file_name"] = f"untitled.{ext}"
-                files.append(data)
+        # Build the file list. Track legacy index per language for naming.
+        legacy_idx_per_lang = {}
+        # Pre-count how many named files per language (so legacy synth doesn't clash with index 0)
+        named_lang_count = {}
+        for sub in named_by_key.values():
+            named_lang_count[sub.language] = named_lang_count.get(sub.language, 0) + 1
 
-        if not files:
-            files = [TeacherCodeSubmissionMiniSerializer(obj).data]
+        files_payload = []
 
-        return files
+        # 1) Named files first, sorted by language priority, then name
+        def lang_rank(lang: str) -> int:
+            return {"html": 0, "css": 1, "javascript": 2}.get(lang, 3)
+
+        named_sorted = sorted(
+            named_by_key.values(),
+            key=lambda s: (lang_rank(s.language), (s.file_name or "").lower(), -s.id),
+        )
+        for sub in named_sorted:
+            files_payload.append(
+                TeacherCodeSubmissionMiniSerializer(sub).data
+            )
+
+        # 2) Legacy files: only emit if no named file of that language already exists,
+        #    OR include them all — being defensive: include them all but disambiguate names.
+        for lang, sub in legacy_by_lang.items():
+            idx = named_lang_count.get(lang, 0) + legacy_idx_per_lang.get(lang, 0)
+            legacy_idx_per_lang[lang] = legacy_idx_per_lang.get(lang, 0) + 1
+            data = TeacherCodeSubmissionMiniSerializer(
+                sub, context={"legacy_idx": {lang: idx}}
+            ).data
+            files_payload.append(data)
+
+        # Defensive fallback: if somehow nothing was assembled, return the obj itself.
+        if not files_payload:
+            files_payload = [TeacherCodeSubmissionMiniSerializer(obj).data]
+
+        # Final sort: HTML first, then CSS, then JS, then others alphabetical.
+        files_payload.sort(
+            key=lambda d: (
+                lang_rank(d.get("language", "")),
+                (d.get("file_name") or "").lower(),
+            )
+        )
+        return files_payload
 
     def get_latest_same_title_submission(self, obj: CodeSubmission):
         title = (obj.title or "").strip()
