@@ -27,6 +27,7 @@ class PrivateTutoring(TimeStampedModel):
     course = models.ForeignKey("learning.Course", on_delete=models.PROTECT, related_name="private_tutoring")
     rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
     tutoring_duration_days = models.PositiveIntegerField(default=24) # NUMBER OF DAYS THE TUTORING WILL LAST
+    hours_per_day = models.FloatField(default=2.0)
     notes = models.CharField(max_length=225)
     active = models.BooleanField(default=True)
 
@@ -60,6 +61,9 @@ class TutoringBooking(TimeStampedModel):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     notes = models.TextField(blank=True)
     completed_date = models.DateTimeField(blank=True, null=True)
+    # Daily lesson time range chosen by parent (e.g. 15:00 – 17:00)
+    session_start_time = models.TimeField(blank=True, null=True)
+    session_end_time = models.TimeField(blank=True, null=True)
 
 
 

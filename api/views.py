@@ -733,6 +733,16 @@ def _get_parent_for_user(user):
         return None
 
 
+def _fmt_time(val) -> str | None:
+    """Safely format a TimeField value (datetime.time or HH:MM[:SS] string) → 'HH:MM'."""
+    if val is None:
+        return None
+    if hasattr(val, "strftime"):
+        return val.strftime("%H:%M")
+    # Already a string like '15:00' or '15:00:00'
+    return str(val)[:5]
+
+
 def _serialize_booking(b: TutoringBooking):
     return {
         "id": b.id,
@@ -743,6 +753,8 @@ def _serialize_booking(b: TutoringBooking):
         "price": str(b.price),
         "status": b.status,
         "notes": b.notes or "",
+        "session_start_time": _fmt_time(b.session_start_time),
+        "session_end_time": _fmt_time(b.session_end_time),
         "created_at": getattr(b, "created", None) or getattr(b, "created_at", None),
         "updated_at": getattr(b, "modified", None) or getattr(b, "updated_at", None),
     }
@@ -768,6 +780,8 @@ def upsert_tutoring_booking(request):
         // Booking attributes
         "duration_hours": <int>,         // optional, default 2
         "notes": "<string>",             // optional
+        "session_start_time": "HH:MM",   // optional – daily lesson start (e.g. "15:00")
+        "session_end_time": "HH:MM",     // optional – daily lesson end   (e.g. "17:00")
         "status": "pending|confirmed|completed|cancelled" // optional (parents usually set pending)
 
         // To update an existing booking (must belong to this parent/child):
@@ -878,6 +892,10 @@ def upsert_tutoring_booking(request):
 
         notes = data.get("notes", "") or ""
 
+        # ---- Time range ----
+        session_start_time = data.get("session_start_time") or None
+        session_end_time = data.get("session_end_time") or None
+
         # Parents usually should not set arbitrary statuses, but we allow an optional override.
         status_choice = (data.get("status") or TutoringBooking.Status.PENDING)
         valid_statuses = {c[0] for c in TutoringBooking.Status.choices}
@@ -922,6 +940,10 @@ def upsert_tutoring_booking(request):
                 booking.price = price
                 booking.status = status_choice
                 booking.notes = notes
+                if session_start_time is not None:
+                    booking.session_start_time = session_start_time
+                if session_end_time is not None:
+                    booking.session_end_time = session_end_time
                 booking.save()
 
             else:
@@ -934,6 +956,8 @@ def upsert_tutoring_booking(request):
                     price=price,
                     status=status_choice,
                     notes=notes,
+                    session_start_time=session_start_time,
+                    session_end_time=session_end_time,
                 )
                 amount = price
 
@@ -958,6 +982,7 @@ def upsert_tutoring_booking(request):
                         status=status.HTTP_200_OK if booking_id else status.HTTP_201_CREATED)
 
     except Exception as e:
+        print(e)
         payload = {
             "detail": "Error creating/updating tutoring booking.",
             "error": f"{type(e).__name__}: {e}",
@@ -1083,7 +1108,7 @@ def _teacher_card_dict(pt: PrivateTutoring):
     total_sessions = TutoringBooking.objects.filter(teacher=teacher).count()
     return {
         "id": pt.id,
-        "title":pt.title,
+        "title": pt.title,
         "teacher_id": teacher.id,
         "teacher_name": teacher.user.get_full_name() or teacher.user.email,
         "course_id": course.id,
@@ -1092,6 +1117,8 @@ def _teacher_card_dict(pt: PrivateTutoring):
         "rating": float(rating),
         "experience": f"{getattr(teacher, 'experience', 0)}+ years",
         "rate": f"₦{pt.rate_per_hour}/month",
+        "hours_per_day": pt.hours_per_day,
+        "tutoring_duration_days": pt.tutoring_duration_days,
         "languages": language_names,
         "availability_days": availability_days,  # ["Mon","Wed","Fri"]
         "verified": True,
@@ -1115,13 +1142,19 @@ def _booking_dict(b: TutoringBooking):
     status_label = b.status.capitalize()
 
     # No strict times stored in TutoringBooking model; adapt if you add schedule fields.
+    start_str = _fmt_time(b.session_start_time)
+    end_str   = _fmt_time(b.session_end_time)
+    time_display = f"{start_str} – {end_str}" if (start_str and end_str) else (start_str or "—")
+
     return {
         "id": b.id,
         "child": b.student.user.get_full_name() or b.student.user.email,
         "tutor": tutor_name,
         "subject": course_title,
         "date": (b.created_at or b.created or timezone.now()).date().isoformat(),
-        "time": "—",
+        "time": time_display,
+        "session_start_time": start_str,
+        "session_end_time": end_str,
         "type": "One-on-One",
         "status": status_label,
         "meetingLink": None,

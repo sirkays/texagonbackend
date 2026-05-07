@@ -12,7 +12,7 @@ from rest_framework import status
 
 from api.authentication import SessionTokenAuthentication  # adjust import path
 from rest_framework_api_key.permissions import HasAPIKey  # adjust import path
-from .models import LiveSession  # adjust app label if different
+from .models import LiveSession, PrivateTutoring, AvailableDay  # adjust app label if different
 from academics.models import TeacherProfile  # adjust if needed
 from learning.models import Course,Enrollment
 from core.utils import _get_teacher_for_user, _get_student_for_user
@@ -449,4 +449,88 @@ def update_live_session(request, session_id):
 
 
 
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def update_private_tutoring(request, session_id):
+    """
+    Partially update a PrivateTutoring record.
+    Only the teacher who created it may update it.
 
+    Allowed PATCH body fields (all optional):
+    {
+        "title": "<string>",
+        "rate_per_hour": <decimal>,
+        "tutoring_duration_days": <int>,
+        "hours_per_day": <float>,
+        "notes": "<string>",
+        "available_days": ["monday", "friday"],  # replaces all existing days
+        "active": true|false
+    }
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            pt = PrivateTutoring.objects.prefetch_related("available_days").get(pk=session_id)
+        except PrivateTutoring.DoesNotExist:
+            return Response({"detail": "Private tutoring not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if pt.teacher_id != teacher.id:
+            return Response({"detail": "You are not authorized to update this private tutoring."},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data
+        scalar_fields = ["title", "rate_per_hour", "tutoring_duration_days", "hours_per_day", "notes", "active"]
+        updated = False
+
+        for field in scalar_fields:
+            if field in data:
+                setattr(pt, field, data[field])
+                updated = True
+
+        if updated:
+            pt.save()
+
+        # Replace available_days if provided
+        if "available_days" in data:
+            new_days = data["available_days"]  # list of {"day": "monday"} or plain strings
+            pt.available_days.all().delete()
+            valid_days = {c[0] for c in AvailableDay.Day.choices}
+            for entry in new_days:
+                day_val = entry.get("day") if isinstance(entry, dict) else entry
+                if day_val in valid_days:
+                    AvailableDay.objects.create(private_tutoring=pt, day=day_val)
+            updated = True
+
+        if not updated:
+            return Response({"detail": "No valid fields provided for update."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        payload = {
+            "id": pt.id,
+            "title": pt.title,
+            "course": pt.course_id,
+            "course_name": getattr(pt.course, "name", ""),
+            "rate_per_hour": str(pt.rate_per_hour),
+            "tutoring_duration_days": pt.tutoring_duration_days,
+            "hours_per_day": pt.hours_per_day,
+            "notes": pt.notes,
+            "active": pt.active,
+            "available_days": [{"day": d.day} for d in pt.available_days.all()],
+            "created_at": pt.created_at.isoformat() if hasattr(pt, "created_at") else None,
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        payload = {
+            "detail": "Error updating private tutoring.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
+            payload["traceback"] = traceback.format_exc()
+        return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

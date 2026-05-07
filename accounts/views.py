@@ -1649,12 +1649,14 @@ def parent_overview(request):
 
     try:
         try:
+            print(request.user, " scndjcndkjcndj ")
             parent_profile = ParentProfile.objects.select_related("organization").get(user=request.user)
         except ParentProfile.DoesNotExist:
             return Response(
                 {"detail": "Parent profile not found for this user."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        print(parent_profile, " end...")
 
         # Get all children linked to this parent
         children_links = (
@@ -1662,6 +1664,8 @@ def parent_overview(request):
             .filter(parent=parent_profile)
             .select_related("student__user", "student__current_classroom")
         )
+
+        print(children_links, " neeeeeee")
 
         if not children_links.exists():
             return Response(
