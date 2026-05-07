@@ -139,6 +139,8 @@ from cloudinary_storage.storage import RawMediaCloudinaryStorage,MediaCloudinary
 from .utils.image import convert_to_webp
 from core.storage_backends import lesson_file_storage, dynamic_storage
 from store.models import Review, Category, Product, ProductImage
+from .models import CodeSnippet, CodeSubmission, CodeComment, CodeFile, Folder
+from django.db.models.functions import Lower, Trim
 
 
 # --- Model classes collected from project ---
@@ -5898,58 +5900,6 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
 
 
 
-class TieringService:
-    """
-    Helper you can call from anywhere (views/serializers/model methods).
-    """
-    @staticmethod
-    def level_for_xp(xp: int) -> dict:
-        xp = max(int(xp or 0), 0)
-
-        # Current tier = highest threshold <= xp
-        current = (
-            Tier.objects
-            .filter(threshold_xp__lte=xp)
-            .order_by("-threshold_xp")
-            .first()
-        )
-
-        # If DB empty, fallback
-        if not current:
-            return {
-                "level_name": "Newbie",
-                "next_threshold": None,
-                "xp_to_next": 0,
-                "progress_to_next_pct": 100,
-            }
-
-        # Next tier = smallest threshold > xp
-        nxt = (
-            Tier.objects
-            .filter(threshold_xp__gt=current.threshold_xp)
-            .order_by("threshold_xp")
-            .first()
-        )
-
-        next_threshold = nxt.threshold_xp if nxt else None
-        xp_to_next = max(next_threshold - xp, 0) if next_threshold is not None else 0
-
-        floor = current.threshold_xp
-        if next_threshold is None:
-            pct = 100
-        else:
-            span = max(next_threshold - floor, 1)
-            pct = int(((xp - floor) / span) * 100)
-
-        return {
-            "level_name": current.name,
-            "next_threshold": next_threshold,
-            "xp_to_next": xp_to_next,
-            "progress_to_next_pct": pct,
-        }
-
-
-
 class OurProgram(models.Model):
     name = models.CharField(max_length=225)
     active = models.BooleanField(default=True)
@@ -6877,3 +6827,633 @@ class ProductAdminSerializer(serializers.ModelSerializer):
             validated_data["slug"] = slug or "slug001"
 
         return super().create(validated_data)
+
+
+
+class TestAttempt(TimeStampedModel):
+    test = models.ForeignKey(Test, on_delete=models.CASCADE, related_name="attempts")
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="test_attempts")
+    started_at = models.DateTimeField(default=timezone.now)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    score = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    answers = models.JSONField(default=dict, blank=True)  # {question_id: ["A", ...] or "True"/"text"}
+    status = models.CharField(max_length=16, default="in_progress")  # in_progress, submitted, graded
+    client_submission_id = models.UUIDField(null=True, blank=True, db_index=True)
+    auto_submitted = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ("test", "student", "started_at")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "client_submission_id"],
+                condition=models.Q(client_submission_id__isnull=False),
+                name="uniq_student_client_submission_id",
+            ),
+        ]
+
+
+
+class Folder(TimeStampedModel):
+    """
+    A virtual folder owned by a student. Used by the IDE to organize
+    code snippets and uploaded files (CodeFile). Folders can be nested
+    via the optional `parent` self-relation.
+
+    Notes:
+    - Folders are scoped to a student.
+    - (student, parent, name) is unique so a student cannot have two
+      sibling folders with the same name.
+    """
+    student = models.ForeignKey(
+        StudentProfile,
+        on_delete=models.CASCADE,
+        related_name="folders",
+    )
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="children",
+    )
+    name = models.CharField(max_length=128)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "parent", "name"],
+                name="uniq_folder_per_parent_per_student",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["student", "parent"]),
+        ]
+
+    def __str__(self):
+        return f"[Folder] {self.name} (student={self.student_id})"
+
+    @property
+    def path(self) -> str:
+        """Return human-readable path like 'projects/site/css'."""
+        parts = [self.name]
+        node = self.parent
+        # safety bound so a corrupted cycle can't loop forever
+        for _ in range(64):
+            if node is None:
+                break
+            parts.append(node.name)
+            node = node.parent
+        return "/".join(reversed(parts))
+
+
+
+class CodeSnippet(TimeStampedModel):
+    """
+    Saved code drafts (student only). Not necessarily submitted.
+    """
+    class LANGUAGE_TYPE(models.TextChoices):
+        JAVASCRIPT = "javascript", "javascript"
+        HTML = "html", "html"
+        CSS = "css", "css"
+        PYTHON = "python", "python"
+        JAVA = "java", "java"
+
+    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="code_snippets")
+    lesson = models.ForeignKey(Lesson, on_delete=models.SET_NULL, null=True, blank=True, related_name="code_snippets")
+    folder = models.ForeignKey(
+        Folder,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="snippets",
+    )
+    title = models.CharField(max_length=255, blank=True)
+    language = models.CharField(max_length=64, choices=LANGUAGE_TYPE.choices, default=LANGUAGE_TYPE.HTML)
+    code_text = models.TextField()
+    meta = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["student", "folder"]),
+            models.Index(fields=["student", "title", "language"]),
+        ]
+
+    def __str__(self):
+        return f"[Snippet] {self.student_id} {self.language} {self.created_at:%Y-%m-%d}"
+
+
+
+class CodeSubmission(TimeStampedModel):
+    """
+    Submitted code by lesson (student). A teacher can grade/correct.
+    """
+    class LANGUAGE_TYPE(models.TextChoices):
+        JAVASCRIPT = "javascript", "javascript"
+        HTML = "html", "html"
+        CSS = "css", "css"
+        PYTHON = "python", "python"
+        JAVA = "java", "java"
+
+    class Status(models.TextChoices):
+        SUBMITTED = "submitted", "Submitted"
+        GRADED = "graded", "Graded"
+        REVISED = "revised", "Revised"
+
+    title = models.CharField(max_length=255, blank=True, null=True)
+    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="code_submissions")
+    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="code_submissions")
+
+    language = models.CharField(max_length=64, choices=LANGUAGE_TYPE.choices, default=LANGUAGE_TYPE.HTML)
+    code_text = models.TextField()
+
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.SUBMITTED)
+
+    # grading / corrections
+    score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    feedback = models.TextField(blank=True)
+    correction_code = models.TextField(blank=True)
+    graded_by = models.ForeignKey(TeacherProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="graded_code_submissions")
+    graded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["lesson", "student"])]
+
+    def __str__(self):
+        return f"[Submission] lesson={self.lesson_id} student={self.student_id} status={self.status}"
+
+
+
+class CodeFile(TimeStampedModel):
+    """
+    Binary/text file a student can upload for use in the code IDE.
+    """
+    student = models.ForeignKey(
+        StudentProfile, on_delete=models.CASCADE, related_name="code_files"
+    )
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.SET_NULL, null=True, blank=True, related_name="code_files"
+    )
+    folder = models.ForeignKey(
+        Folder,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="files",
+    )
+    label = models.CharField(max_length=255, blank=True)
+    file = models.FileField(upload_to=codefile_upload_to, max_length=512)
+    original_name = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=127, blank=True)
+    size_bytes = models.BigIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["lesson", "student"]),
+            models.Index(fields=["student", "folder"]),
+        ]
+
+    def __str__(self):
+        return f"[CodeFile] student={self.student_id} name={self.original_name}"
+
+    @property
+    def url(self) -> str:
+        try:
+            return self.file.url
+        except Exception:
+            return ""
+
+
+
+class FolderSerializer(serializers.ModelSerializer):
+    path = serializers.CharField(read_only=True)
+    snippet_count = serializers.SerializerMethodField()
+    file_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Folder
+        fields = [
+            "id", "name", "parent", "path",
+            "snippet_count", "file_count",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "path", "snippet_count", "file_count", "created_at", "updated_at"]
+
+    def get_snippet_count(self, obj):
+        # Avoid extra queries if prefetched
+        if hasattr(obj, "_prefetched_snippets_count"):
+            return obj._prefetched_snippets_count
+        return obj.snippets.count()
+
+    def get_file_count(self, obj):
+        if hasattr(obj, "_prefetched_files_count"):
+            return obj._prefetched_files_count
+        return obj.files.count()
+
+    def validate_name(self, value):
+        v = (value or "").strip()
+        if not v:
+            raise serializers.ValidationError("Folder name is required.")
+        # Disallow path separators in the name itself
+        if "/" in v or "\\" in v:
+            raise serializers.ValidationError("Folder name cannot contain '/' or '\\'.")
+        if len(v) > 128:
+            raise serializers.ValidationError("Folder name too long.")
+        return v
+
+
+
+class CodeFileSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = CodeFile
+        fields = [
+            "id", "created_at", "updated_at",
+            "student", "lesson", "folder", "label",
+            "original_name", "content_type", "size_bytes",
+            "url",
+        ]
+        read_only_fields = [
+            "id", "created_at", "updated_at", "student",
+            "original_name", "content_type", "size_bytes", "url",
+        ]
+
+    def get_url(self, obj):
+        request = self.context.get("request")
+        file_url = obj.url
+        if request is not None and file_url:
+            return request.build_absolute_uri(file_url)
+        return file_url
+
+
+
+class CodeSubmissionSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    comments = CodeCommentSerializer(many=True, read_only=True)
+
+    graded_by_name = serializers.SerializerMethodField()
+    latest_same_title_submission = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id", "title", "lesson", "student", "language", "code_text",
+            "status", "score", "feedback", "correction_code",
+            "graded_by", "graded_by_name", "graded_at",
+            "created_at", "updated_at", "comments",
+            "latest_same_title_submission",
+        ]
+
+    def get_graded_by_name(self, obj):
+        if not obj.graded_by:
+            return None
+        user = getattr(obj.graded_by, "user", None)
+        if user:
+            return user.get_full_name() or user.username or user.email
+        return str(obj.graded_by)
+
+    def get_latest_same_title_submission(self, obj):
+        if not obj.title:
+            return {}
+
+        base = (
+            CodeSubmission.objects
+            .filter(
+                student=obj.student,
+                lesson=obj.lesson,
+                title__iexact=obj.title.strip(),
+            )
+            .exclude(id=obj.id)
+        )
+
+        latest_times = (
+            base.values("language")
+            .annotate(latest_created_at=Max("created_at"))
+        )
+
+        if not latest_times:
+            return {}
+
+        out = {}
+        for row in latest_times:
+            lang = row["language"]
+            dt = row["latest_created_at"]
+            latest_obj = (
+                base.filter(language=lang, created_at=dt)
+                .order_by("-created_at", "-id")
+                .first()
+            )
+            if latest_obj:
+                out[lang] = CodeSubmissionMiniSerializer(latest_obj).data
+
+        return out
+
+
+
+class SubmissionListSerializer(serializers.ModelSerializer):
+    title = serializers.SerializerMethodField()
+    student_name = serializers.SerializerMethodField()
+    lesson_title = serializers.CharField(source="lesson.name", read_only=True)
+    course_name = serializers.SerializerMethodField()
+    class_name = serializers.SerializerMethodField()
+    file_count = serializers.SerializerMethodField()
+    file_languages = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id", "title", "created_at", "updated_at",
+            "status", "language", "student_name",
+            "lesson_title", "course_name", "class_name", "score",
+            "file_count", "file_languages",
+        ]
+
+    def _get_sibling_qs(self, obj: CodeSubmission):
+        """Return all submissions sharing the same (student, lesson, title)."""
+        title = (obj.title or "").strip()
+        if not title:
+            return CodeSubmission.objects.none()
+        return CodeSubmission.objects.filter(
+            student=obj.student,
+            lesson=obj.lesson,
+        ).annotate(
+            title_norm=Lower(Trim("title")),
+        ).filter(
+            title_norm=title.lower().strip(),
+        )
+
+    def get_file_count(self, obj: CodeSubmission) -> int:
+        siblings = self._get_sibling_qs(obj)
+        langs = siblings.values_list("language", flat=True).distinct()
+        count = langs.count()
+        return max(count, 1)
+
+    def get_file_languages(self, obj: CodeSubmission) -> list:
+        siblings = self._get_sibling_qs(obj)
+        langs = list(siblings.values_list("language", flat=True).distinct())
+        if not langs:
+            return [obj.language]
+        return sorted(set(langs))
+
+    def get_title(self, obj: CodeSubmission):
+        t = (obj.title or "").strip()
+        return t or None
+
+    def get_student_name(self, obj: CodeSubmission) -> str:
+        u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
+        if u.strip():
+            return u
+        return getattr(getattr(obj.student, "user", None), "email", "") or f"student-{obj.student_id}"
+
+    def get_course_name(self, obj: CodeSubmission) -> str:
+        try:
+            return obj.lesson.module.course.name
+        except Exception:
+            return ""
+
+    def get_class_name(self, obj: CodeSubmission) -> str:
+        try:
+            room = obj.lesson.module.course.classroom
+            if room:
+                return room.name
+        except Exception:
+            pass
+        try:
+            room = obj.student.classroom
+            if room:
+                return room.name
+        except Exception:
+            pass
+        return ""
+
+
+
+class TeacherCodeCommentSerializer(serializers.ModelSerializer):
+    author_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CodeComment
+        fields = ["id", "created_at", "author", "author_role", "author_name", "message"]
+
+    def get_author_name(self, obj):
+        u = getattr(obj, "author", None)
+        if not u:
+            return ""
+        full = (getattr(u, "get_full_name", lambda: "")() or "").strip()
+        return full or u.email or f"user-{getattr(u, 'pk', '')}"
+
+
+
+class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    student_id = serializers.IntegerField(source="student.id", read_only=True)
+    title = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    lesson = serializers.SerializerMethodField()
+    course = serializers.SerializerMethodField()
+    classroom = serializers.SerializerMethodField()
+    comments = TeacherCodeCommentSerializer(many=True, read_only=True)
+    latest_same_title_submission = serializers.SerializerMethodField()
+    all_project_files = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CodeSubmission
+        fields = [
+            "id", "title", "created_at", "updated_at",
+            "status", "language", "code_text",
+            "score", "feedback", "correction_code",
+            "graded_at", "graded_by_id",
+            "student_id", "student_name",
+            "lesson", "course", "classroom",
+            "comments",
+            "latest_same_title_submission",
+            "all_project_files",
+        ]
+
+    def get_all_project_files(self, obj: CodeSubmission):
+        """
+        Return ALL submissions sharing the same (student, lesson, title)
+        — one per language (the latest). This gives the teacher the
+        complete multi-file project in a single response.
+        """
+        title = (obj.title or "").strip()
+        if not title:
+            return [TeacherCodeSubmissionMiniSerializer(obj).data]
+
+        base = CodeSubmission.objects.filter(
+            student=obj.student,
+            lesson=obj.lesson,
+            title__iexact=title,
+        )
+
+        latest_times = base.values("language").annotate(
+            latest_created_at=Max("created_at")
+        )
+
+        files = []
+        for row in latest_times:
+            lang = row["language"]
+            dt = row["latest_created_at"]
+            latest_obj = (
+                base.filter(language=lang, created_at=dt)
+                .order_by("-created_at", "-id")
+                .first()
+            )
+            if latest_obj:
+                files.append(TeacherCodeSubmissionMiniSerializer(latest_obj).data)
+
+        # Fallback: if nothing found, return at least the current submission
+        if not files:
+            files = [TeacherCodeSubmissionMiniSerializer(obj).data]
+
+        return files
+
+    def get_latest_same_title_submission(self, obj: CodeSubmission):
+        title = (obj.title or "").strip()
+        if not title:
+            return {}
+
+        base = CodeSubmission.objects.filter(
+            student=obj.student,
+            lesson=obj.lesson,
+            title__iexact=title,
+        )
+
+        latest_times = base.values("language").annotate(
+            latest_created_at=Max("created_at")
+        )
+
+        out = {}
+        for row in latest_times:
+            lang = row["language"]
+            dt = row["latest_created_at"]
+            latest_obj = (
+                base.filter(language=lang, created_at=dt)
+                .order_by("-created_at", "-id")
+                .first()
+            )
+            if not latest_obj or latest_obj.id == obj.id:
+                continue
+            out[lang] = TeacherCodeSubmissionMiniSerializer(latest_obj).data
+        return out
+
+    def get_student_name(self, obj: CodeSubmission) -> str:
+        u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
+        if u.strip():
+            return u
+        return getattr(getattr(obj.student, "user", None), "email", "") or f"student-{obj.student_id}"
+
+    def get_lesson(self, obj):
+        l = obj.lesson
+        return {"id": getattr(l, "id", None), "title": getattr(l, "name", "")} if l else {"id": None, "title": ""}
+
+    def get_course(self, obj):
+        try:
+            c = obj.lesson.module.course
+        except Exception:
+            c = None
+        return {"id": getattr(c, "id", None), "name": getattr(c, "name", "")} if c else {"id": None, "name": ""}
+
+    def get_classroom(self, obj):
+        try:
+            room = obj.lesson.module.course.classroom
+            if room:
+                return {"id": room.id, "name": room.name}
+        except Exception:
+            pass
+        try:
+            room = obj.student.classroom
+            if room:
+                return {"id": room.id, "name": room.name}
+        except Exception:
+            pass
+        return {"id": None, "name": ""}
+
+
+
+class TieringService:
+    """
+    Helper you can call from anywhere (views/serializers/model methods).
+    """
+    @staticmethod
+    def level_for_xp(xp: int) -> dict:
+        xp = max(int(xp or 0), 0)
+
+        # Current tier = highest threshold <= xp
+        current = (
+            Tier.objects
+            .filter(threshold_xp__lte=xp)
+            .order_by("-threshold_xp")
+            .first()
+        )
+
+        # If DB empty, fallback
+        if not current:
+            return {
+                "level_name": "Newbie",
+                "next_threshold": None,
+                "xp_to_next": 0,
+                "progress_to_next_pct": 100,
+            }
+
+        # Next tier = smallest threshold > xp
+        nxt = (
+            Tier.objects
+            .filter(threshold_xp__gt=current.threshold_xp)
+            .order_by("threshold_xp")
+            .first()
+        )
+
+        next_threshold = nxt.threshold_xp if nxt else None
+        xp_to_next = max(next_threshold - xp, 0) if next_threshold is not None else 0
+
+        floor = current.threshold_xp
+        if next_threshold is None:
+            pct = 100
+        else:
+            span = max(next_threshold - floor, 1)
+            pct = int(((xp - floor) / span) * 100)
+
+        return {
+            "level_name": current.name,
+            "next_threshold": next_threshold,
+            "xp_to_next": xp_to_next,
+            "progress_to_next_pct": pct,
+        }
+
+
+
+class PrivateTutoring(TimeStampedModel):
+    title = models.CharField(max_length=250, default="My Private Tutoring")
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="private_tutoring")
+    course = models.ForeignKey("learning.Course", on_delete=models.PROTECT, related_name="private_tutoring")
+    rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
+    tutoring_duration_days = models.PositiveIntegerField(default=24) # NUMBER OF DAYS THE TUTORING WILL LAST
+    hours_per_day = models.FloatField(default=2.0)
+    notes = models.CharField(max_length=225)
+    active = models.BooleanField(default=True)
+
+
+
+class TutoringBooking(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+    private_tutoring = models.ForeignKey(PrivateTutoring, on_delete=models.CASCADE, related_name="tutoring_bookings",
+    blank=True, null=True)
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
+    duration_hours = models.PositiveIntegerField(default=2)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    notes = models.TextField(blank=True)
+    completed_date = models.DateTimeField(blank=True, null=True)
+    # Daily lesson time range chosen by parent (e.g. 15:00 – 17:00)
+    session_start_time = models.TimeField(blank=True, null=True)
+    session_end_time = models.TimeField(blank=True, null=True)

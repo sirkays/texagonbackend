@@ -366,15 +366,24 @@ def submission_create(request):
     lesson_id = request.data.get("lesson")
     language = request.data.get("language")
     code_text = request.data.get("code_text")
+    file_name = (request.data.get("file_name") or "").strip()
 
     if not lesson_id or not language or not code_text:
         return Response({"detail": "lesson, language and code_text are required."}, status=400)
     lesson = get_object_or_404(Lesson, id=lesson_id)
+
+    # Auto-generate file_name from language if not provided
+    if not file_name:
+        ext_map = {"javascript": "js", "python": "py", "html": "html", "css": "css", "java": "java", "cpp": "cpp"}
+        ext = ext_map.get(language, language)
+        file_name = f"untitled.{ext}"
+
     submission = CodeSubmission.objects.create(
         title=title,
         student=student,
         lesson=lesson,
         language=language,
+        file_name=file_name,
         code_text=code_text,
         status=CodeSubmission.Status.SUBMITTED,
     )
@@ -802,6 +811,44 @@ def teacher_submission_grade(request, pk: int):
     submission.save(update_fields=[
         "score", "feedback", "correction_code", "status", "graded_by", "graded_at", "updated_at"
     ])
+
+    # ── Multi-file: update correction_code on sibling submissions ──────
+    # The teacher sends all_corrections = { "123": "corrected code", ... }
+    # keyed by submission id. Update each sibling that belongs to the same
+    # project (same student + lesson + title).
+    all_corrections = request.data.get("all_corrections")
+    if all_corrections and isinstance(all_corrections, dict):
+        title_norm = (submission.title or "").strip().lower()
+        if title_norm:
+            siblings = (
+                CodeSubmission.objects
+                .filter(
+                    student=submission.student,
+                    lesson=submission.lesson,
+                )
+                .exclude(pk=submission.pk)
+            )
+            for sid_str, corr_code in all_corrections.items():
+                try:
+                    sid = int(sid_str)
+                except (ValueError, TypeError):
+                    continue
+                sib = siblings.filter(pk=sid).first()
+                if not sib:
+                    continue
+                sib_title = (sib.title or "").strip().lower()
+                if sib_title != title_norm:
+                    continue
+                sib.correction_code = corr_code or ""
+                sib.status = CodeSubmission.Status.GRADED
+                sib.graded_by = teacher
+                sib.graded_at = submission.graded_at
+                sib.score = score_val
+                sib.feedback = feedback
+                sib.save(update_fields=[
+                    "correction_code", "status", "graded_by",
+                    "graded_at", "score", "feedback", "updated_at",
+                ])
 
     if not was_graded_before:
         student = submission.student

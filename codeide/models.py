@@ -124,6 +124,10 @@ class CodeSubmission(TimeStampedModel):
     lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="code_submissions")
 
     language = models.CharField(max_length=64, choices=LANGUAGE_TYPE.choices, default=LANGUAGE_TYPE.HTML)
+    file_name = models.CharField(
+        max_length=255, blank=True, default="",
+        help_text="Individual filename within the project (e.g. 'index.html', 'style.css').",
+    )
     code_text = models.TextField()
 
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.SUBMITTED)

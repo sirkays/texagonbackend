@@ -4,6 +4,7 @@ from .models import CodeSnippet, CodeSubmission, CodeComment, CodeFile, Folder
 from academics.models import StudentProfile
 from learning.models import Lesson
 from django.db.models import Max
+from django.db.models.functions import Lower, Trim
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +120,7 @@ class CodeSubmissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = CodeSubmission
         fields = [
-            "id", "title", "lesson", "student", "language", "code_text",
+            "id", "title", "file_name", "lesson", "student", "language", "code_text",
             "status", "score", "feedback", "correction_code",
             "graded_by", "graded_by_name", "graded_at",
             "created_at", "updated_at", "comments",
@@ -183,6 +184,8 @@ class SubmissionListSerializer(serializers.ModelSerializer):
     lesson_title = serializers.CharField(source="lesson.name", read_only=True)
     course_name = serializers.SerializerMethodField()
     class_name = serializers.SerializerMethodField()
+    file_count = serializers.SerializerMethodField()
+    file_languages = serializers.SerializerMethodField()
 
     class Meta:
         model = CodeSubmission
@@ -190,7 +193,35 @@ class SubmissionListSerializer(serializers.ModelSerializer):
             "id", "title", "created_at", "updated_at",
             "status", "language", "student_name",
             "lesson_title", "course_name", "class_name", "score",
+            "file_count", "file_languages",
         ]
+
+    def _get_sibling_qs(self, obj: CodeSubmission):
+        """Return all submissions sharing the same (student, lesson, title)."""
+        title = (obj.title or "").strip()
+        if not title:
+            return CodeSubmission.objects.none()
+        return CodeSubmission.objects.filter(
+            student=obj.student,
+            lesson=obj.lesson,
+        ).annotate(
+            title_norm=Lower(Trim("title")),
+        ).filter(
+            title_norm=title.lower().strip(),
+        )
+
+    def get_file_count(self, obj: CodeSubmission) -> int:
+        siblings = self._get_sibling_qs(obj)
+        langs = siblings.values_list("language", flat=True).distinct()
+        count = langs.count()
+        return max(count, 1)
+
+    def get_file_languages(self, obj: CodeSubmission) -> list:
+        siblings = self._get_sibling_qs(obj)
+        langs = list(siblings.values_list("language", flat=True).distinct())
+        if not langs:
+            return [obj.language]
+        return sorted(set(langs))
 
     def get_title(self, obj: CodeSubmission):
         t = (obj.title or "").strip()
@@ -243,7 +274,7 @@ class TeacherCodeSubmissionMiniSerializer(serializers.ModelSerializer):
     class Meta:
         model = CodeSubmission
         fields = [
-            "id", "title", "created_at", "updated_at",
+            "id", "title", "file_name", "created_at", "updated_at",
             "status", "language", "code_text",
             "score", "feedback", "correction_code",
             "graded_at", "graded_by_id",
@@ -260,6 +291,7 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
     classroom = serializers.SerializerMethodField()
     comments = TeacherCodeCommentSerializer(many=True, read_only=True)
     latest_same_title_submission = serializers.SerializerMethodField()
+    all_project_files = serializers.SerializerMethodField()
 
     class Meta:
         model = CodeSubmission
@@ -272,7 +304,56 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
             "lesson", "course", "classroom",
             "comments",
             "latest_same_title_submission",
+            "all_project_files",
         ]
+
+    def get_all_project_files(self, obj: CodeSubmission):
+        """
+        Return ALL submissions sharing the same (student, lesson, title).
+        Groups by file_name (or by language for legacy submissions without file_name)
+        and returns the latest version of each file.
+        """
+        title = (obj.title or "").strip()
+        if not title:
+            return [TeacherCodeSubmissionMiniSerializer(obj).data]
+
+        base = CodeSubmission.objects.filter(
+            student=obj.student,
+            lesson=obj.lesson,
+            title__iexact=title,
+        )
+
+        # Group by file_name if available, else by language (legacy)
+        # Get unique file identifiers
+        files = []
+        seen_keys = set()
+
+        # First pass: submissions with file_name set
+        named = base.exclude(file_name="").order_by("-created_at", "-id")
+        for sub in named:
+            key = sub.file_name.lower()
+            if key not in seen_keys:
+                seen_keys.add(key)
+                files.append(TeacherCodeSubmissionMiniSerializer(sub).data)
+
+        # Second pass: legacy submissions (no file_name) — group by language
+        unnamed = base.filter(file_name="").order_by("-created_at", "-id")
+        for sub in unnamed:
+            key = f"__lang__{sub.language}"
+            if key not in seen_keys:
+                seen_keys.add(key)
+                data = TeacherCodeSubmissionMiniSerializer(sub).data
+                # Auto-assign a file_name for the frontend
+                ext_map = {"javascript": "js", "python": "py", "html": "html",
+                           "css": "css", "java": "java", "cpp": "cpp"}
+                ext = ext_map.get(sub.language, sub.language)
+                data["file_name"] = f"untitled.{ext}"
+                files.append(data)
+
+        if not files:
+            files = [TeacherCodeSubmissionMiniSerializer(obj).data]
+
+        return files
 
     def get_latest_same_title_submission(self, obj: CodeSubmission):
         title = (obj.title or "").strip()
