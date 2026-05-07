@@ -226,6 +226,7 @@ class Command(BaseCommand):
                         last_name=last_name,
                         is_generated=True,
                         is_active=True,
+                        primary_org=org,
                     )
                     created_users += 1
 
