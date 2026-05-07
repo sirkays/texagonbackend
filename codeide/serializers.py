@@ -226,36 +226,20 @@ class SubmissionListSerializer(serializers.ModelSerializer):
         )
 
     def get_file_count(self, obj: CodeSubmission) -> int:
-        siblings = self._get_sibling_qs(obj)
-        # Count distinct logical files: prefer file_name, fall back to language for legacy rows
-        named_count = (
-            siblings.exclude(file_name="")
-            .values("file_name").distinct().count()
-        )
-        unnamed_langs = (
-            siblings.filter(file_name="")
-            .values_list("language", flat=True).distinct()
-        )
-        # Don't double-count a language that already has a named file with the same ext
-        return max(named_count + len(set(unnamed_langs)), 1)
+        return self._get_sibling_qs(obj).count()
 
     def get_file_languages(self, obj: CodeSubmission) -> list:
         langs = list(self._get_sibling_qs(obj).values_list("language", flat=True).distinct())
         return sorted(set(langs)) if langs else [obj.language]
 
     def get_file_names(self, obj: CodeSubmission) -> list:
-        """Return the actual list of file names in this project (handy for the list page)."""
+        """Return the file names of every submission in this project."""
         siblings = self._get_sibling_qs(obj)
         names = []
-        seen = set()
-        for sub in siblings.order_by("-created_at", "-id"):
+        for sub in siblings.order_by("created_at", "id"):
             name = (sub.file_name or "").strip()
             if not name:
                 name = default_filename_for(sub.language)
-            key = name.lower()
-            if key in seen:
-                continue
-            seen.add(key)
             names.append(name)
         return names
 
@@ -365,79 +349,34 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
     def get_all_project_files(self, obj: CodeSubmission):
         """
         Return ALL submissions sharing the same (student, lesson, title)
-        as a list of project files, with the latest version of each file.
+        as a flat list of project files — no de-duplication.
 
-        Grouping rules (in order):
-        1. If a row has `file_name` set, group by file_name.lower().
-        2. Otherwise (legacy rows), group by language and synthesize a
-           file_name (untitled.html, untitled-1.html, ...).
+        Every CodeSubmission row that matches the project key is included
+        so the teacher sees every file the student submitted.
 
-        Result is sorted: HTML first (so the entry page is obvious), then
-        CSS, JS, then everything else alphabetically by file_name.
+        Sorted: HTML first, then CSS, JS, then everything else alphabetical.
         """
         title = (obj.title or "").strip()
         if not title:
-            # Single submission with no title — return just itself.
             return [TeacherCodeSubmissionMiniSerializer(obj).data]
 
-        base = CodeSubmission.objects.filter(
-            student=obj.student,
-            lesson=obj.lesson,
-            title__iexact=title,
+        siblings = (
+            CodeSubmission.objects
+            .filter(student=obj.student, lesson=obj.lesson, title__iexact=title)
+            .order_by("created_at", "id")
         )
 
-        # Group named files by file_name (case-insensitive). Latest wins.
-        named_by_key = {}
-        for sub in base.exclude(file_name="").order_by("-created_at", "-id"):
-            key = sub.file_name.strip().lower()
-            if key and key not in named_by_key:
-                named_by_key[key] = sub
+        files_payload = [
+            TeacherCodeSubmissionMiniSerializer(sub).data
+            for sub in siblings
+        ]
 
-        # Group legacy (no file_name) rows by language. Latest wins per language.
-        # If a language already has named file(s), don't synthesize a duplicate
-        # unless the legacy row is genuinely newer with no file_name equivalent.
-        legacy_by_lang = {}
-        for sub in base.filter(file_name="").order_by("-created_at", "-id"):
-            if sub.language not in legacy_by_lang:
-                legacy_by_lang[sub.language] = sub
-
-        # Build the file list. Track legacy index per language for naming.
-        legacy_idx_per_lang = {}
-        # Pre-count how many named files per language (so legacy synth doesn't clash with index 0)
-        named_lang_count = {}
-        for sub in named_by_key.values():
-            named_lang_count[sub.language] = named_lang_count.get(sub.language, 0) + 1
-
-        files_payload = []
-
-        # 1) Named files first, sorted by language priority, then name
-        def lang_rank(lang: str) -> int:
-            return {"html": 0, "css": 1, "javascript": 2}.get(lang, 3)
-
-        named_sorted = sorted(
-            named_by_key.values(),
-            key=lambda s: (lang_rank(s.language), (s.file_name or "").lower(), -s.id),
-        )
-        for sub in named_sorted:
-            files_payload.append(
-                TeacherCodeSubmissionMiniSerializer(sub).data
-            )
-
-        # 2) Legacy files: only emit if no named file of that language already exists,
-        #    OR include them all — being defensive: include them all but disambiguate names.
-        for lang, sub in legacy_by_lang.items():
-            idx = named_lang_count.get(lang, 0) + legacy_idx_per_lang.get(lang, 0)
-            legacy_idx_per_lang[lang] = legacy_idx_per_lang.get(lang, 0) + 1
-            data = TeacherCodeSubmissionMiniSerializer(
-                sub, context={"legacy_idx": {lang: idx}}
-            ).data
-            files_payload.append(data)
-
-        # Defensive fallback: if somehow nothing was assembled, return the obj itself.
         if not files_payload:
             files_payload = [TeacherCodeSubmissionMiniSerializer(obj).data]
 
-        # Final sort: HTML first, then CSS, then JS, then others alphabetical.
+        def lang_rank(lang: str) -> int:
+            return {"html": 0, "css": 1, "javascript": 2}.get(lang, 3)
+
         files_payload.sort(
             key=lambda d: (
                 lang_rank(d.get("language", "")),

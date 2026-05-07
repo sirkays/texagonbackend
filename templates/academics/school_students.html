@@ -48,6 +48,10 @@
                             </th>
 
                             <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                                Class
+                            </th>
+
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700">
                                 Admission No
                             </th>
                         </tr>
@@ -73,7 +77,15 @@
                             </td>
 
                             <td class="px-6 py-4 text-sm text-gray-700">
-                                {{ student.admission_no }}
+                                {% if student.current_classroom %}
+                                    {{ student.current_classroom.name }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+
+                            <td class="px-6 py-4 text-sm text-gray-700">
+                                {{ student.admission_no|default:"-" }}
                             </td>
 
                         </tr>
@@ -82,7 +94,7 @@
 
                         <tr>
                             <td
-                                colspan="4"
+                                colspan="5"
                                 class="px-6 py-10 text-center text-gray-500"
                             >
                                 No students found.

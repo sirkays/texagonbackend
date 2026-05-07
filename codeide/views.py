@@ -885,26 +885,32 @@ def teacher_submission_download(request, pk: int):
             )
             .annotate(t_norm=Lower(Trim("title")))
             .filter(t_norm=title.lower())
-            .order_by("-created_at", "-id")
+            .order_by("created_at", "id")
         )
     else:
         siblings = CodeSubmission.objects.filter(pk=submission.pk)
 
-    # De-duplicate by file_name (latest version wins)
-    seen = {}
+    # Collect ALL files — no de-duplication
+    files = []
     for sub in siblings:
         fname = (sub.file_name or "").strip()
         if not fname:
             ext = LANG_EXT_MAP.get(sub.language, sub.language or "txt")
             fname = f"untitled.{ext}"
-        key = fname.lower()
-        if key not in seen:
-            seen[key] = (fname, sub.code_text or "")
+        files.append((fname, sub.code_text or ""))
 
-    # Build the ZIP in memory
+    # Build the ZIP in memory, handling duplicate filenames
     buf = io.BytesIO()
+    name_count = {}
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fname, code in seen.values():
+        for fname, code in files:
+            key = fname.lower()
+            if key in name_count:
+                name_count[key] += 1
+                base_name, ext = fname.rsplit(".", 1) if "." in fname else (fname, "")
+                fname = f"{base_name}_{name_count[key]}.{ext}" if ext else f"{base_name}_{name_count[key]}"
+            else:
+                name_count[key] = 0
             zf.writestr(fname, code)
     buf.seek(0)
 
