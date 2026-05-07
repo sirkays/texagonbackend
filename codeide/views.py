@@ -857,6 +857,71 @@ def teacher_submission_grade(request, pk: int):
 
 
 @api_view(["GET"])
+@permission_classes([HasAPIKey, IsAuthenticated])
+@authentication_classes([SessionTokenAuthentication])
+def teacher_submission_download(request, pk: int):
+    """
+    Download all project files for a submission as a ZIP archive.
+
+    Collects every sibling CodeSubmission sharing the same
+    (student, lesson, title) and packages each file's code_text
+    into a ZIP named  ``<student>_<title>.zip``.
+    """
+    import io, zipfile, re
+    from django.http import HttpResponse
+
+    qs, err = _teacher_scoped_queryset(request)
+    if err:
+        return err
+    submission = get_object_or_404(qs, pk=pk)
+
+    title = (submission.title or "").strip()
+    if title:
+        siblings = (
+            CodeSubmission.objects
+            .filter(
+                student=submission.student,
+                lesson=submission.lesson,
+            )
+            .annotate(t_norm=Lower(Trim("title")))
+            .filter(t_norm=title.lower())
+            .order_by("-created_at", "-id")
+        )
+    else:
+        siblings = CodeSubmission.objects.filter(pk=submission.pk)
+
+    # De-duplicate by file_name (latest version wins)
+    seen = {}
+    for sub in siblings:
+        fname = (sub.file_name or "").strip()
+        if not fname:
+            ext = LANG_EXT_MAP.get(sub.language, sub.language or "txt")
+            fname = f"untitled.{ext}"
+        key = fname.lower()
+        if key not in seen:
+            seen[key] = (fname, sub.code_text or "")
+
+    # Build the ZIP in memory
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fname, code in seen.values():
+            zf.writestr(fname, code)
+    buf.seek(0)
+
+    # Build a safe filename for the download
+    student_user = getattr(submission.student, "user", None)
+    student_name = ""
+    if student_user:
+        student_name = (student_user.get_full_name() or student_user.email or "").strip()
+    safe = re.sub(r"[^\w\s-]", "", f"{student_name}_{title or 'submission'}").strip()
+    safe = re.sub(r"\s+", "_", safe) or "download"
+
+    response = HttpResponse(buf.read(), content_type="application/zip")
+    response["Content-Disposition"] = f'attachment; filename="{safe}.zip"'
+    return response
+
+
+@api_view(["GET"])
 @permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
 @authentication_classes([SessionTokenAuthentication])
 def student_submission_list(request):
