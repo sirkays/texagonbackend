@@ -25,7 +25,7 @@ class Command(BaseCommand):
 
         parser.add_argument(
             "--email-pattern",
-            default="sop@",
+            default="pssigboora@",
             help="Email pattern to match. Default: sop@",
         )
 

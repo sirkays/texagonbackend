@@ -1720,6 +1720,12 @@ class ClassroomViewSet(viewsets.ModelViewSet):
         if q_param:
             q = q.filter(Q(name__icontains=q_param) | Q(code__icontains=q_param))
 
+        # optional class_type filter (?class_type=public)
+        class_type = self.request.query_params.get("class_type")
+        if class_type in ("public", "private"):
+            q = q.filter(class_type=class_type)
+
+
         # Robust counts via subqueries to avoid multi-join explosions.
         students_sq = (
             StudentProfile.objects

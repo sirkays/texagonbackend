@@ -42,6 +42,7 @@ from learning.models import (
 from gamification.models import LeaderboardSeason
 from core.models import StudentDevice, TimeStampedModel
 from billing.models import OrganizationSubscription
+from accounts.models import AdminAccess
 
 from store.models import Category, Product, ProductImage
 from store.serializers import (
@@ -850,7 +851,7 @@ def admin_classroom_modal_data(request, classroom_id: int):
             {
                 "id": s.id,
                 "user_id": s.user_id,
-                "name": _full_name(s.user),
+                "name": (s.user.get_full_name() or s.user.email or ""),
                 "email": getattr(s.user, "email", "") or "",
                 "avatar_url": _get_user_avatar_url(request, s.user),
                 "admission_no": s.admission_no or "",
@@ -1509,7 +1510,16 @@ def generate_student_logins(request):
         password = "Techxagon@2026"
         now = timezone.now()
         end_at = now + timedelta(days=30)  # 1 month subscription
-        org_slug = (org.slug or "org").replace("-", "").replace("_", "").lower()
+        # Build a short org tag for the email local-part.
+        # Multi-word names get abbreviated (first letter of each word).
+        # E.g. "Anglican Comprehensive Secondary School Kubwa" → "acssk"
+        raw_org_name = (org.name or org.slug or "org")
+        org_words = raw_org_name.split()
+        if len(org_words) > 1:
+            org_slug = "".join(w[0] for w in org_words if w).lower()
+        else:
+            org_slug = re.sub(r"[^a-z0-9]", "", raw_org_name.lower())
+
 
         # ── Parse students list based on mode ─────────────────────────
         students_to_create = []  # list of dicts: {name, classroom_name}
@@ -1609,16 +1619,21 @@ def generate_student_logins(request):
             User.objects.filter(email__endswith="@techxagonacademy.com")
             .values_list("email", flat=True)
         )
-        assigned_emails = set()
+        assigned_emails = set()   # emails assigned in this batch
+
+        # Track (sanitised_name, classroom_id) pairs to detect same-class duplicates
+        seen_name_in_class: set[tuple[str, int]] = set()
 
         # ── Create everything atomically ──────────────────────────
         created_results = []
+        duplicate_results = []   # same name in the same classroom
         stats = {
             "users_created": 0,
             "profiles_created": 0,
             "memberships_created": 0,
             "subscriptions_created": 0,
             "skipped_existing": 0,
+            "duplicates": 0,
         }
 
         # Pre-fetch / cache classrooms
@@ -1640,9 +1655,41 @@ def generate_student_logins(request):
                 if not base_local:
                     base_local = "student"
 
-                local_part = base_local + org_slug
-                candidate = f"{local_part}@techxagonacademy.com"
+                # ── Same-classroom duplicate check ────────
+                # If we have already seen this exact name for this classroom
+                # in this batch, it is a true duplicate — skip and record it.
+                name_class_key = (base_local, cls_id)
+                if name_class_key in seen_name_in_class:
+                    stats["duplicates"] += 1
+                    duplicate_results.append({
+                        "name": full_name,
+                        "classroom": cls_name,
+                        "reason": "Duplicate name in the same classroom — skipped.",
+                    })
+                    continue
+                seen_name_in_class.add(name_class_key)
 
+                # ── Cross-classroom collision: auto-suffix ──
+                local_part = base_local + org_slug
+                base_email = f"{local_part}@techxagonacademy.com"
+
+                # KEY FIX: if the base email (no suffix) already exists AND
+                # that user is already an active member of this org, this is a
+                # re-submission of an existing student — skip, don't mint a
+                # new suffixed account (aguchimdikeacssk1, acssk2, etc.).
+                if base_email in existing_emails:
+                    already_in_org = OrganizationMembership.objects.filter(
+                        user__email=base_email,
+                        organization=org,
+                        is_active=True,
+                    ).exists()
+                    if already_in_org:
+                        stats["skipped_existing"] += 1
+                        continue
+                    # base email exists but NOT in this org → genuine name
+                    # collision (different org), fall through to suffix loop
+
+                candidate = base_email
                 suffix = 0
                 while candidate in existing_emails or candidate in assigned_emails:
                     suffix += 1
@@ -1652,10 +1699,11 @@ def generate_student_logins(request):
                 assigned_emails.add(email)
                 existing_emails.add(email)
 
-                # ── Skip if user already in DB ────────────
+                # ── Safety: skip if somehow the final candidate is in DB ──
                 if User.objects.filter(email=email).exists():
                     stats["skipped_existing"] += 1
                     continue
+
 
                 # ── Split name ────────────────────────────
                 parts = full_name.strip().split()
@@ -1719,6 +1767,7 @@ def generate_student_logins(request):
                 "detail": "Login generation completed successfully.",
                 "stats": stats,
                 "students": created_results,
+                "duplicates": duplicate_results,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -1729,3 +1778,110 @@ def generate_student_logins(request):
             {"detail": "Login generation failed. All changes have been rolled back.", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# ── Admin: Password Management ─────────────────────────────────────────────────
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_list_org_users(request):
+    """
+    GET /core/api/admin/change-password/users/
+    Returns all active members of the admin's selected organisation.
+    Supports ?q= search by name or email.
+    """
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response(
+            {"detail": "No selected organisation for this admin."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    q_param = (request.query_params.get("q") or "").strip()
+
+    qs = (
+        OrganizationMembership.objects
+        .filter(organization_id=org_id, is_active=True)
+        .select_related("user")
+        .order_by("user__first_name", "user__last_name")
+    )
+
+    if q_param:
+        qs = qs.filter(
+            Q(user__first_name__icontains=q_param)
+            | Q(user__last_name__icontains=q_param)
+            | Q(user__email__icontains=q_param)
+        )
+
+    seen_ids: set[int] = set()
+    users = []
+    for m in qs:
+        if m.user_id in seen_ids:
+            continue
+        seen_ids.add(m.user_id)
+        users.append({
+            "id": m.user_id,
+            "name": (m.user.get_full_name() or m.user.email or ""),
+            "email": m.user.email,
+            "role": m.role,
+            "avatar_url": _get_user_avatar_url(request, m.user),
+        })
+
+    return Response({"count": len(users), "results": users}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey, IsAdminAccess])
+@authentication_classes([SessionTokenAuthentication])
+def admin_change_user_password(request):
+    """
+    POST /core/api/admin/change-password/
+    Body: { user_id: <int>, new_password: <str> }
+
+    Changes the password for `user_id` only if that user belongs to the
+    admin's selected organisation.
+    """
+    org_id = _get_admin_selected_org_id(request)
+    if not org_id:
+        return Response(
+            {"detail": "No selected organisation for this admin."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user_id = request.data.get("user_id")
+    new_password = (request.data.get("new_password") or "").strip()
+
+    if not user_id:
+        return Response({"detail": "user_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if not new_password or len(new_password) < 6:
+        return Response(
+            {"detail": "new_password must be at least 6 characters."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Verify the target user belongs to this org
+    membership = OrganizationMembership.objects.filter(
+        user_id=user_id,
+        organization_id=org_id,
+        is_active=True,
+    ).select_related("user").first()
+
+    if not membership:
+        return Response(
+            {"detail": "User not found in this organisation."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    target_user = membership.user
+    target_user.set_password(new_password)
+    target_user.save(update_fields=["password"])
+
+    return Response(
+        {
+            "detail": f"Password updated for {target_user.get_full_name() or target_user.email}.",
+            "user_id": target_user.id,
+            "email": target_user.email,
+        },
+        status=status.HTTP_200_OK,
+    )

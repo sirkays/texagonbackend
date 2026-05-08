@@ -250,7 +250,8 @@ class StudentWriteSerializer(serializers.Serializer):
 class ClassroomBaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Classroom
-        fields = ["id", "name", "code"]
+        fields = ["id", "name", "code", "class_type"]
+
 
 class ClassroomListSerializer(ClassroomBaseSerializer):
     students = serializers.IntegerField(source="students_count", read_only=True)
