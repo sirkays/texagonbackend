@@ -1120,14 +1120,18 @@ def post_login(request):
 
     if not membership.is_active:
         return Response({"detail": "The user has been deactivated."}, status=status.HTTP_403_FORBIDDEN)
+    # Check if this user also has active AdminAccess
+    has_admin_access = AdminAccess.user_has_admin_access(user)
+
     return Response(
         {
             "detail": "User access granted",
             "org_membership_pk": membership.pk,
             "role": membership.role,
-            "is_generated":user.is_generated,
+            "is_generated": user.is_generated,
+            "has_admin_access": has_admin_access,
         },
-        status=status.HTTP_200_OK,  # <- correct constant
+        status=status.HTTP_200_OK,
     )
 
 

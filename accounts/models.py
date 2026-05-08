@@ -75,7 +75,6 @@ class AdminAccess(models.Model):
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
-        limit_choices_to=Q(is_staff=True) | Q(is_superuser=True),
     )
     organizations = models.ManyToManyField("orgs.Organization", blank=True)
     selected_organization = models.ForeignKey(
@@ -89,9 +88,16 @@ class AdminAccess(models.Model):
     super_user = models.BooleanField(default=False)
 
     def clean(self):
-        if self.user and not (self.user.is_staff or self.user.is_superuser):
+        from orgs.models import OrganizationMembership
+        if self.user and not (
+            self.user.is_staff
+            or self.user.is_superuser
+            or OrganizationMembership.objects.filter(
+                user=self.user, role="teacher"
+            ).exists()
+        ):
             raise ValidationError({
-                "user": "AdminAccess can only be granted to staff or superusers."
+                "user": "AdminAccess can only be granted to staff, superusers, or teachers."
             })
 
     def save(self, *args, **kwargs):
