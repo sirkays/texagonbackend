@@ -1,418 +1,831 @@
 {% load static %}
-<!DOCTYPE html>
-<html lang="en">
+<link href="https://fonts.googleapis.com/css2?fam
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Analytics Dashboard | Techxagon</title>
-  <meta name="description" content="Techxagon organization analytics — students, classes, courses, and more." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-  <style>
-    *,*::before,*::after{box-sizing:border-box}
-    body{margin:0;font-family:'Syne',sans-serif;background:#0F0F12;color:#E8E4E0;min-height:100vh}
-    .mono{font-family:'DM Mono',monospace}
+  <meta charset=" UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Analytics Dashboard | Techxagon</title>
+<meta name="description" content="Techxagon organization analytics — students, classes, courses, and more." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link
+  href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+  rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<style>
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box
+  }
 
-    /* ── Scrollbar ── */
-    ::-webkit-scrollbar{width:5px;height:5px}
-    ::-webkit-scrollbar-track{background:#1A1A20}
-    ::-webkit-scrollbar-thumb{background:#3A3A45;border-radius:3px}
+  body {
+    margin: 0;
+    font-family: 'Outfit', sans-serif;
+    background: #0F0F12;
+    color: #E8E4E0;
+    min-height: 100vh
+  }
 
-    /* ── Layout ── */
-    .page-shell{max-width:1440px;margin:0 auto;padding:1.5rem 2rem 3rem}
+  .mono {
+    font-family: 'JetBrains Mono', monospace
+  }
 
-    /* ── Topbar ── */
-    .topbar{background:rgba(15,15,18,.85);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.06);position:sticky;top:0;z-index:50}
-    .topbar-inner{max-width:1440px;margin:0 auto;padding:.75rem 2rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px
+  }
 
-    /* ── Gradient Accents ── */
-    .grad{background:linear-gradient(135deg,#DC3005,#F97316)}
-    .grad-text{background:linear-gradient(135deg,#FF6B3D,#FFB347);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-    .grad-glow{box-shadow:0 0 30px rgba(220,48,5,.15),0 0 60px rgba(249,115,22,.08)}
+  ::-webkit-scrollbar-track {
+    background: #1A1A20
+  }
 
-    /* ── Stat Cards ── */
-    .stat-card{background:rgba(26,26,32,.6);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:1.25rem 1.5rem;transition:all .3s;position:relative;overflow:hidden}
-    .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,rgba(255,107,61,.4),transparent);opacity:0;transition:opacity .3s}
-    .stat-card:hover{border-color:rgba(255,107,61,.2);transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,0,0,.3)}
-    .stat-card:hover::before{opacity:1}
-    .stat-label{font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#6B6B78;margin-bottom:.5rem}
-    .stat-value{font-size:2rem;font-weight:800;line-height:1}
-    .stat-sub{font-size:.75rem;color:#6B6B78;font-weight:600;margin-top:.4rem}
+  ::-webkit-scrollbar-thumb {
+    background: #3A3A45;
+    border-radius: 3px
+  }
 
-    /* ── Cards ── */
-    .panel{background:rgba(26,26,32,.6);border:1px solid rgba(255,255,255,.06);border-radius:16px;overflow:hidden}
-    .panel-header{padding:1.25rem 1.5rem;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;gap:1rem}
-    .panel-title{font-size:.95rem;font-weight:800;color:#E8E4E0}
-    .panel-badge{display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .65rem;border-radius:999px;font-size:.7rem;font-weight:700;letter-spacing:.04em;background:rgba(255,107,61,.12);color:#FF6B3D}
+  /* ── Layout ── */
+  .page-shell {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 1.5rem 2rem 3rem
+  }
 
-    /* ── Table ── */
-    .tbl{width:100%;border-collapse:collapse}
-    .tbl thead th{background:rgba(255,255,255,.02);font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6B6B78;padding:.75rem 1rem;border-bottom:1px solid rgba(255,255,255,.06);text-align:left;white-space:nowrap}
-    .tbl tbody tr{border-bottom:1px solid rgba(255,255,255,.03);transition:background .15s}
-    .tbl tbody tr:hover{background:rgba(255,255,255,.03)}
-    .tbl tbody td{padding:.75rem 1rem;font-size:.85rem;vertical-align:middle}
+  /* ── Topbar ── */
+  .topbar {
+    background: rgba(15, 15, 18, .85);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
+    position: sticky;
+    top: 0;
+    z-index: 50
+  }
 
-    /* ── Badges ── */
-    .badge{display:inline-flex;align-items:center;gap:.3rem;padding:.15rem .55rem;border-radius:999px;font-size:.68rem;font-weight:700;letter-spacing:.03em}
-    .badge-green{background:rgba(22,163,74,.12);color:#4ADE80}
-    .badge-orange{background:rgba(249,115,22,.12);color:#FFB347}
-    .badge-red{background:rgba(220,48,5,.12);color:#FF6B3D}
-    .badge-gray{background:rgba(255,255,255,.06);color:#6B6B78}
-    .badge-blue{background:rgba(59,130,246,.12);color:#60A5FA}
+  .topbar-inner {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: .75rem 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap
+  }
 
-    /* ── Buttons ── */
-    .btn-ghost{display:inline-flex;align-items:center;gap:.4rem;padding:.5rem 1rem;border-radius:10px;font-size:.8rem;font-weight:700;color:#9A8F86;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);cursor:pointer;transition:all .2s;text-decoration:none}
-    .btn-ghost:hover{background:rgba(255,255,255,.08);color:#E8E4E0;border-color:rgba(255,255,255,.12)}
+  /* ── Gradient Accents ── */
+  .grad {
+    background: linear-gradient(135deg, #DC3005, #F97316)
+  }
 
-    /* ── Progress Bar ── */
-    .progress-track{height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;flex:1}
-    .progress-fill{height:100%;border-radius:3px;transition:width .6s cubic-bezier(.4,0,.2,1)}
+  .grad-text {
+    background: linear-gradient(135deg, #FF6B3D, #FFB347);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text
+  }
 
-    /* ── Section Title ── */
-    .section-title{font-size:1.1rem;font-weight:800;margin-bottom:1.25rem;display:flex;align-items:center;gap:.5rem}
-    .section-dot{width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,#DC3005,#F97316)}
+  .grad-glow {
+    box-shadow: 0 0 30px rgba(220, 48, 5, .15), 0 0 60px rgba(249, 115, 22, .08)
+  }
 
-    /* ── Org selector ── */
-    .org-select{padding:.5rem 1rem;border-radius:10px;font-size:.82rem;font-weight:700;color:#E8E4E0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);outline:none;cursor:pointer;font-family:'Syne',sans-serif}
-    .org-select option{background:#1A1A20;color:#E8E4E0}
+  /* ── Stat Cards ── */
+  .stat-card {
+    background: rgba(26, 26, 32, .6);
+    border: 1px solid rgba(255, 255, 255, .06);
+    border-radius: 16px;
+    padding: 1.25rem 1.5rem;
+    transition: all .3s;
+    position: relative;
+    overflow: hidden
+  }
 
-    /* ── Bar chart ── */
-    .bar-chart{display:flex;align-items:flex-end;gap:6px;height:120px;padding:.5rem 0}
-    .bar-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:4px}
-    .bar-stick{width:100%;max-width:40px;border-radius:4px 4px 0 0;transition:height .6s cubic-bezier(.4,0,.2,1);cursor:pointer;position:relative}
-    .bar-stick:hover{filter:brightness(1.3)}
-    .bar-label{font-size:.6rem;font-weight:700;color:#6B6B78;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60px}
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255, 107, 61, .4), transparent);
+    opacity: 0;
+    transition: opacity .3s
+  }
 
-    /* ── Animations ── */
-    @keyframes fadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-    .anim{animation:fadeIn .5s cubic-bezier(.4,0,.2,1) both}
-    .d1{animation-delay:.05s}.d2{animation-delay:.1s}.d3{animation-delay:.15s}.d4{animation-delay:.2s}
-    .d5{animation-delay:.25s}.d6{animation-delay:.3s}.d7{animation-delay:.35s}.d8{animation-delay:.4s}
+  .stat-card:hover {
+    border-color: rgba(255, 107, 61, .2);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .3)
+  }
 
-    /* ── Tab system ── */
-    .tab-bar{display:flex;gap:.5rem;padding:0 1.5rem;border-bottom:1px solid rgba(255,255,255,.06);overflow-x:auto}
-    .tab-btn{padding:.75rem 1.25rem;font-size:.8rem;font-weight:700;color:#6B6B78;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap;font-family:'Syne',sans-serif}
-    .tab-btn:hover{color:#E8E4E0}
-    .tab-btn.active{color:#FF6B3D;border-bottom-color:#FF6B3D}
-    .tab-content{display:none}
-    .tab-content.active{display:block}
+  .stat-card:hover::before {
+    opacity: 1
+  }
 
-    /* ── Responsive ── */
-    @media(max-width:1024px){.page-shell{padding:1rem}.topbar-inner{padding:.75rem 1rem}}
-    @media(max-width:768px){
-      .page-shell{padding:.75rem}
-      .topbar-inner{flex-direction:column;align-items:stretch;gap:.5rem}
+  .stat-label {
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: #6B6B78;
+    margin-bottom: .5rem
+  }
+
+  .stat-value {
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1
+  }
+
+  .stat-sub {
+    font-size: .75rem;
+    color: #6B6B78;
+    font-weight: 600;
+    margin-top: .4rem
+  }
+
+  /* ── Cards ── */
+  .panel {
+    background: rgba(26, 26, 32, .6);
+    border: 1px solid rgba(255, 255, 255, .06);
+    border-radius: 16px;
+    overflow: hidden
+  }
+
+  .panel-header {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem
+  }
+
+  .panel-title {
+    font-size: .95rem;
+    font-weight: 800;
+    color: #E8E4E0
+  }
+
+  .panel-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    padding: .2rem .65rem;
+    border-radius: 999px;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    background: rgba(255, 107, 61, .12);
+    color: #FF6B3D
+  }
+
+  /* ── Table ── */
+  .tbl {
+    width: 100%;
+    border-collapse: collapse
+  }
+
+  .tbl thead th {
+    background: rgba(255, 255, 255, .02);
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: #6B6B78;
+    padding: .75rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
+    text-align: left;
+    white-space: nowrap
+  }
+
+  .tbl tbody tr {
+    border-bottom: 1px solid rgba(255, 255, 255, .03);
+    transition: background .15s
+  }
+
+  .tbl tbody tr:hover {
+    background: rgba(255, 255, 255, .03)
+  }
+
+  .tbl tbody td {
+    padding: .75rem 1rem;
+    font-size: .85rem;
+    vertical-align: middle
+  }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    padding: .15rem .55rem;
+    border-radius: 999px;
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .03em
+  }
+
+  .badge-green {
+    background: rgba(22, 163, 74, .12);
+    color: #4ADE80
+  }
+
+  .badge-orange {
+    background: rgba(249, 115, 22, .12);
+    color: #FFB347
+  }
+
+  .badge-red {
+    background: rgba(220, 48, 5, .12);
+    color: #FF6B3D
+  }
+
+  .badge-gray {
+    background: rgba(255, 255, 255, .06);
+    color: #6B6B78
+  }
+
+  .badge-blue {
+    background: rgba(59, 130, 246, .12);
+    color: #60A5FA
+  }
+
+  /* ── Buttons ── */
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .5rem 1rem;
+    border-radius: 10px;
+    font-size: .8rem;
+    font-weight: 700;
+    color: #9A8F86;
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid rgba(255, 255, 255, .08);
+    cursor: pointer;
+    transition: all .2s;
+    text-decoration: none
+  }
+
+  .btn-ghost:hover {
+    background: rgba(255, 255, 255, .08);
+    color: #E8E4E0;
+    border-color: rgba(255, 255, 255, .12)
+  }
+
+  /* ── Progress Bar ── */
+  .progress-track {
+    height: 6px;
+    background: rgba(255, 255, 255, .06);
+    border-radius: 3px;
+    overflow: hidden;
+    flex: 1
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width .6s cubic-bezier(.4, 0, .2, 1)
+  }
+
+  /* ── Section Title ── */
+  .section-title {
+    font-size: 1.1rem;
+    font-weight: 800;
+    margin-bottom: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: .5rem
+  }
+
+  .section-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #DC3005, #F97316)
+  }
+
+  /* ── Org selector ── */
+  .org-select {
+    padding: .5rem 1rem;
+    border-radius: 10px;
+    font-size: .82rem;
+    font-weight: 700;
+    color: #E8E4E0;
+    background: rgba(255, 255, 255, .06);
+    border: 1px solid rgba(255, 255, 255, .08);
+    outline: none;
+    cursor: pointer;
+    font-family: 'Syne', sans-serif
+  }
+
+  .org-select option {
+    background: #1A1A20;
+    color: #E8E4E0
+  }
+
+  /* ── Bar chart ── */
+  .bar-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    height: 120px;
+    padding: .5rem 0
+  }
+
+  .bar-col {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px
+  }
+
+  .bar-stick {
+    width: 100%;
+    max-width: 40px;
+    border-radius: 4px 4px 0 0;
+    transition: height .6s cubic-bezier(.4, 0, .2, 1);
+    cursor: pointer;
+    position: relative
+  }
+
+  .bar-stick:hover {
+    filter: brightness(1.3)
+  }
+
+  .bar-label {
+    font-size: .75rem;
+    font-weight: 700;
+    color: #6B6B78;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 90px
+  }
+
+  /* ── Animations ── */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(12px)
     }
-  </style>
+
+    to {
+      opacity: 1;
+      transform: translateY(0)
+    }
+  }
+
+  .anim {
+    animation: fadeIn .5s cubic-bezier(.4, 0, .2, 1) both
+  }
+
+  .d1 {
+    animation-delay: .05s
+  }
+
+  .d2 {
+    animation-delay: .1s
+  }
+
+  .d3 {
+    animation-delay: .15s
+  }
+
+  .d4 {
+    animation-delay: .2s
+  }
+
+  .d5 {
+    animation-delay: .25s
+  }
+
+  .d6 {
+    animation-delay: .3s
+  }
+
+  .d7 {
+    animation-delay: .35s
+  }
+
+  .d8 {
+    animation-delay: .4s
+  }
+
+  /* ── Tab system ── */
+  .tab-bar {
+    display: flex;
+    gap: .5rem;
+    padding: 0 1.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
+    overflow-x: auto
+  }
+
+  .tab-btn {
+    padding: .75rem 1.25rem;
+    font-size: .8rem;
+    font-weight: 700;
+    color: #6B6B78;
+    border: none;
+    background: none;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all .2s;
+    white-space: nowrap;
+    font-family: 'Syne', sans-serif
+  }
+
+  .tab-btn:hover {
+    color: #E8E4E0
+  }
+
+  .tab-btn.active {
+    color: #FF6B3D;
+    border-bottom-color: #FF6B3D
+  }
+
+  .tab-content {
+    display: none
+  }
+
+  .tab-content.active {
+    display: block
+  }
+
+  /* ── Responsive ── */
+  @media(max-width:1024px) {
+    .page-shell {
+      padding: 1rem
+    }
+
+    .topbar-inner {
+      padding: .75rem 1rem
+    }
+  }
+
+  @media(max-width:768px) {
+    .page-shell {
+      padding: .75rem
+    }
+
+    .topbar-inner {
+      flex-direction: column;
+      align-items: stretch;
+      gap: .5rem
+    }
+  }
+</style>
 </head>
+
 <body>
 
-<!-- ══════════ TOPBAR ══════════ -->
-<header class="topbar">
-  <div class="topbar-inner">
-    <div style="display:flex;align-items:center;gap:.875rem;min-width:0">
-      <img src="{% static 'assets/logo_text.png' %}" alt="Techxagon" style="height:48px;width:auto;object-fit:contain;filter:brightness(1.1)" />
-      <div>
-        <div style="font-size:.6rem;color:#6B6B78;letter-spacing:.12em;text-transform:uppercase;font-weight:700">Analytics Dashboard</div>
-      </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-      {% if orgs.count > 1 %}
-      <form method="GET" id="orgForm">
-        <select name="org" onchange="document.getElementById('orgForm').submit()" class="org-select">
-          {% for o in orgs %}
-          <option value="{{ o.pk }}" {% if org and o.pk == org.pk %}selected{% endif %}>{{ o.name }}</option>
-          {% endfor %}
-        </select>
-      </form>
-      {% endif %}
-      <a href="{% url 'corefrontend:dashboard_portal' %}" class="btn-ghost">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-        Portal
-      </a>
-      <span style="font-size:.78rem;color:#6B6B78;font-weight:600">{{ request.user.get_full_name|default:request.user.username }}</span>
-      <form method="post" action="{% url 'corefrontend:dashboard_logout' %}" style="margin:0">
-        {% csrf_token %}
-        <button type="submit" style="font-size:.78rem;color:#FF6B3D;font-weight:700;background:none;border:none;cursor:pointer;padding:0">Logout</button>
-      </form>
-    </div>
-  </div>
-</header>
-
-{% if not org %}
-<main class="page-shell" style="text-align:center;padding-top:8rem">
-  <h2 style="font-size:1.5rem;font-weight:800;color:#6B6B78">No Organization Found</h2>
-  <p style="color:#6B6B78;margin-top:.5rem">Create an organization in the admin panel first.</p>
-</main>
-{% else %}
-
-<main class="page-shell">
-
-  <!-- ══════════ ORG HEADER ══════════ -->
-  <div class="anim" style="margin-bottom:2rem">
-    <h1 style="font-size:1.5rem;font-weight:800;margin:0 0 .25rem">
-      <span class="grad-text">{{ org.name }}</span>
-    </h1>
-    <p style="font-size:.82rem;color:#6B6B78;font-weight:600;margin:0">
-      Organization overview &amp; analytics
-      {% if org.city or org.state %} · {{ org.city }}{% if org.city and org.state %},{% endif %} {{ org.state }}{% endif %}
-    </p>
-  </div>
-
-  <!-- ══════════ TOP STAT CARDS ══════════ -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
-    <div class="stat-card anim d1">
-      <div class="stat-label">Total Students</div>
-      <div class="stat-value grad-text">{{ stats.total_students }}</div>
-      <div class="stat-sub">{{ stats.unassigned_count }} unassigned</div>
-    </div>
-    <div class="stat-card anim d2">
-      <div class="stat-label">Teachers</div>
-      <div class="stat-value" style="color:#60A5FA">{{ stats.total_teachers }}</div>
-      <div class="stat-sub">Active instructors</div>
-    </div>
-    <div class="stat-card anim d3">
-      <div class="stat-label">Classrooms</div>
-      <div class="stat-value" style="color:#4ADE80">{{ stats.total_classrooms }}</div>
-      <div class="stat-sub">{{ stats.total_students }} students placed</div>
-    </div>
-    <div class="stat-card anim d4">
-      <div class="stat-label">Parents</div>
-      <div class="stat-value" style="color:#A78BFA">{{ stats.total_parents }}</div>
-      <div class="stat-sub">Linked accounts</div>
-    </div>
-    <div class="stat-card anim d5">
-      <div class="stat-label">Courses</div>
-      <div class="stat-value" style="color:#FFB347">{{ stats.total_courses }}</div>
-      <div class="stat-sub">{{ stats.total_enrollments }} enrollments</div>
-    </div>
-    <div class="stat-card anim d6">
-      <div class="stat-label">Modules / Lessons</div>
-      <div class="stat-value" style="color:#F472B6">{{ stats.total_modules }}</div>
-      <div class="stat-sub">{{ stats.total_lessons }} lessons total</div>
-    </div>
-    <div class="stat-card anim d7">
-      <div class="stat-label">CBTs Created</div>
-      <div class="stat-value" style="color:#34D399">{{ stats.total_tests }}</div>
-      <div class="stat-sub">{{ stats.published_tests }} published · {{ stats.draft_tests }} draft</div>
-    </div>
-    <div class="stat-card anim d8">
-      <div class="stat-label">Certificates</div>
-      <div class="stat-value" style="color:#FBBF24">{{ stats.total_certs }}</div>
-      <div class="stat-sub">{{ stats.issued_certs }} issued · {{ stats.revoked_certs }} revoked</div>
-    </div>
-  </div>
-
-  <!-- ══════════ SECONDARY STATS ══════════ -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;margin-bottom:2.5rem">
-    <div class="stat-card anim d5">
-      <div class="stat-label">Enrollments Breakdown</div>
-      <div style="display:flex;align-items:center;gap:1rem;margin-top:.5rem">
+  <!-- ══════════ TOPBAR ══════════ -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div style="display:flex;align-items:center;gap:.875rem;min-width:0">
+        <img src="{% static 'assets/logo_text.png' %}" alt="Techxagon"
+          style="height:48px;width:auto;object-fit:contain;filter:brightness(1.1)" />
         <div>
-          <div style="font-size:1.4rem;font-weight:800;color:#4ADE80">{{ stats.active_enrollments }}</div>
-          <div style="font-size:.68rem;color:#6B6B78;font-weight:600">Active</div>
-        </div>
-        <div style="width:1px;height:30px;background:rgba(255,255,255,.08)"></div>
-        <div>
-          <div style="font-size:1.4rem;font-weight:800;color:#60A5FA">{{ stats.completed_enrollments }}</div>
-          <div style="font-size:.68rem;color:#6B6B78;font-weight:600">Completed</div>
+          <div style="font-size:.6rem;color:#6B6B78;letter-spacing:.12em;text-transform:uppercase;font-weight:700">
+            Analytics Dashboard</div>
         </div>
       </div>
-    </div>
-    <div class="stat-card anim d6">
-      <div class="stat-label">Code Submissions</div>
-      <div style="display:flex;align-items:center;gap:1rem;margin-top:.5rem">
-        <div>
-          <div style="font-size:1.4rem;font-weight:800;color:#FF6B3D">{{ stats.total_code_submissions }}</div>
-          <div style="font-size:.68rem;color:#6B6B78;font-weight:600">Total</div>
-        </div>
-        <div style="width:1px;height:30px;background:rgba(255,255,255,.08)"></div>
-        <div>
-          <div style="font-size:1.4rem;font-weight:800;color:#4ADE80">{{ stats.graded_submissions }}</div>
-          <div style="font-size:.68rem;color:#6B6B78;font-weight:600">Graded</div>
-        </div>
+      <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+        {% if orgs.count > 1 %}
+        <form method="GET" id="orgForm">
+          <select name="org" onchange="document.getElementById('orgForm').submit()" class="org-select">
+            {% for o in orgs %}
+            <option value="{{ o.pk }}" {% if org and o.pk == org.pk %}selected{% endif %}>{{ o.name }}</option>
+            {% endfor %}
+          </select>
+        </form>
+        {% endif %}
+        <a href="{% url 'corefrontend:dashboard_portal' %}" class="btn-ghost">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+          Portal
+        </a>
+        <span style="font-size:.78rem;color:#6B6B78;font-weight:600">{{ request.user.get_full_name|default:request.user.username }}</span>
+        <form method="post" action="{% url 'corefrontend:dashboard_logout' %}" style="margin:0">
+          {% csrf_token %}
+          <button type="submit"
+            style="font-size:.78rem;color:#FF6B3D;font-weight:700;background:none;border:none;cursor:pointer;padding:0">Logout</button>
+        </form>
       </div>
     </div>
-    <div class="stat-card anim d7">
-      <div class="stat-label">Staff Members</div>
-      <div style="margin-top:.5rem">
-        <div style="font-size:1.4rem;font-weight:800;color:#A78BFA">{{ stats.total_staff }}</div>
-        <div style="font-size:.68rem;color:#6B6B78;font-weight:600">Active staff roles</div>
+  </header>
+
+  {% if not org %}
+  <main class="page-shell" style="text-align:center;padding-top:8rem">
+    <h2 style="font-size:1.5rem;font-weight:800;color:#6B6B78">No Organization Found</h2>
+    <p style="color:#6B6B78;margin-top:.5rem">Create an organization in the admin panel first.</p>
+  </main>
+  {% else %}
+
+  <main class="page-shell">
+
+    <!-- ══════════ ORG HEADER ══════════ -->
+    <div class="anim" style="margin-bottom:2rem">
+      <h1 style="font-size:1.5rem;font-weight:800;margin:0 0 .25rem">
+        <span class="grad-text">{{ org.name }}</span>
+      </h1>
+      <p style="font-size:.82rem;color:#6B6B78;font-weight:600;margin:0">
+        Organization overview &amp; analytics
+        {% if org.city or org.state %} · {{ org.city }}{% if org.city and org.state %},{% endif %} {{ org.state }}{% endif %}
+      </p>
+    </div>
+
+    <!-- ══════════ TOP STAT CARDS ══════════ -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:2rem">
+      <div class="stat-card anim d1">
+        <div class="stat-label">Total Students</div>
+        <div class="stat-value grad-text">{{ stats.total_students }}</div>
+        <div class="stat-sub">{{ stats.unassigned_count }} unassigned</div>
+      </div>
+      <div class="stat-card anim d2">
+        <div class="stat-label">Teachers</div>
+        <div class="stat-value" style="color:#60A5FA">{{ stats.total_teachers }}</div>
+        <div class="stat-sub">Active instructors</div>
+      </div>
+      <div class="stat-card anim d3">
+        <div class="stat-label">Classrooms</div>
+        <div class="stat-value" style="color:#4ADE80">{{ stats.total_classrooms }}</div>
+        <div class="stat-sub">{{ stats.total_students }} students placed</div>
+      </div>
+      <div class="stat-card anim d4">
+        <div class="stat-label">Parents</div>
+        <div class="stat-value" style="color:#A78BFA">{{ stats.total_parents }}</div>
+        <div class="stat-sub">Linked accounts</div>
+      </div>
+      <div class="stat-card anim d5">
+        <div class="stat-label">Courses</div>
+        <div class="stat-value" style="color:#FFB347">{{ stats.total_courses }}</div>
+        <div class="stat-sub">{{ stats.total_enrollments }} enrollments</div>
+      </div>
+      <div class="stat-card anim d6">
+        <div class="stat-label">Modules / Lessons</div>
+        <div class="stat-value" style="color:#F472B6">{{ stats.total_modules }}</div>
+        <div class="stat-sub">{{ stats.total_lessons }} lessons total</div>
+      </div>
+      <div class="stat-card anim d7">
+        <div class="stat-label">CBTs Created</div>
+        <div class="stat-value" style="color:#34D399">{{ stats.total_tests }}</div>
+        <div class="stat-sub">{{ stats.published_tests }} published · {{ stats.draft_tests }} draft</div>
+      </div>
+      <div class="stat-card anim d8">
+        <div class="stat-label">Certificates</div>
+        <div class="stat-value" style="color:#FBBF24">{{ stats.total_certs }}</div>
+        <div class="stat-sub">{{ stats.issued_certs }} issued · {{ stats.revoked_certs }} revoked</div>
       </div>
     </div>
-  </div>
 
-  <!-- ══════════ TABBED DATA PANELS ══════════ -->
-  <div class="panel anim d4" style="margin-bottom:2rem">
-    <div class="tab-bar" id="mainTabBar">
-      <button class="tab-btn active" data-tab="classrooms" onclick="switchTab('classrooms',this)">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="display:inline;vertical-align:middle;margin-right:4px"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        Classrooms
-      </button>
-      <button class="tab-btn" data-tab="courses" onclick="switchTab('courses',this)">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-        Courses
-      </button>
-      <button class="tab-btn" data-tab="unassigned" onclick="switchTab('unassigned',this)">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-        Unassigned Students
-      </button>
-    </div>
-
-    <!-- ── Classrooms Tab ── -->
-    <div class="tab-content active" id="tab-classrooms">
-      {% if classrooms %}
-      <!-- Visual bar chart -->
-      <div style="padding:1.5rem">
-        <div style="font-size:.78rem;font-weight:700;color:#6B6B78;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.08em">Students per Classroom</div>
-        <div class="bar-chart">
-          {% for c in classrooms %}
-          <div class="bar-col">
-            <div style="font-size:.72rem;font-weight:800;color:#E8E4E0">{{ c.count }}</div>
-            <div class="bar-stick" style="height:{% widthratio c.count stats.total_students 100 %}%;min-height:4px;background:linear-gradient(180deg,#FF6B3D,#DC3005)" title="{{ c.name }}: {{ c.count }} students"></div>
-            <div class="bar-label">{{ c.name }}</div>
+    <!-- ══════════ SECONDARY STATS ══════════ -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;margin-bottom:2.5rem">
+      <div class="stat-card anim d5">
+        <div class="stat-label">Enrollments Breakdown</div>
+        <div style="display:flex;align-items:center;gap:1rem;margin-top:.5rem">
+          <div>
+            <div style="font-size:1.4rem;font-weight:800;color:#4ADE80">{{ stats.active_enrollments }}</div>
+            <div style="font-size:.68rem;color:#6B6B78;font-weight:600">Active</div>
           </div>
-          {% endfor %}
+          <div style="width:1px;height:30px;background:rgba(255,255,255,.08)"></div>
+          <div>
+            <div style="font-size:1.4rem;font-weight:800;color:#60A5FA">{{ stats.completed_enrollments }}</div>
+            <div style="font-size:.68rem;color:#6B6B78;font-weight:600">Completed</div>
+          </div>
         </div>
       </div>
-      <!-- Table -->
-      <div style="overflow-x:auto">
-        <table class="tbl">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Classroom</th>
-              <th>Code</th>
-              <th>Students</th>
-              <th>% of Total</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div class="stat-card anim d6">
+        <div class="stat-label">Code Submissions</div>
+        <div style="display:flex;align-items:center;gap:1rem;margin-top:.5rem">
+          <div>
+            <div style="font-size:1.4rem;font-weight:800;color:#FF6B3D">{{ stats.total_code_submissions }}</div>
+            <div style="font-size:.68rem;color:#6B6B78;font-weight:600">Total</div>
+          </div>
+          <div style="width:1px;height:30px;background:rgba(255,255,255,.08)"></div>
+          <div>
+            <div style="font-size:1.4rem;font-weight:800;color:#4ADE80">{{ stats.graded_submissions }}</div>
+            <div style="font-size:.68rem;color:#6B6B78;font-weight:600">Graded</div>
+          </div>
+        </div>
+      </div>
+      <div class="stat-card anim d7">
+        <div class="stat-label">Staff Members</div>
+        <div style="margin-top:.5rem">
+          <div style="font-size:1.4rem;font-weight:800;color:#A78BFA">{{ stats.total_staff }}</div>
+          <div style="font-size:.68rem;color:#6B6B78;font-weight:600">Active staff roles</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ TABBED DATA PANELS ══════════ -->
+    <div class="panel anim d4" style="margin-bottom:2rem">
+      <div class="tab-bar" id="mainTabBar">
+        <button class="tab-btn active" data-tab="classrooms" onclick="switchTab('classrooms',this)">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"
+            style="display:inline;vertical-align:middle;margin-right:4px">
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
+          </svg>
+          Classrooms
+        </button>
+        <button class="tab-btn" data-tab="courses" onclick="switchTab('courses',this)">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"
+            style="display:inline;vertical-align:middle;margin-right:4px">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+          </svg>
+          Courses
+        </button>
+        <button class="tab-btn" data-tab="unassigned" onclick="switchTab('unassigned',this)">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"
+            style="display:inline;vertical-align:middle;margin-right:4px">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <line x1="23" y1="11" x2="17" y2="11" />
+          </svg>
+          Unassigned Students
+        </button>
+      </div>
+
+      <!-- ── Classrooms Tab ── -->
+      <div class="tab-content active" id="tab-classrooms">
+        {% if classrooms %}
+        <!-- Visual bar chart -->
+        <div style="padding:1.5rem">
+          <div
+            style="font-size:.78rem;font-weight:700;color:#6B6B78;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.08em">
+            Students per Classroom</div>
+          <div class="bar-chart">
             {% for c in classrooms %}
-            <tr>
-              <td class="mono" style="color:#6B6B78;font-size:.75rem">{{ forloop.counter }}</td>
-              <td style="font-weight:700">{{ c.name }}</td>
-              <td><span class="badge badge-gray mono">{{ c.code|default:"—" }}</span></td>
-              <td style="font-weight:800;color:#FF6B3D">{{ c.count }}</td>
-              <td>
-                <div style="display:flex;align-items:center;gap:.5rem">
-                  <div class="progress-track">
-                    <div class="progress-fill" style="width:{% if stats.total_students %}{% widthratio c.count stats.total_students 100 %}{% else %}0{% endif %}%;background:linear-gradient(90deg,#DC3005,#F97316)"></div>
-                  </div>
-                  <span class="mono" style="font-size:.72rem;color:#6B6B78;min-width:35px;text-align:right">
-                    {% if stats.total_students %}{% widthratio c.count stats.total_students 100 %}%{% else %}0%{% endif %}
-                  </span>
-                </div>
-              </td>
-            </tr>
+            <div class="bar-col">
+              <div style="font-size:.72rem;font-weight:800;color:#E8E4E0">{{ c.count }}</div>
+              <div class="bar-stick"
+                style="height:{% widthratio c.count stats.total_students 100 %}%;min-height:4px;background:linear-gradient(180deg,#FF6B3D,#DC3005)"
+                title="{{ c.name }}: {{ c.count }} students"></div>
+              <div class="bar-label">{{ c.name }}</div>
+            </div>
             {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <div style="padding:3rem;text-align:center;color:#6B6B78;font-weight:600">No classrooms found for this organization.</div>
-      {% endif %}
-    </div>
-
-    <!-- ── Courses Tab ── -->
-    <div class="tab-content" id="tab-courses">
-      {% if courses %}
-      <div style="overflow-x:auto">
-        <table class="tbl">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Course</th>
-              <th>Subject</th>
-              <th>Classroom</th>
-              <th>Teacher</th>
-              <th>Enrolled</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for c in courses %}
-            <tr>
-              <td class="mono" style="color:#6B6B78;font-size:.75rem">{{ forloop.counter }}</td>
-              <td style="font-weight:700">{{ c.name }}</td>
-              <td><span class="badge badge-blue">{{ c.subject }}</span></td>
-              <td style="font-size:.82rem;color:#9A8F86">{{ c.classroom }}</td>
-              <td style="font-size:.82rem">{{ c.teacher }}</td>
-              <td style="font-weight:800;color:#FFB347">{{ c.enrolled }}</td>
-              <td>
-                {% if c.is_active %}
-                <span class="badge badge-green">Active</span>
-                {% else %}
-                <span class="badge badge-red">Inactive</span>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <div style="padding:3rem;text-align:center;color:#6B6B78;font-weight:600">No courses found for this organization.</div>
-      {% endif %}
-    </div>
-
-    <!-- ── Unassigned Students Tab ── -->
-    <div class="tab-content" id="tab-unassigned">
-      {% if unassigned_students %}
-      <div style="padding:1rem 1.5rem .5rem">
-        <div class="badge badge-orange" style="font-size:.75rem;padding:.3rem .8rem">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          {{ stats.unassigned_count }} student{{ stats.unassigned_count|pluralize }} not assigned to any classroom
+          </div>
         </div>
+        <!-- Table -->
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Classroom</th>
+                <th>Code</th>
+                <th>Students</th>
+                <th>% of Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in classrooms %}
+              <tr>
+                <td class="mono" style="color:#6B6B78;font-size:.75rem">{{ forloop.counter }}</td>
+                <td style="font-weight:700">{{ c.name }}</td>
+                <td><span class="badge badge-gray mono">{{ c.code|default:"—" }}</span></td>
+                <td style="font-weight:800;color:#FF6B3D">{{ c.count }}</td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:.5rem">
+                    <div class="progress-track">
+                      <div class="progress-fill"
+                        style="width:{% if stats.total_students %}{% widthratio c.count stats.total_students 100 %}{% else %}0{% endif %}%;background:linear-gradient(90deg,#DC3005,#F97316)">
+                      </div>
+                    </div>
+                    <span class="mono" style="font-size:.72rem;color:#6B6B78;min-width:35px;text-align:right">
+                      {% if stats.total_students %}{% widthratio c.count stats.total_students 100 %}%{% else %}0%{% endif %}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div style="padding:3rem;text-align:center;color:#6B6B78;font-weight:600">No classrooms found for this
+          organization.</div>
+        {% endif %}
       </div>
-      <div style="overflow-x:auto">
-        <table class="tbl">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Admission No</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for s in unassigned_students %}
-            <tr>
-              <td class="mono" style="color:#6B6B78;font-size:.75rem">{{ forloop.counter }}</td>
-              <td style="font-weight:700">{{ s.user.get_full_name|default:s.user.username }}</td>
-              <td class="mono" style="font-size:.78rem;color:#FF6B3D">{{ s.user.email }}</td>
-              <td><span class="badge badge-gray mono">{{ s.admission_no|default:"—" }}</span></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+
+      <!-- ── Courses Tab ── -->
+      <div class="tab-content" id="tab-courses">
+        {% if courses %}
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Course</th>
+                <th>Subject</th>
+                <th>Classroom</th>
+                <th>Teacher</th>
+                <th>Enrolled</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in courses %}
+              <tr>
+                <td class="mono" style="color:#6B6B78;font-size:.75rem">{{ forloop.counter }}</td>
+                <td style="font-weight:700">{{ c.name }}</td>
+                <td><span class="badge badge-blue">{{ c.subject }}</span></td>
+                <td style="font-size:.82rem;color:#9A8F86">{{ c.classroom }}</td>
+                <td style="font-size:.82rem">{{ c.teacher }}</td>
+                <td style="font-weight:800;color:#FFB347">{{ c.enrolled }}</td>
+                <td>
+                  {% if c.is_active %}
+                  <span class="badge badge-green">Active</span>
+                  {% else %}
+                  <span class="badge badge-red">Inactive</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div style="padding:3rem;text-align:center;color:#6B6B78;font-weight:600">No courses found for this
+          organization.</div>
+        {% endif %}
       </div>
-      {% if stats.unassigned_count > 50 %}
-      <div style="padding:1rem 1.5rem;font-size:.78rem;color:#6B6B78;font-weight:600;border-top:1px solid rgba(255,255,255,.06)">
-        Showing first 50 of {{ stats.unassigned_count }} unassigned students.
+
+      <!-- ── Unassigned Students Tab ── -->
+      <div class="tab-content" id="tab-unassigned">
+        {% if unassigned_students %}
+        <div style="padding:1rem 1.5rem .5rem">
+          <div class="badge badge-orange" style="font-size:.75rem;padding:.3rem .8rem">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            {{ stats.unassigned_count }} student{{ stats.unassigned_count|pluralize }} not assigned to any classroom
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Admission No</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in unassigned_students %}
+              <tr>
+                <td class="mono" style="color:#6B6B78;font-size:.75rem">{{ forloop.counter }}</td>
+                <td style="font-weight:700">{{ s.user.get_full_name|default:s.user.username }}</td>
+                <td class="mono" style="font-size:.78rem;color:#FF6B3D">{{ s.user.email }}</td>
+                <td><span class="badge badge-gray mono">{{ s.admission_no|default:"—" }}</span></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if stats.unassigned_count > 50 %}
+        <div
+          style="padding:1rem 1.5rem;font-size:.78rem;color:#6B6B78;font-weight:600;border-top:1px solid rgba(255,255,255,.06)">
+          Showing first 50 of {{ stats.unassigned_count }} unassigned students.
+        </div>
+        {% endif %}
+        {% else %}
+        <div style="padding:3rem;text-align:center;color:#4ADE80;font-weight:600">
+          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"
+            style="display:inline;vertical-align:middle;margin-right:6px">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+          All students are assigned to a classroom!
+        </div>
+        {% endif %}
       </div>
-      {% endif %}
-      {% else %}
-      <div style="padding:3rem;text-align:center;color:#4ADE80;font-weight:600">
-        <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="display:inline;vertical-align:middle;margin-right:6px"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-        All students are assigned to a classroom!
-      </div>
-      {% endif %}
     </div>
-  </div>
 
-</main>
-{% endif %}
+  </main>
+  {% endif %}
 
-<script>
-function switchTab(tabId, btn) {
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + tabId).classList.add('active');
-  btn.classList.add('active');
-}
-</script>
+  <script>
+    function switchTab(tabId, btn) {
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + tabId).classList.add('active');
+      btn.classList.add('active');
+    }
+  </script>
 
 </body>
+
 </html>
