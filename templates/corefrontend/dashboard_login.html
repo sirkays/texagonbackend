@@ -1,6 +1,7 @@
 {% load static %}
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,21 +10,37 @@
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <style>
-    body { font-family:'Syne',sans-serif; background:#FAF8F6; }
-    .grad { background: linear-gradient(135deg, #DC3005 0%, #F97316 100%); }
-    .card { background:#fff; border:1px solid #EDE8E3; border-radius:20px; }
-    .field {
-      width:100%;
-      padding:.85rem 1rem;
-      border:1.5px solid #EDE8E3;
-      border-radius:12px;
-      outline:none;
-      font-size:.95rem;
-      background:#fff;
+    body {
+      font-family: 'Syne', sans-serif;
+      background: #FAF8F6;
     }
-    .field:focus { border-color:#F97316; }
+
+    .grad {
+      background: linear-gradient(135deg, #DC3005 0%, #F97316 100%);
+    }
+
+    .card {
+      background: #fff;
+      border: 1px solid #EDE8E3;
+      border-radius: 20px;
+    }
+
+    .field {
+      width: 100%;
+      padding: .85rem 1rem;
+      border: 1.5px solid #EDE8E3;
+      border-radius: 12px;
+      outline: none;
+      font-size: .95rem;
+      background: #fff;
+    }
+
+    .field:focus {
+      border-color: #F97316;
+    }
   </style>
 </head>
+
 <body class="min-h-screen flex items-center justify-center px-4">
   <div class="w-full max-w-md">
     <div class="text-center mb-6">
@@ -37,11 +54,11 @@
         {% csrf_token %}
 
         {% if form.non_field_errors %}
-          <div class="mb-4 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-            {% for error in form.non_field_errors %}
-              <div>{{ error }}</div>
-            {% endfor %}
-          </div>
+        <div class="mb-4 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          {% for error in form.non_field_errors %}
+          <div>{{ error }}</div>
+          {% endfor %}
+        </div>
         {% endif %}
 
         <div class="mb-4">
@@ -61,4 +78,5 @@
     </div>
   </div>
 </body>
+
 </html>

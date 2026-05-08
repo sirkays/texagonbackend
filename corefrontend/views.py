@@ -454,11 +454,151 @@ class DashboardLoginView(LoginView):
     redirect_authenticated_user = True
 
     def get_success_url(self):
-        return self.request.GET.get('next') or '/applications/dashboard/'
+        return self.request.GET.get('next') or '/applications/portal/'
 
 
 class DashboardLogoutView(LogoutView):
     next_page = '/applications/login/'
+
+
+@dashboard_access_required
+def portal_chooser(request):
+    return render(request, 'corefrontend/dashboard_portal.html')
+
+
+@dashboard_access_required
+def analytics_dashboard(request):
+    from orgs.models import Organization, OrganizationMembership
+    from academics.models import (
+        Classroom, StudentProfile, TeacherProfile, EnrollmentCertificate,
+    )
+    from learning.models import Course, Enrollment, Module, Lesson
+    from assessments.models import Test
+    from codeide.models import CodeSubmission
+
+    # ── Determine organization ──
+    orgs = Organization.objects.filter(is_active=True).order_by('name')
+    selected_org_id = request.GET.get('org')
+    org = None
+
+    if selected_org_id:
+        try:
+            org = Organization.objects.get(pk=selected_org_id, is_active=True)
+        except Organization.DoesNotExist:
+            pass
+
+    if not org:
+        org = orgs.first()
+
+    if not org:
+        return render(request, 'corefrontend/analytics_dashboard.html', {
+            'orgs': orgs, 'org': None, 'stats': {},
+            'classrooms': [], 'unassigned_students': [],
+        })
+
+    # ── Students ──
+    all_students = StudentProfile.objects.filter(organization=org)
+    total_students = all_students.count()
+    unassigned_students = all_students.filter(current_classroom__isnull=True).select_related('user')
+
+    # ── Teachers ──
+    total_teachers = TeacherProfile.objects.filter(organization=org).count()
+
+    # ── Classrooms with student counts ──
+    classrooms = (
+        Classroom.objects.filter(organization=org)
+        .prefetch_related('studentprofile_set')
+        .order_by('name')
+    )
+    classroom_data = []
+    for cls in classrooms:
+        count = cls.studentprofile_set.count()
+        classroom_data.append({'name': cls.name, 'code': cls.code, 'count': count, 'id': cls.id})
+
+    # ── Courses & Enrollments ──
+    courses = Course.objects.filter(organization=org)
+    total_courses = courses.count()
+    total_enrollments = Enrollment.objects.filter(course__organization=org).count()
+    active_enrollments = Enrollment.objects.filter(
+        course__organization=org, status='active'
+    ).count()
+    completed_enrollments = Enrollment.objects.filter(
+        course__organization=org, status='completed'
+    ).count()
+
+    # Per-course enrollment data
+    course_data = []
+    for c in courses.select_related('subject', 'classroom', 'teacher__user').order_by('name'):
+        enrolled = c.enrollments.count()
+        course_data.append({
+            'name': c.name,
+            'subject': c.subject.name if c.subject else '—',
+            'classroom': c.classroom.name if c.classroom else '—',
+            'teacher': c.teacher.user.get_full_name() if c.teacher else '—',
+            'enrolled': enrolled,
+            'is_active': c.is_active,
+        })
+
+    # ── Modules & Lessons ──
+    total_modules = Module.objects.filter(course__organization=org).count()
+    total_lessons = Lesson.objects.filter(module__course__organization=org).count()
+
+    # ── CBTs (Tests) ──
+    tests_qs = Test.objects.filter(course__organization=org)
+    total_tests = tests_qs.count()
+    published_tests = tests_qs.filter(visibility='published').count()
+    draft_tests = tests_qs.filter(visibility='draft').count()
+
+    # ── Certificates ──
+    certs = EnrollmentCertificate.objects.filter(organization=org)
+    total_certs = certs.count()
+    issued_certs = certs.filter(status='issued').count()
+    revoked_certs = certs.filter(status='revoked').count()
+
+    # ── Code Submissions ──
+    total_code_submissions = CodeSubmission.objects.filter(
+        student__organization=org
+    ).count()
+    graded_submissions = CodeSubmission.objects.filter(
+        student__organization=org, status='graded'
+    ).count()
+
+    # ── Memberships breakdown ──
+    memberships = OrganizationMembership.objects.filter(organization=org, is_active=True)
+    total_parents = memberships.filter(role='parent').count()
+    total_staff = memberships.filter(role='staff').count()
+
+    stats = {
+        'total_students': total_students,
+        'total_teachers': total_teachers,
+        'total_parents': total_parents,
+        'total_staff': total_staff,
+        'unassigned_count': unassigned_students.count(),
+        'total_classrooms': len(classroom_data),
+        'total_courses': total_courses,
+        'total_enrollments': total_enrollments,
+        'active_enrollments': active_enrollments,
+        'completed_enrollments': completed_enrollments,
+        'total_modules': total_modules,
+        'total_lessons': total_lessons,
+        'total_tests': total_tests,
+        'published_tests': published_tests,
+        'draft_tests': draft_tests,
+        'total_certs': total_certs,
+        'issued_certs': issued_certs,
+        'revoked_certs': revoked_certs,
+        'total_code_submissions': total_code_submissions,
+        'graded_submissions': graded_submissions,
+    }
+
+    return render(request, 'corefrontend/analytics_dashboard.html', {
+        'orgs': orgs,
+        'org': org,
+        'stats': stats,
+        'classrooms': classroom_data,
+        'courses': course_data,
+        'unassigned_students': unassigned_students[:50],
+    })
 
 
 def get_filtered_applications(request):

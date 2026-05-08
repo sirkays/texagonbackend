@@ -36,10 +36,13 @@ urlpatterns = [
 
     path('applications/login/', views.DashboardLoginView.as_view(), name='dashboard_login'),
     path('applications/logout/', views.DashboardLogoutView.as_view(), name='dashboard_logout'),
+    path('applications/portal/', views.portal_chooser, name='dashboard_portal'),
 
     path('applications/dashboard/', views.admin_applications, name='admin_applications'),
     path('applications/dashboard/export/csv/', views.export_applications_csv, name='export_applications_csv'),
     path('applications/dashboard/<int:pk>/', views.admin_application_detail, name='admin_application_detail'),
+
+    path('applications/analytics/', views.analytics_dashboard, name='analytics_dashboard'),
 
     path('admin-user/send-email/',            views.admin_send_email,           name='admin_send_email'),
 ]
