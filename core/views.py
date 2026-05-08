@@ -1401,3 +1401,331 @@ def upload_parent_student_csv(request):
     }
     status_code = status.HTTP_207_MULTI_STATUS if errors else status.HTTP_201_CREATED
     return Response(summary, status=status_code)
+
+
+# ── Login Generation ─────────────────────────────────────────────────────────
+
+import unicodedata
+from datetime import timedelta
+from openpyxl import Workbook, load_workbook
+from io import BytesIO
+from billing.models import SubscriptionPlan, UserAccountSubscription
+
+
+def _sanitise_for_email(full_name: str) -> str:
+    """
+    Convert a full name to a lowercase, ASCII-only, punctuation-free string
+    suitable for use as an email local-part.
+    """
+    nfkd = unicodedata.normalize("NFKD", full_name)
+    ascii_only = nfkd.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]", "", ascii_only.lower())
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def login_generation_template(request):
+    """
+    GET /core/api/admin/login-generation/template/
+    Returns an .xlsx template with columns: Student Name
+    Each sheet tab represents a classroom.
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Students"
+        ws.append(["Student Full Name"])
+        # Add a couple of example rows
+        ws.append(["John Doe"])
+        ws.append(["Jane Smith"])
+
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        response = HttpResponse(
+            buf.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="student_login_template.xlsx"'
+        return response
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response(
+            {"detail": "Failed to generate template.", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def generate_student_logins(request):
+    """
+    POST /core/api/admin/login-generation/generate/
+
+    Accepts two modes:
+      1) mode=excel  → multipart with file= .xlsx
+      2) mode=manual → JSON body with students=[{name, classroom_name}]
+
+    Required: classroom_id (for manual mode per-student or a single one)
+
+    Creates for each student:
+      • User (email = <sanitised-name><org-slug>@techxagonacademy.com, password = Techxagon@2026)
+      • OrganizationMembership (role=student)
+      • StudentProfile (org + classroom linked)
+      • UserAccountSubscription (Free plan, 1 month, active)
+
+    Everything runs inside transaction.atomic() — any error rolls back all.
+
+    Returns JSON with created student details (name, email, password, classroom, admission_no).
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        mode = request.data.get("mode") or request.POST.get("mode") or "manual"
+
+        # ── Resolve the Free plan (SubscriptionPlan with price=0 or lowest price)
+        free_plan = SubscriptionPlan.objects.filter(price=0).first()
+        if not free_plan:
+            free_plan = SubscriptionPlan.objects.order_by("price").first()
+        if not free_plan:
+            return Response(
+                {"detail": "No subscription plan found. Please create a Free plan first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        password = "Techxagon@2026"
+        now = timezone.now()
+        end_at = now + timedelta(days=30)  # 1 month subscription
+        org_slug = (org.slug or "org").replace("-", "").replace("_", "").lower()
+
+        # ── Parse students list based on mode ─────────────────────────
+        students_to_create = []  # list of dicts: {name, classroom_name}
+
+        if mode == "excel":
+            file = request.FILES.get("file")
+            if not file:
+                return Response(
+                    {"detail": "Excel file is required for mode=excel."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                wb = load_workbook(file, read_only=True)
+            except Exception as exc:
+                return Response(
+                    {"detail": f"Cannot open Excel file: {exc}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            classroom_id = request.data.get("classroom_id") or request.POST.get("classroom_id")
+            if not classroom_id:
+                return Response(
+                    {"detail": "classroom_id is required."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                classroom_obj = Classroom.objects.get(pk=int(classroom_id), organization=org)
+            except (Classroom.DoesNotExist, ValueError):
+                return Response(
+                    {"detail": f"Classroom with id={classroom_id} not found in this organization."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                rows = list(ws.iter_rows(values_only=True))
+                for row in rows[1:]:  # skip header row
+                    if not row or len(row) < 1:
+                        continue
+                    name = str(row[0] or "").strip()
+                    if not name:
+                        continue
+                    students_to_create.append({
+                        "name": name,
+                        "classroom_name": classroom_obj.name,
+                        "classroom_id": classroom_obj.id,
+                    })
+
+            wb.close()
+
+        elif mode == "manual":
+            students_raw = request.data.get("students", [])
+            if not students_raw or not isinstance(students_raw, list):
+                return Response(
+                    {"detail": "students list is required for mode=manual."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            for s in students_raw:
+                name = (s.get("name") or "").strip()
+                classroom_id = s.get("classroom_id")
+                if not name:
+                    continue
+                if not classroom_id:
+                    return Response(
+                        {"detail": f"classroom_id is required for student '{name}'."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                try:
+                    cls_obj = Classroom.objects.get(pk=int(classroom_id), organization=org)
+                except (Classroom.DoesNotExist, ValueError):
+                    return Response(
+                        {"detail": f"Classroom id={classroom_id} not found for student '{name}'."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                students_to_create.append({
+                    "name": name,
+                    "classroom_name": cls_obj.name,
+                    "classroom_id": cls_obj.id,
+                })
+        else:
+            return Response(
+                {"detail": "Invalid mode. Use 'excel' or 'manual'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not students_to_create:
+            return Response(
+                {"detail": "No valid students found to process."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Seed email uniqueness pool ────────────────────────────
+        existing_emails = set(
+            User.objects.filter(email__endswith="@techxagonacademy.com")
+            .values_list("email", flat=True)
+        )
+        assigned_emails = set()
+
+        # ── Create everything atomically ──────────────────────────
+        created_results = []
+        stats = {
+            "users_created": 0,
+            "profiles_created": 0,
+            "memberships_created": 0,
+            "subscriptions_created": 0,
+            "skipped_existing": 0,
+        }
+
+        # Pre-fetch / cache classrooms
+        classroom_cache = {}
+
+        with transaction.atomic():
+            for student_data in students_to_create:
+                full_name = student_data["name"]
+                cls_id = student_data["classroom_id"]
+                cls_name = student_data["classroom_name"]
+
+                # Get or cache classroom
+                if cls_id not in classroom_cache:
+                    classroom_cache[cls_id] = Classroom.objects.get(pk=cls_id, organization=org)
+                classroom = classroom_cache[cls_id]
+
+                # ── Build unique email ────────────────────
+                base_local = _sanitise_for_email(full_name)
+                if not base_local:
+                    base_local = "student"
+
+                local_part = base_local + org_slug
+                candidate = f"{local_part}@techxagonacademy.com"
+
+                suffix = 0
+                while candidate in existing_emails or candidate in assigned_emails:
+                    suffix += 1
+                    candidate = f"{local_part}{suffix}@techxagonacademy.com"
+
+                email = candidate
+                assigned_emails.add(email)
+                existing_emails.add(email)
+
+                # ── Skip if user already in DB ────────────
+                if User.objects.filter(email=email).exists():
+                    stats["skipped_existing"] += 1
+                    continue
+
+                # ── Split name ────────────────────────────
+                parts = full_name.strip().split()
+                first_name = parts[0] if parts else ""
+                last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+                # ── User ──────────────────────────────────
+                user = User.objects.create_user(
+                    email=email,
+                    password=password,
+                    first_name=first_name,
+                    last_name=last_name,
+                    is_generated=True,
+                    is_active=True,
+                    primary_org=org,
+                )
+                stats["users_created"] += 1
+
+                # ── OrganizationMembership ────────────────
+                OrganizationMembership.objects.create(
+                    user=user,
+                    organization=org,
+                    role=OrganizationMembership.Role.STUDENT,
+                    is_active=True,
+                )
+                stats["memberships_created"] += 1
+
+                # ── StudentProfile ────────────────────────
+                sp = StudentProfile.objects.create(
+                    user=user,
+                    organization=org,
+                    current_classroom=classroom,
+                )
+                stats["profiles_created"] += 1
+
+                # ── UserAccountSubscription (1 month Free) ─
+                UserAccountSubscription.objects.create(
+                    organization=org,
+                    user=user,
+                    plan=free_plan,
+                    status=UserAccountSubscription.Status.ACTIVE,
+                    start_at=now,
+                    end_at=end_at,
+                    amount=free_plan.price,
+                    currency="NGN",
+                )
+                stats["subscriptions_created"] += 1
+
+                created_results.append({
+                    "name": full_name,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "email": email,
+                    "password": password,
+                    "classroom": cls_name,
+                    "admission_no": sp.admission_no or "",
+                })
+
+        return Response(
+            {
+                "detail": "Login generation completed successfully.",
+                "stats": stats,
+                "students": created_results,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response(
+            {"detail": "Login generation failed. All changes have been rolled back.", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )

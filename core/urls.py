@@ -4,7 +4,7 @@ from .views import (active_modules_for_user,leaderboard_seasons_view,leaderboard
 course_pass_criteria_view,admin_categories_list_create,admin_categories_detail,admin_products_list_create,
 admin_products_detail,admin_product_images_upload,admin_product_images_detail,admin_classroom_modal_data,
 admin_student_devices_search,admin_student_device_delete,download_csv_template,upload_parent_student_csv,
-school_students_view)
+school_students_view,login_generation_template,generate_student_logins)
 
 urlpatterns = [
     path(
@@ -37,4 +37,8 @@ urlpatterns = [
 
     path("api/import/template/parents-students/", download_csv_template, name="ps_template"),
     path("api/import/upload/parents-students/", upload_parent_student_csv, name="ps_upload"),
+
+    # Login Generation
+    path("api/admin/login-generation/template/", login_generation_template, name="login_gen_template"),
+    path("api/admin/login-generation/generate/", generate_student_logins, name="login_gen_generate"),
 ]
