@@ -1884,4 +1884,4 @@ def admin_change_user_password(request):
             "email": target_user.email,
         },
         status=status.HTTP_200_OK,
-    )
+    )
