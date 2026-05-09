@@ -490,10 +490,18 @@ def analytics_dashboard(request):
     if not org:
         org = orgs.first()
 
+    # ── Platform-wide totals (always computed, regardless of selected org) ──
+    global_stats = {
+        'total_students': StudentProfile.objects.count(),
+        'total_enrolled': Enrollment.objects.count(),
+        'total_orgs': orgs.count(),
+    }
+
     if not org:
         return render(request, 'corefrontend/analytics_dashboard.html', {
             'orgs': orgs, 'org': None, 'stats': {},
             'classrooms': [], 'unassigned_students': [],
+            'global_stats': global_stats,
         })
 
     # ── Students ──
@@ -598,6 +606,7 @@ def analytics_dashboard(request):
         'classrooms': classroom_data,
         'courses': course_data,
         'unassigned_students': unassigned_students[:50],
+        'global_stats': global_stats,
     })
 
 
