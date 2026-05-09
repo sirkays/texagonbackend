@@ -3113,3 +3113,269 @@ def classroom_students_bulk_update(request, classroom_id: int):
         "removed": removed_count,
     }, status=status.HTTP_200_OK)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Report Generation Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_date_range(request):
+    """Parse date_from / date_to query params. Returns (start, end) as aware datetimes."""
+    from django.utils.dateparse import parse_date
+    date_from_str = request.query_params.get("date_from", "")
+    date_to_str = request.query_params.get("date_to", "")
+
+    today = timezone.now().date()
+    # defaults: current month
+    start_date = parse_date(date_from_str) if date_from_str else today.replace(day=1)
+    end_date = parse_date(date_to_str) if date_to_str else today
+
+    # clamp: start <= end
+    if start_date and end_date and start_date > end_date:
+        start_date, end_date = end_date, start_date
+
+    start_dt = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+    end_dt = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
+    return start_dt, end_dt
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def report_student_performance(request):
+    """
+    GET /api/admin/reports/student-performance/
+    Query: date_from=YYYY-MM-DD, date_to=YYYY-MM-DD
+    Returns a CSV file with student performance data.
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        start_dt, end_dt = _parse_date_range(request)
+
+        students = (
+            StudentProfile.objects
+            .filter(organization=org)
+            .select_related("user", "current_classroom")
+            .prefetch_related("enrollments__course")
+        )
+
+        # Aggregate test scores
+        test_scores = (
+            TestAttempt.objects
+            .filter(student__organization=org, started_at__gte=start_dt, started_at__lte=end_dt)
+            .values("student_id")
+            .annotate(
+                total_attempts=Count("id"),
+                avg_score=Avg("score"),
+            )
+        )
+        score_map = {r["student_id"]: r for r in test_scores}
+
+        # Submission counts
+        submission_counts = (
+            Submission.objects
+            .filter(student__organization=org, submitted_at__gte=start_dt, submitted_at__lte=end_dt)
+            .values("student_id")
+            .annotate(count=Count("id"))
+        )
+        sub_map = {r["student_id"]: r["count"] for r in submission_counts}
+
+        # Enrollment counts & avg progress
+        enrollment_data = (
+            Enrollment.objects
+            .filter(course__organization=org, student__organization=org)
+            .values("student_id")
+            .annotate(
+                course_count=Count("id"),
+                avg_progress=Avg("progress_pct"),
+            )
+        )
+        enroll_map = {r["student_id"]: r for r in enrollment_data}
+
+        buf = StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "Student ID", "Full Name", "Email", "Classroom",
+            "Courses Enrolled", "Avg Progress (%)",
+            "Tests Attempted", "Avg Test Score (%)",
+            "Assignments Submitted",
+        ])
+
+        for s in students:
+            name = (s.user.get_full_name() or "").strip() or s.user.email
+            classroom = getattr(s.current_classroom, "name", "N/A") if s.current_classroom else "N/A"
+            ed = enroll_map.get(s.id, {})
+            sd = score_map.get(s.id, {})
+            writer.writerow([
+                s.id,
+                name,
+                s.user.email,
+                classroom,
+                ed.get("course_count", 0),
+                round(float(ed.get("avg_progress") or 0), 1),
+                sd.get("total_attempts", 0),
+                round(float(sd.get("avg_score") or 0), 1),
+                sub_map.get(s.id, 0),
+            ])
+
+        csv_data = buf.getvalue()
+        resp = HttpResponse(csv_data, content_type="text/csv")
+        resp["Content-Disposition"] = 'attachment; filename="student_performance_report.csv"'
+        return resp
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def report_revenue(request):
+    """
+    GET /api/admin/reports/revenue/
+    Query: date_from=YYYY-MM-DD, date_to=YYYY-MM-DD
+    Returns a CSV file with revenue / billing data.
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        start_dt, end_dt = _parse_date_range(request)
+
+        invoices = (
+            SubscriptionInvoice.objects
+            .filter(
+                subscription__organization=org,
+                issued_at__gte=start_dt,
+                issued_at__lte=end_dt,
+            )
+            .select_related("subscription__plan", "organization_membership__user")
+            .order_by("-issued_at")
+        )
+
+        buf = StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "Invoice #", "Issued Date", "Due Date",
+            "Payer Name", "Payer Email",
+            "Plan", "Amount", "Currency", "Status",
+        ])
+
+        for inv in invoices:
+            mem = inv.organization_membership
+            payer_name = _member_display_name(mem) if mem else "N/A"
+            payer_email = mem.user.email if mem and mem.user else "N/A"
+            plan = getattr(getattr(inv, "subscription", None), "plan", None)
+            writer.writerow([
+                inv.number,
+                inv.issued_at.strftime("%Y-%m-%d") if inv.issued_at else "",
+                inv.due_at.strftime("%Y-%m-%d") if inv.due_at else "",
+                payer_name,
+                payer_email,
+                plan.name if plan else "N/A",
+                f"{inv.amount:.2f}",
+                inv.currency,
+                inv.status,
+            ])
+
+        csv_data = buf.getvalue()
+        resp = HttpResponse(csv_data, content_type="text/csv")
+        resp["Content-Disposition"] = 'attachment; filename="revenue_report.csv"'
+        return resp
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def report_course_completion(request):
+    """
+    GET /api/admin/reports/course-completion/
+    Query: date_from=YYYY-MM-DD, date_to=YYYY-MM-DD
+    Returns a CSV file with per-course completion and enrollment stats.
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        start_dt, end_dt = _parse_date_range(request)
+
+        courses = (
+            Course.objects
+            .filter(organization=org)
+            .select_related("subject", "teacher__user", "classroom")
+            .annotate(
+                total_enrolled=Count("enrollments", distinct=True),
+                completed=Count(
+                    "enrollments",
+                    filter=Q(enrollments__progress_pct__gte=100),
+                    distinct=True,
+                ),
+                avg_progress=Avg("enrollments__progress_pct"),
+                new_enrollments=Count(
+                    "enrollments",
+                    filter=Q(
+                        enrollments__created_at__gte=start_dt,
+                        enrollments__created_at__lte=end_dt,
+                    ),
+                    distinct=True,
+                ),
+            )
+            .order_by("-total_enrolled")
+        )
+
+        buf = StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "Course ID", "Course Name", "Subject", "Teacher",
+            "Classroom", "Status",
+            "Total Enrolled", "New Enrollments (Period)",
+            "Completed", "Completion Rate (%)", "Avg Progress (%)",
+        ])
+
+        for c in courses:
+            teacher_user = getattr(getattr(c, "teacher", None), "user", None)
+            teacher_name = (teacher_user.get_full_name() if teacher_user else "") or (teacher_user.email if teacher_user else "N/A")
+            total = c.total_enrolled or 0
+            completed = c.completed or 0
+            completion_rate = round(100 * completed / total, 1) if total > 0 else 0.0
+            writer.writerow([
+                c.id,
+                c.name,
+                getattr(c.subject, "name", "N/A"),
+                teacher_name,
+                getattr(c.classroom, "name", "N/A") if c.classroom else "N/A",
+                "Active" if c.is_active else "Inactive",
+                total,
+                c.new_enrollments or 0,
+                completed,
+                completion_rate,
+                round(float(c.avg_progress or 0), 1),
+            ])
+
+        csv_data = buf.getvalue()
+        resp = HttpResponse(csv_data, content_type="text/csv")
+        resp["Content-Disposition"] = 'attachment; filename="course_completion_report.csv"'
+        return resp
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
