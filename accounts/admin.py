@@ -4,8 +4,27 @@ from django.db.models import Q, Count
 from .models import AdminAccess, User, EmailOTP, EmailChangeRequest
 from django import forms
 from orgs.models import Organization
+from django.utils.translation import gettext_lazy as _
 
+class AccountTypeFilter(admin.SimpleListFilter):
+    title = _('account type')
+    parameter_name = 'account_type'
 
+    def lookups(self, request, model_admin):
+        return (
+            ('student', _('Student Profile')),
+            ('teacher', _('Teacher Profile')),
+            ('parent', _('Parent Profile')),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == 'student':
+            return queryset.filter(student_profile__isnull=False)
+        if self.value() == 'teacher':
+            return queryset.filter(teacher_profile__isnull=False)
+        if self.value() == 'parent':
+            return queryset.filter(parent_profile__isnull=False)
+        return queryset
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
     # Show extra fields
@@ -26,6 +45,8 @@ class UserAdmin(BaseUserAdmin):
         "is_active",
         "is_generated",   # ✅ added
         "groups",
+        "primary_org",
+        AccountTypeFilter,
     )
 
     search_fields = ("email", "first_name", "last_name", "phone")
