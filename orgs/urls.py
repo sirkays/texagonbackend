@@ -9,7 +9,8 @@ from .views import (dashboard_summary,courses_list,courses_stats_header,course_f
     gamification_leaderboard,
     admin_student_enrollments,admin_available_courses_for_student,
     billing_plans,billing_plan_update,billing_plan_activate,admin_complaints,
-    admin_complaint_detail,admin_complaint_add_response,invoice_pdf
+    admin_complaint_detail,admin_complaint_add_response,invoice_pdf,
+    classroom_students, classroom_students_bulk_update,
 
 
 )
@@ -60,6 +61,10 @@ urlpatterns = [
 
     path("api/admin/students/<int:student_id>/enrollments/", admin_student_enrollments),
     path("api/admin/students/<int:student_id>/available-courses/", admin_available_courses_for_student),
+
+    # Classroom student management
+    path("api/classrooms/<int:classroom_id>/students/", classroom_students, name="classroom-students"),
+    path("api/classrooms/<int:classroom_id>/students/bulk-update/", classroom_students_bulk_update, name="classroom-students-bulk-update"),
 ]
 # append, don't overwrite
 urlpatterns += router.urls

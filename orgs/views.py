@@ -2972,3 +2972,144 @@ def admin_available_courses_for_student(request, student_id: int):
         traceback.print_exc()
         return Response({"detail": "An unexpected error occurred.", "error": str(e)},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------------------------------------------------------------
+# Classroom Student Management
+# ---------------------------------------------------------------
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def classroom_students(request, classroom_id: int):
+    """
+    GET /orgs/api/classrooms/<classroom_id>/students/
+
+    Returns:
+      {
+        "classroom": {"id", "name", "code"},
+        "enrolled":  [{student card}, ...],   # students with current_classroom == this
+        "available": [{student card}, ...],   # org students NOT in this classroom
+      }
+
+    Optional query params:
+      ?search=<str>   — filter both lists by name / email
+    """
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    classroom = Classroom.objects.filter(id=classroom_id, organization=org).first()
+    if not classroom:
+        return Response({"detail": "Classroom not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    search = (request.query_params.get("search") or "").strip()
+
+    base_qs = (
+        StudentProfile.objects
+        .filter(organization=org)
+        .select_related("user", "current_classroom")
+        .order_by("user__first_name", "user__last_name", "user__email")
+    )
+
+    if search:
+        base_qs = base_qs.filter(
+            Q(user__first_name__icontains=search)
+            | Q(user__last_name__icontains=search)
+            | Q(user__email__icontains=search)
+            | Q(admission_no__icontains=search)
+        )
+
+    def _student_dict(sp: StudentProfile) -> dict:
+        u = sp.user
+        return {
+            "id": sp.id,
+            "name": (u.get_full_name() or u.email or "").strip(),
+            "email": u.email,
+            "admission_no": sp.admission_no or "",
+            "current_classroom": (
+                {"id": sp.current_classroom_id, "name": sp.current_classroom.name}
+                if sp.current_classroom_id else None
+            ),
+        }
+
+    enrolled_qs = base_qs.filter(current_classroom_id=classroom_id)
+    available_qs = base_qs.exclude(current_classroom_id=classroom_id)
+
+    return Response({
+        "classroom": {"id": classroom.id, "name": classroom.name, "code": classroom.code},
+        "enrolled": [_student_dict(s) for s in enrolled_qs],
+        "available": [_student_dict(s) for s in available_qs],
+    })
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def classroom_students_bulk_update(request, classroom_id: int):
+    """
+    POST /orgs/api/classrooms/<classroom_id>/students/bulk-update/
+
+    Body:
+      {
+        "add":    [<student_profile_id>, ...],   # assign current_classroom = this
+        "remove": [<student_profile_id>, ...],   # clear current_classroom (set to null)
+      }
+
+    Both lists are optional; at least one must be non-empty.
+    Students in "remove" that are currently in a *different* classroom are left
+    unchanged (we only clear if their classroom matches).
+    Returns updated counts.
+    """
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    classroom = Classroom.objects.filter(id=classroom_id, organization=org).first()
+    if not classroom:
+        return Response({"detail": "Classroom not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    data = request.data or {}
+    add_ids = data.get("add") or []
+    remove_ids = data.get("remove") or []
+
+    if not isinstance(add_ids, list) or not isinstance(remove_ids, list):
+        return Response({"detail": "'add' and 'remove' must be lists."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not add_ids and not remove_ids:
+        return Response({"detail": "Provide at least one student id in 'add' or 'remove'."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        add_ids = [int(i) for i in add_ids]
+        remove_ids = [int(i) for i in remove_ids]
+    except (TypeError, ValueError):
+        return Response({"detail": "Student IDs must be integers."}, status=status.HTTP_400_BAD_REQUEST)
+
+    added_count = 0
+    removed_count = 0
+
+    with transaction.atomic():
+        if add_ids:
+            # Only update students belonging to this org
+            added_count = StudentProfile.objects.filter(
+                id__in=add_ids, organization=org
+            ).update(current_classroom=classroom)
+
+        if remove_ids:
+            # Only clear if currently assigned to THIS classroom
+            removed_count = StudentProfile.objects.filter(
+                id__in=remove_ids, organization=org, current_classroom=classroom
+            ).update(current_classroom=None)
+
+    return Response({
+        "classroom": {"id": classroom.id, "name": classroom.name},
+        "added": added_count,
+        "removed": removed_count,
+    }, status=status.HTTP_200_OK)
+
