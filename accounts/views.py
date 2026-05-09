@@ -425,8 +425,8 @@ def verify_email_view(request):
         "code": "123456"   # or "otp"
     }
     """
-    email = request.data.get("email")
-    code = request.data.get("code") or request.data.get("otp")
+    email = (request.data.get("email") or "").strip().lower()
+    code = (request.data.get("code") or request.data.get("otp") or "").strip()
 
     if not email or not code:
         return Response(
@@ -535,8 +535,8 @@ def verify_email_view_authenticated(request):
         "code": "123456"   # or "otp"
     }
     """
-    email = request.data.get("email")
-    code = request.data.get("code") or request.data.get("otp")
+    email = (request.data.get("email") or "").strip().lower()
+    code = (request.data.get("code") or request.data.get("otp") or "").strip()
 
     if not email or not code:
         return Response(
