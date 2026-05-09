@@ -66,6 +66,15 @@ class NoteAdmin(admin.ModelAdmin):
     autocomplete_fields = ("student", "lesson")
 
 
-admin.site.register(ModuleCategory)
+@admin.register(ModuleCategory)
+class ModuleCategoryAdmin(admin.ModelAdmin):
+    list_display = ['id', 'created_at', 'updated_at', 'name', 'active']
+    list_filter = ['created_at', 'updated_at', 'active']
+    search_fields = ['name']
 
-admin.site.register(CoursePassCriteria)
+
+@admin.register(CoursePassCriteria)
+class CoursePassCriteriaAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['course']
+    list_display = ['id', 'course', 'no_of_cbt', 'no_of_code_submission', 'total_pass_mark_cbt', 'total_pass_mark_code']
+    list_filter = ['course']

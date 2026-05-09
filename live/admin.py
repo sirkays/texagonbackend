@@ -76,6 +76,7 @@ class TutoringBookingAdmin(admin.ModelAdmin):
 # --------------------
 @admin.register(AvailableDay)
 class AvailableDayAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['private_tutoring']
     list_display = ("day", "private_tutoring")
     list_filter = ("day", "private_tutoring__teacher", "private_tutoring__course")
     search_fields = (

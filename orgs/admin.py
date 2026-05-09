@@ -20,12 +20,14 @@ class OrganizationAdmin(admin.ModelAdmin):
 
 @admin.register(OrganizationMembership)
 class OrganizationMembershipAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['user', 'organization']
     list_display = ("user", "organization", "role", "is_active", "created_at")
     list_filter = ("role", "is_active", "organization")
     search_fields = ("user__username", "user__email", "organization__name")
 
 @admin.register(AcademicSession)
 class AcademicSessionAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['organization']
     list_display = ("name", "organization", "start_date", "end_date", "is_current", "created_at")
     list_filter = ("organization", "is_current", "start_date", "end_date")
     search_fields = ("name", "organization__name")

@@ -370,6 +370,7 @@ class InvoiceTypeAdmin(admin.ModelAdmin):
 
 @admin.register(UserAccountSubscription)
 class UserAccountSubscriptionAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['organization', 'user', 'plan', 'billed_to_parent']
     # ---- List ----
     list_display = (
         "id",

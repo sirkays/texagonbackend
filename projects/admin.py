@@ -16,6 +16,7 @@ class ProjectTagAdmin(admin.ModelAdmin):
 
 @admin.register(StudentProject)
 class StudentProjectAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['student_user']
     list_display  = (
         "title", "student_name", "student_school",
         "category", "difficulty", "is_featured", "is_published", "completed_at",

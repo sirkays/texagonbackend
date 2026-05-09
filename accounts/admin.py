@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.db.models import Q, Count
-from .models import AdminAccess, User, EmailOTP
+from .models import AdminAccess, User, EmailOTP, EmailChangeRequest
 from django import forms
 from orgs.models import Organization
 
@@ -75,5 +75,22 @@ class UserAdmin(BaseUserAdmin):
     )
 
 
-admin.site.register(AdminAccess)
-admin.site.register(EmailOTP)
+@admin.register(AdminAccess)
+class AdminAccessAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['user', 'selected_organization']
+    list_display = ['id', 'user', 'selected_organization', 'active', 'super_user']
+    list_filter = ['user', 'selected_organization', 'active', 'super_user']
+
+@admin.register(EmailChangeRequest)
+class EmailChangeRequestAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['user']
+    list_display = ['id', 'user', 'new_email', 'code', 'created_at', 'expires_at', 'used']
+    list_filter = ['user', 'created_at', 'expires_at', 'used']
+    search_fields = ['new_email', 'code']
+
+@admin.register(EmailOTP)
+class EmailOTPAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['user']
+    list_display = ['id', 'user', 'code', 'created_at', 'expires_at', 'used']
+    list_filter = ['user', 'created_at', 'expires_at', 'used']
+    search_fields = ['code']

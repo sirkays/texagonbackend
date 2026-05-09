@@ -16,6 +16,7 @@ class TagAdmin(admin.ModelAdmin):
 
 @admin.register(AuthorProfile)
 class AuthorProfileAdmin(admin.ModelAdmin):
+    search_fields = ['user__email', 'user__first_name', 'user__last_name']
     list_display = ("user", "title")
     raw_id_fields = ("user",)
 

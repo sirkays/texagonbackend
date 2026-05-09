@@ -35,6 +35,7 @@ class StudentProfileAdmin(admin.ModelAdmin):
 
 @admin.register(Classroom)
 class ClassroomAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['organization']
     list_display = ("name", "organization", "code", "created_at")
     list_filter = ("organization",)
     search_fields = ("name", "code", "organization__name")
@@ -42,6 +43,7 @@ class ClassroomAdmin(admin.ModelAdmin):
 
 @admin.register(Subject)
 class SubjectAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['organization']
     list_display = ("name", "organization", "code", "created_at")
     list_filter = ("organization",)
     search_fields = ("name", "code", "organization__name")

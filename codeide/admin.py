@@ -4,7 +4,7 @@ from django.db import models
 from django.utils.html import format_html
 from django.utils.text import Truncator
 
-from .models import CodeSnippet, CodeSubmission, CodeComment,CodeFile
+from .models import CodeSnippet, CodeSubmission, CodeComment, CodeFile, Folder
 
 
 # ---------- Inlines ----------
@@ -173,4 +173,16 @@ class CodeCommentAdmin(MonospaceTextMixin, admin.ModelAdmin):
     def message_preview(self, obj):
         return Truncator(obj.message).chars(60)
 
-admin.site.register(CodeFile) 
+@admin.register(CodeFile)
+class CodeFileAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['student', 'lesson']
+    list_display = ['id', 'created_at', 'updated_at', 'student', 'lesson', 'folder', 'label', 'file']
+    list_filter = ['created_at', 'updated_at', 'student', 'lesson', 'folder']
+    search_fields = ['label', 'original_name', 'content_type']
+
+@admin.register(Folder)
+class FolderAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['student']
+    list_display = ['id', 'created_at', 'updated_at', 'student', 'parent', 'name']
+    list_filter = ['created_at', 'updated_at', 'student', 'parent']
+    search_fields = ['name']

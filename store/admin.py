@@ -86,6 +86,7 @@ class ReturnItemInline(admin.TabularInline):
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['parent']
     list_display = ("name", "slug", "parent")
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}

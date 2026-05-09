@@ -1,9 +1,10 @@
 from django.contrib import admin
-from .models import StudentDevice
+from .models import StudentDevice, Tier
 
 
 @admin.register(StudentDevice)
 class StudentDeviceAdmin(admin.ModelAdmin):
+    autocomplete_fields = ['student']
     list_display = (
         "student",
         "device_id_short",
