@@ -40,4 +40,6 @@ urlpatterns = [
 
     path("api/update-parent-child-link/", views.update_parent_child_link, name="update_parent_child_link"),
 
+    path("api/auth/verify-password/", views.verify_password, name="verify-password"),
+
 ]

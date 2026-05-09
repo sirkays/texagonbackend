@@ -1135,6 +1135,36 @@ def post_login(request):
     )
 
 
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def verify_password(request):
+    """
+    Verify the current authenticated user's password.
+    Used as a security gate before allowing dashboard-role switching.
+
+    Body: { "password": "user_plaintext_password" }
+    Returns: { "valid": true/false }
+    """
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response(
+            {"detail": "Authentication required."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    password = request.data.get("password")
+    if not password:
+        return Response(
+            {"detail": "Password is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # check_password works on the AbstractBaseUser
+    if user.check_password(password):
+        return Response({"valid": True}, status=status.HTTP_200_OK)
+    else:
+        return Response({"valid": False, "detail": "Incorrect password."}, status=status.HTTP_200_OK)
 
 
 def _fmt_duration(total_seconds: int) -> str:
