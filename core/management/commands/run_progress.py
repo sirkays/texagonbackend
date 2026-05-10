@@ -12,7 +12,7 @@ from django.db.models import Q
 from django.utils import timezone
 from core.utils import resolve_season
 from gamification.services.engine import log_event
-from codeide.models import CodeSubmission
+from codeide.models import CodeProject
 from learning.models import CoursePassCriteria, Enrollment
 from assessments.models import TestAttempt
 
@@ -158,7 +158,7 @@ class Command(BaseCommand):
                     code_total = Decimal(criteria.total_pass_mark_code or 0)
 
                     code_qs = (
-                        CodeSubmission.objects.filter(
+                        CodeProject.objects.filter(
                             lesson__module__course_id=enr.course_id,
                             student_id=enr.student_id,
                         )

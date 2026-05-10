@@ -1,6 +1,7 @@
-# app: api/ide/urls.py
+# codeide/urls.py
 from django.urls import path
 from . import views
+from . import project_views
 
 urlpatterns = [
     # ---- FOLDERS ----
@@ -15,15 +16,10 @@ urlpatterns = [
     path("snippets/<int:snippet_id>/delete/", views.snippet_delete, name="snippet_delete"),
     path("api/ide/snippets/<int:snippet_id>/", views.snippet_detail, name="ide_snippet_detail"),
 
-    # ---- SUBMISSIONS ----
-    path("api/ide/submissions/create/", views.submission_create, name="ide_submission_create"),
-    path("api/ide/student/submissions/", views.student_submission_list, name="ide_submission_list"),
-    path("api/ide/submissions/<int:submission_id>/student-update/", views.student_update_submission),
-    path("api/ide/submissions/<int:submission_id>/", views.submission_detail, name="ide_submission_detail"),
-    path("api/ide/submissions/<int:submission_id>/teacher-update/", views.submission_teacher_update, name="ide_submission_teacher_update"),
-
-    # ---- COMMENTS ----
-    path("api/ide/submissions/<int:submission_id>/comments/", views.submission_comment_create, name="ide_submission_comment_create"),
+    # ---- PROJECT SUBMISSIONS (student) ----
+    path("api/ide/projects/submit/", project_views.project_submit, name="ide_project_submit"),
+    path("api/ide/projects/<int:pk>/resubmit/", project_views.project_resubmit, name="ide_project_resubmit"),
+    path("api/ide/student/projects/", project_views.student_project_list, name="ide_student_project_list"),
 
     # ---- FILES ----
     path("api/ide/files/", views.codefile_list, name="ide_codefile_list"),
@@ -32,13 +28,12 @@ urlpatterns = [
     path("api/ide/files/<int:file_id>/delete/", views.codefile_delete, name="ide_codefile_delete"),
 
     # ---- TEACHER ----
-    path("api/teacher/submissions/", views.teacher_submissions_list, name="teacher_submissions_list"),
-    path("api/teacher/submissions/<int:pk>/", views.teacher_submission_detail, name="teacher_submission_detail"),
-    path("api/teacher/submissions/<int:pk>/comments/", views.teacher_submission_comments, name="teacher_submission_comments"),
-    path("api/teacher/submissions/<int:pk>/grade/", views.teacher_submission_grade, name="teacher_submission_grade"),
-    path("api/teacher/submissions/<int:pk>/download/", views.teacher_submission_download, name="teacher_submission_download"),
+    path("api/teacher/submissions/", project_views.teacher_projects_list, name="teacher_projects_list"),
+    path("api/teacher/submissions/<int:pk>/", project_views.teacher_project_detail, name="teacher_project_detail"),
+    path("api/teacher/submissions/<int:pk>/comments/", project_views.teacher_project_comments, name="teacher_project_comments"),
+    path("api/teacher/submissions/<int:pk>/grade/", project_views.teacher_project_grade, name="teacher_project_grade"),
+    path("api/teacher/submissions/<int:pk>/download/", project_views.teacher_project_download, name="teacher_project_download"),
 
     # ---- UPLOAD RESOLVE ----
     path("api/uploads/resolve/", views.resolve_upload_by_label, name="resolve-upload-by-label"),
 ]
-

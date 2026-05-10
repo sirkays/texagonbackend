@@ -103,57 +103,133 @@ class CodeSnippet(TimeStampedModel):
         return f"[Snippet] {self.student_id} {self.language} {self.created_at:%Y-%m-%d}"
 
 
-class CodeSubmission(TimeStampedModel):
+# ---------------------------------------------------------------------------
+# CodeProject + ProjectFile — the submission system
+# ---------------------------------------------------------------------------
+class CodeProject(TimeStampedModel):
     """
-    Submitted code by lesson (student). A teacher can grade/correct.
-    """
-    class LANGUAGE_TYPE(models.TextChoices):
-        JAVASCRIPT = "javascript", "javascript"
-        HTML = "html", "html"
-        CSS = "css", "css"
-        PYTHON = "python", "python"
-        JAVA = "java", "java"
+    A submitted project bundle from a student for a lesson.
 
+    One CodeProject = one 'Submit' action containing one or more files.
+    The teacher grades the project as a whole (score, feedback) and can
+    provide per-file corrections via ProjectFile.correction_code.
+    """
     class Status(models.TextChoices):
         SUBMITTED = "submitted", "Submitted"
         GRADED = "graded", "Graded"
         REVISED = "revised", "Revised"
 
-    title = models.CharField(max_length=255, blank=True, null=True)
-    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="code_submissions")
-    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="code_submissions")
-
-    language = models.CharField(max_length=64, choices=LANGUAGE_TYPE.choices, default=LANGUAGE_TYPE.HTML)
-    file_name = models.CharField(
-        max_length=255, blank=True, default="",
-        help_text="Individual filename within the project (e.g. 'index.html', 'style.css').",
+    title = models.CharField(max_length=255)
+    student = models.ForeignKey(
+        StudentProfile, on_delete=models.CASCADE, related_name="code_projects",
     )
-    code_text = models.TextField()
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="code_projects",
+    )
 
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.SUBMITTED)
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.SUBMITTED,
+    )
 
-    # grading / corrections
-    score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    # Grading (project-level)
+    score = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+    )
     feedback = models.TextField(blank=True)
-    correction_code = models.TextField(blank=True)
-    graded_by = models.ForeignKey(TeacherProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="graded_code_submissions")
+    graded_by = models.ForeignKey(
+        TeacherProfile, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="graded_projects",
+    )
     graded_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["lesson", "student"])]
+        indexes = [
+            models.Index(fields=["lesson", "student"]),
+            models.Index(fields=["student", "status"]),
+        ]
 
     def __str__(self):
-        return f"[Submission] lesson={self.lesson_id} student={self.student_id} status={self.status}"
+        return f"[Project] {self.title} lesson={self.lesson_id} student={self.student_id}"
+
+
+def projectfile_upload_to(instance, filename: str) -> str:
+    from datetime import datetime
+    today = datetime.utcnow()
+    safe_name = os.path.basename(filename)
+    project_id = instance.project_id or 0
+    return f"texagon/projects/{project_id}/{today:%Y/%m/%d}/{safe_name}"
+
+
+class ProjectFile(TimeStampedModel):
+    """
+    A single file within a submitted project.
+
+    `path` preserves the student's folder structure relative to the
+    project root, e.g. "logins/login.html" or "jean.css".
+
+    Text files (HTML, CSS, JS, Python, …) store content in `code_text`.
+    Binary files (images, PDFs, …) use the `binary_file` FileField.
+    """
+    LANG_CHOICES = [
+        ("javascript", "javascript"),
+        ("python", "python"),
+        ("html", "html"),
+        ("css", "css"),
+        ("java", "java"),
+        ("cpp", "cpp"),
+        ("other", "other"),
+    ]
+
+    project = models.ForeignKey(
+        CodeProject, on_delete=models.CASCADE, related_name="files",
+    )
+    path = models.CharField(
+        max_length=512,
+        help_text="Relative path within the project, e.g. 'logins/login.html'",
+    )
+    language = models.CharField(max_length=64, choices=LANG_CHOICES, default="html")
+
+    # Text content (for code / markup files)
+    code_text = models.TextField(blank=True, default="")
+
+    # Binary content (for images, PDFs, etc.)
+    is_binary = models.BooleanField(default=False)
+    binary_file = models.FileField(
+        upload_to=projectfile_upload_to, max_length=512,
+        null=True, blank=True,
+    )
+    content_type = models.CharField(max_length=127, blank=True, default="")
+    size_bytes = models.BigIntegerField(default=0)
+
+    # Teacher correction for this specific file
+    correction_code = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["path"]
+        indexes = [
+            models.Index(fields=["project", "language"]),
+        ]
+
+    def __str__(self):
+        return f"[ProjectFile] {self.path} (project={self.project_id})"
 
 
 class CodeComment(TimeStampedModel):
     """
-    Threaded discussion on a submission. Both student and teacher can post.
+    Threaded discussion on a project. Both student and teacher can post.
     """
-    submission = models.ForeignKey(CodeSubmission, on_delete=models.CASCADE, related_name="comments")
-    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="code_comments")
-    author_role = models.CharField(max_length=16, choices=[("student", "Student"), ("teacher", "Teacher")])
+    project = models.ForeignKey(
+        CodeProject, on_delete=models.CASCADE, related_name="comments",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="code_comments",
+    )
+    author_role = models.CharField(
+        max_length=16,
+        choices=[("student", "Student"), ("teacher", "Teacher")],
+    )
     message = models.TextField()
 
     class Meta:

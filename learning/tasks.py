@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from core.utils import resolve_season
 from gamification.services.engine import log_event
-from codeide.models import CodeSubmission
+from codeide.models import CodeProject
 from learning.models import CoursePassCriteria, Enrollment
 from assessments.models import TestAttempt
 
@@ -135,7 +135,7 @@ def recalc_progress_chunk(
             code_total = Decimal(getattr(criteria, "total_pass_mark_code", 0) or 0)
 
             code_qs = (
-                CodeSubmission.objects.filter(
+                CodeProject.objects.filter(
                     lesson__module__course_id=enr.course_id,
                     student_id=enr.student_id,
                 )

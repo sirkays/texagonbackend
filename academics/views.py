@@ -75,7 +75,7 @@ from .models import EnrollmentCertificate, StudentEnrollmentCertificateApproval
 from accounts.models import AdminAccess
 
 from learning.models import Module, CoursePassCriteria
-from codeide.models import CodeSubmission
+from codeide.models import CodeProject
 from api.permissions import RequiresActiveStudentSubscription
 
 @api_view(["GET"])
@@ -481,7 +481,7 @@ def student_course_activity_metrics(request, course_id: int, student_id: int):
     # -----------------------------
     # Code Submission metrics
     # -----------------------------
-    code_qs = CodeSubmission.objects.filter(
+    code_qs = CodeProject.objects.filter(
         student=student,
         lesson__module__course=course,
     )

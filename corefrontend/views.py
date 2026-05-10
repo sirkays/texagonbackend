@@ -474,7 +474,7 @@ def analytics_dashboard(request):
     )
     from learning.models import Course, Enrollment, Module, Lesson
     from assessments.models import Test
-    from codeide.models import CodeSubmission
+    from codeide.models import CodeProject
 
     # ── Determine organization ──
     orgs = Organization.objects.filter(is_active=True).order_by('name')
@@ -564,10 +564,10 @@ def analytics_dashboard(request):
     revoked_certs = certs.filter(status='revoked').count()
 
     # ── Code Submissions ──
-    total_code_submissions = CodeSubmission.objects.filter(
+    total_code_submissions = CodeProject.objects.filter(
         student__organization=org
     ).count()
-    graded_submissions = CodeSubmission.objects.filter(
+    graded_submissions = CodeProject.objects.filter(
         student__organization=org, status='graded'
     ).count()
 

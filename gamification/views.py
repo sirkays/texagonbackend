@@ -14,7 +14,7 @@ from rest_framework_api_key.permissions import HasAPIKey
 from api.authentication import SessionTokenAuthentication
 from academics.models import ParentProfile, ParentChildLink, StudentProfile
 from assessments.models import TestAttempt
-from codeide.models import CodeSubmission
+from codeide.models import CodeProject  # noqa: F401
 from django.db.models.functions import Coalesce
 from gamification.models import (
     Badge,
