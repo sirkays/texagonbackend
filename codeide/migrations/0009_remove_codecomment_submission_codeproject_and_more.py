@@ -6,6 +6,12 @@ import django.utils.timezone
 from django.db import migrations, models
 
 
+def clear_codecomments(apps, schema_editor):
+    """Delete all existing CodeComment rows so the new FK doesn't violate constraints."""
+    CodeComment = apps.get_model('codeide', 'CodeComment')
+    CodeComment.objects.all().delete()
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -15,6 +21,8 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # Step 0: Clear existing comments before dropping the old FK
+        migrations.RunPython(clear_codecomments, migrations.RunPython.noop),
         migrations.RemoveField(
             model_name='codecomment',
             name='submission',
