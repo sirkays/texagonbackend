@@ -132,6 +132,21 @@ def student_project_list(request):
     return Response(StudentProjectSerializer(qs, many=True).data)
 
 
+# ── Student: single project detail ──────────────────────────────────
+@api_view(["GET"])
+@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@authentication_classes([SessionTokenAuthentication])
+def student_project_detail(request, pk: int):
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Not allowed."}, status=403)
+    project = get_object_or_404(
+        CodeProject.objects.prefetch_related("files", "comments__author"),
+        pk=pk, student=student
+    )
+    return Response(StudentProjectSerializer(project).data)
+
+
 # ── Teacher helpers ──────────────────────────────────────────────────
 class QuickPagination(pagination.PageNumberPagination):
     page_size = 20

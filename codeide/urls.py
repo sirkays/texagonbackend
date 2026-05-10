@@ -20,6 +20,7 @@ urlpatterns = [
     path("api/ide/projects/submit/", project_views.project_submit, name="ide_project_submit"),
     path("api/ide/projects/<int:pk>/resubmit/", project_views.project_resubmit, name="ide_project_resubmit"),
     path("api/ide/student/projects/", project_views.student_project_list, name="ide_student_project_list"),
+    path("api/ide/student/projects/<int:pk>/", project_views.student_project_detail, name="ide_student_project_detail"),
 
     # ---- FILES ----
     path("api/ide/files/", views.codefile_list, name="ide_codefile_list"),
