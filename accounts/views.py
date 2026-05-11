@@ -218,17 +218,19 @@ def create_account_view(request):
     # ✅ clean "already exists" check
     existing_user = User.objects.filter(email=email).first()
     if existing_user:
-        # 1) active => always in use
+        # 1) active => always in use, no recovery path
         if existing_user.is_active:
             return Response({"detail": "Email already in use."}, status=400)
 
-        # 2) inactive: allow ONLY if student is linked to same parent
+        # 2) inactive account => let the user resume by resending a fresh OTP
+        #    This handles the case where a user started signup but never verified.
+
         if account_type == "student":
+            # Student path: must be linked to the same parent
             parent_profile_id = request.data.get("parent_profile_id")
             if not parent_profile_id:
                 return Response({"detail": "parent_profile_id is required"}, status=400)
 
-            # must be a student profile
             student_profile = StudentProfile.objects.filter(user=existing_user).first()
             if not student_profile:
                 return Response({"detail": "Email already in use."}, status=400)
@@ -241,7 +243,7 @@ def create_account_view(request):
             if not linked:
                 return Response({"detail": "Email already in use."}, status=400)
 
-            # ✅ same parent + inactive student => resend OTP and return "proceed to verification"
+            # ✅ Same parent + inactive student => resend OTP
             otp = EmailOTP.create_for_user(existing_user, minutes_valid=10)
             try:
                 send_mail(
@@ -261,14 +263,55 @@ def create_account_view(request):
                     "email": existing_user.email,
                     "accountType": "student",
                     "studentProfileId": student_profile.id,
-                    "existing_inactive": True,     # ✅ frontend can use this
+                    "existing_inactive": True,
                     "otp_sent": True,
                 },
                 status=200,
             )
 
-        # for parent/teacher inactive accounts => still block
-        return Response({"detail": "Email already in use."}, status=400)
+        # ✅ Teacher / Parent inactive => resend OTP so they can continue without admin help
+        # Optionally update name/phone in case they mistyped them before abandoning
+        existing_user.first_name = request.data.get("first_name", existing_user.first_name)
+        existing_user.last_name = request.data.get("last_name", existing_user.last_name)
+        existing_user.phone = request.data.get("phone", existing_user.phone)
+        existing_user.set_password(request.data.get("password") or "")  # allow them to use a new password
+        existing_user.save(update_fields=["first_name", "last_name", "phone", "password"])
+
+        otp = EmailOTP.create_for_user(existing_user, minutes_valid=10)
+        try:
+            send_mail(
+                subject="Verify your email – Techxagon Academy",
+                message=(
+                    f"Hi {existing_user.first_name or 'there'},\n\n"
+                    f"You started creating an account but didn't finish verifying your email.\n"
+                    f"Your new verification code is: {otp.code}\n\n"
+                    f"This code expires in 10 minutes.\n\n"
+                    f"If you did not request this, please ignore this email."
+                ),
+                from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+                recipient_list=[existing_user.email],
+                fail_silently=False,
+            )
+        except Exception as e:
+            return Response({"detail": "Failed to send email", "error": str(e)}, status=500)
+
+        # Determine profile id to return
+        parent_profile = getattr(existing_user, "parent_profile", None)
+        teacher_profile = getattr(existing_user, "teacher_profile", None)
+
+        return Response(
+            {
+                "detail": "Account already created. A new verification code has been sent to your email.",
+                "userId": existing_user.id,
+                "email": existing_user.email,
+                "accountType": account_type,
+                "parentProfileId": parent_profile.id if parent_profile else None,
+                "teacherProfileId": teacher_profile.id if teacher_profile else None,
+                "existing_inactive": True,   # ✅ frontend uses this to skip to OTP step
+                "otp_sent": True,
+            },
+            status=200,
+        )
 
 
     user = None
