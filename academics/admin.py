@@ -1,7 +1,8 @@
 from django.contrib import admin
 from .models import (Language, Classroom, Subject, StudentProfile, 
     TeacherProfile, ParentProfile, ParentChildLink,OrganizationCertificateSignatures,EnrollmentCertificate,
-    StudentEnrollmentCertificateApproval
+    StudentEnrollmentCertificateApproval,
+    TeacherReport, ReportCBTItem, ReportCodingItem, ReportActivity, ReportVideo, ReportRecipient,
     )
 from django.utils import timezone
 from django.utils.html import format_html
@@ -374,3 +375,47 @@ class StudentEnrollmentCertificateApprovalAdmin(admin.ModelAdmin):
         Remove this if deletions are acceptable.
         """
         return request.user.is_superuser
+
+
+# ─────────────────────────────────────────────────────────
+# Teacher Report Admin
+# ─────────────────────────────────────────────────────────
+
+class ReportCBTItemInline(admin.TabularInline):
+    model = ReportCBTItem
+    extra = 0
+    autocomplete_fields = ("test",)
+
+class ReportCodingItemInline(admin.TabularInline):
+    model = ReportCodingItem
+    extra = 0
+    autocomplete_fields = ("lesson",)
+
+class ReportActivityInline(admin.TabularInline):
+    model = ReportActivity
+    extra = 0
+
+class ReportVideoInline(admin.TabularInline):
+    model = ReportVideo
+    extra = 0
+
+class ReportRecipientInline(admin.TabularInline):
+    model = ReportRecipient
+    extra = 0
+    autocomplete_fields = ("student",)
+
+@admin.register(TeacherReport)
+class TeacherReportAdmin(admin.ModelAdmin):
+    list_display = ("title", "teacher", "course", "organization", "status", "recipient_mode", "published_at", "created_at")
+    list_filter = ("status", "organization", "recipient_mode")
+    search_fields = ("title", "teacher__user__email", "course__name", "share_token")
+    autocomplete_fields = ("organization", "teacher", "course")
+    readonly_fields = ("share_token", "created_at", "updated_at")
+    inlines = [ReportCBTItemInline, ReportCodingItemInline, ReportActivityInline, ReportVideoInline, ReportRecipientInline]
+
+@admin.register(ReportRecipient)
+class ReportRecipientAdmin(admin.ModelAdmin):
+    list_display = ("report", "student", "parent_viewed", "parent_viewed_at", "created_at")
+    list_filter = ("parent_viewed",)
+    search_fields = ("student__user__email", "student__user__first_name", "report__title")
+    autocomplete_fields = ("report", "student")

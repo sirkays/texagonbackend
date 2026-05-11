@@ -88,22 +88,32 @@ class StudentProfile(TimeStampedModel):
     def check_session_data(self, request, _retry=False):
         from billing.models import UserAccountSubscription
 
+        # ── Fast path: active subscription in DB ──────────────────────────
         if UserAccountSubscription.has_subscription(self.user, self.organization):
             return True
 
+        # ── Session-cache path (only valid for cookie-session requests) ───
+        # For token-authenticated API requests the Django session is always
+        # empty, so skip the cache entirely and rely solely on the DB check.
         session_key = "allowed_courses_cache"
+        session = getattr(request, "session", None)
+
+        # If the session backend hasn't been initialised (token auth),
+        # treat the student as not-allowed (subscription check already failed above).
+        if session is None or not hasattr(session, "get"):
+            return False
 
         # Load cache (populate if missing)
-        cached_data = request.session.get(session_key)
+        cached_data = session.get(session_key)
         if cached_data is None:
             self.get_course_allowed(request)
-            cached_data = request.session.get(session_key)
+            cached_data = session.get(session_key)
 
         if not cached_data:
             return False
 
         cached_date = cached_data.get("general_activation_date")
-        date_cached_str = cached_data.get("date_cached")  # e.g. "2026-01-20T12:34:56Z" or similar
+        date_cached_str = cached_data.get("date_cached")
 
         # If either is missing, treat as invalid
         if not (cached_date and date_cached_str):
@@ -111,26 +121,21 @@ class StudentProfile(TimeStampedModel):
 
         # Parse date_cached (prefer ISO-8601)
         try:
-            # If you store it as ISO 8601, Django can parse it nicely:
-            # from django.utils.dateparse import parse_datetime
             from django.utils.dateparse import parse_datetime
             date_cached_dt = parse_datetime(date_cached_str)
 
-            # If it parsed but is naive, make it aware in current timezone
             if date_cached_dt is None:
                 raise ValueError("Could not parse date_cached")
             if timezone.is_naive(date_cached_dt):
                 date_cached_dt = timezone.make_aware(date_cached_dt, timezone.get_current_timezone())
 
         except Exception:
-            # If parsing fails, invalidate cache
-            request.session.pop(session_key, None)
+            session.pop(session_key, None)
             return False
 
         # Expire after 1 hour
         if timezone.now() - date_cached_dt > timedelta(hours=1):
-            # delete and re-run ONCE (second call is the last)
-            request.session.pop(session_key, None)
+            session.pop(session_key, None)
             if _retry:
                 return False
             return self.check_session_data(request, _retry=True)
@@ -647,3 +652,188 @@ class OrganizationCertificateSignatures(models.Model):
 
     def __str__(self):
         return f"Certificate Signatures — Org {self.organization_id}"
+
+
+# ─────────────────────────────────────────────────────────
+# Teacher Report System
+# ─────────────────────────────────────────────────────────
+
+def report_video_upload_to(instance, filename):
+    import os
+    from datetime import datetime
+    today = datetime.utcnow()
+    safe_name = os.path.basename(filename)
+    report_id = instance.report_id or 0
+    return f"texagon/reports/{report_id}/videos/{today:%Y/%m/%d}/{safe_name}"
+
+
+class TeacherReport(TimeStampedModel):
+    """
+    A report created by a teacher summarising student activities,
+    CBT results, coding projects, and class activities.
+    """
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        PUBLISHED = "published", "Published"
+
+    class RecipientMode(models.TextChoices):
+        SELECTED = "selected", "Selected Students"
+        COURSE = "course", "All in Course"
+        CLASSROOM = "classroom", "All in Classroom"
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="teacher_reports",
+    )
+    teacher = models.ForeignKey(
+        "academics.TeacherProfile",
+        on_delete=models.CASCADE,
+        related_name="created_reports",
+    )
+    course = models.ForeignKey(
+        "learning.Course",
+        on_delete=models.CASCADE,
+        related_name="teacher_reports",
+    )
+
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, help_text="Teacher notes / description")
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.DRAFT
+    )
+    recipient_mode = models.CharField(
+        max_length=16, choices=RecipientMode.choices, default=RecipientMode.SELECTED,
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    # Public share link token (for parent onboarding)
+    share_token = models.CharField(max_length=64, unique=True, db_index=True, editable=False)
+
+    # Optional: date range the report covers
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["organization", "teacher", "status"]),
+            models.Index(fields=["course", "status"]),
+        ]
+
+    def __str__(self):
+        return f"[Report] {self.title} by {self.teacher} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        if not self.share_token:
+            self.share_token = secrets.token_urlsafe(32)[:48]
+        super().save(*args, **kwargs)
+
+
+class ReportCBTItem(TimeStampedModel):
+    """A CBT test included in a report, with a snapshot of the student's score."""
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="cbt_items",
+    )
+    test = models.ForeignKey(
+        "assessments.Test", on_delete=models.CASCADE, related_name="+",
+    )
+    # Snapshot fields so report remains stable even if test data changes
+    test_title = models.CharField(max_length=255, blank=True)
+    total_marks = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+
+    class Meta:
+        unique_together = ("report", "test")
+        ordering = ["created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.test_title and self.test_id:
+            self.test_title = self.test.title
+        if not self.total_marks and self.test_id:
+            self.total_marks = self.test.total_marks
+        super().save(*args, **kwargs)
+
+
+class ReportCodingItem(TimeStampedModel):
+    """A coding project submission included in a report."""
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="coding_items",
+    )
+    lesson = models.ForeignKey(
+        "learning.Lesson", on_delete=models.CASCADE, related_name="+",
+    )
+    # Snapshot
+    lesson_title = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        unique_together = ("report", "lesson")
+        ordering = ["created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.lesson_title and self.lesson_id:
+            self.lesson_title = self.lesson.name
+        super().save(*args, **kwargs)
+
+
+class ReportActivity(TimeStampedModel):
+    """Custom class activity added by the teacher."""
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="activities",
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    activity_date = models.DateField(null=True, blank=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "activity_date"]
+
+
+class ReportVideo(TimeStampedModel):
+    """Video attachment on a report (uploaded file or external URL)."""
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="videos",
+    )
+    title = models.CharField(max_length=255, blank=True)
+    video_file = models.FileField(
+        upload_to=report_video_upload_to, max_length=512,
+        null=True, blank=True,
+    )
+    video_url = models.URLField(blank=True, help_text="External video URL (YouTube, etc.)")
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"[ReportVideo] {self.title or self.video_url}"
+
+
+class ReportRecipient(TimeStampedModel):
+    """
+    Tracks which students received this report and per-student score snapshots.
+    """
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="recipients",
+    )
+    student = models.ForeignKey(
+        StudentProfile, on_delete=models.CASCADE, related_name="received_reports",
+    )
+    # Per-student CBT scores snapshot: { test_id: { score, total } }
+    cbt_scores = models.JSONField(default=dict, blank=True)
+    # Per-student coding scores snapshot: { lesson_id: { score, feedback, project_title } }
+    coding_scores = models.JSONField(default=dict, blank=True)
+    # Overall teacher remark for this specific student
+    teacher_remark = models.TextField(blank=True)
+    # Whether parent has viewed this report
+    parent_viewed = models.BooleanField(default=False)
+    parent_viewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("report", "student")
+        ordering = ["student__user__first_name"]
+        indexes = [
+            models.Index(fields=["student", "report"]),
+        ]
+
+    def __str__(self):
+        return f"[Recipient] student={self.student_id} report={self.report_id}"

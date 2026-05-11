@@ -9,6 +9,14 @@ courses_completion_dashboard,course_completed_enrollments,
     student_course_activity_metrics,
 )
 
+from .report_views import (
+    teacher_report_list, teacher_report_create, teacher_report_detail,
+    teacher_report_update, teacher_report_publish, teacher_report_delete,
+    teacher_report_student_data,
+    my_reports_list, my_report_detail,
+    public_report_info, public_report_verify_student, public_parent_setup,
+)
+
 urlpatterns = [
     path("api/gamification/achievements/", achievements_overview, name="achievements-overview"),
     path("generate_subs/", generate_subs, name="generate_sub"),
@@ -52,5 +60,23 @@ urlpatterns = [
         student_course_activity_metrics,
         name="student-course-activity-metrics",
     ),
+
+    # ─── Teacher Reports ────────────────────────────────────
+    path("api/reports/", teacher_report_list, name="teacher-report-list"),
+    path("api/reports/create/", teacher_report_create, name="teacher-report-create"),
+    path("api/reports/<int:report_id>/", teacher_report_detail, name="teacher-report-detail"),
+    path("api/reports/<int:report_id>/update/", teacher_report_update, name="teacher-report-update"),
+    path("api/reports/<int:report_id>/publish/", teacher_report_publish, name="teacher-report-publish"),
+    path("api/reports/<int:report_id>/delete/", teacher_report_delete, name="teacher-report-delete"),
+    path("api/reports/student-data/", teacher_report_student_data, name="teacher-report-student-data"),
+
+    # ─── Student/Parent Report Viewing ──────────────────────
+    path("api/my-reports/", my_reports_list, name="my-reports-list"),
+    path("api/my-reports/<int:report_id>/", my_report_detail, name="my-report-detail"),
+
+    # ─── Public Report Access ───────────────────────────────
+    path("api/report/public/<str:token>/", public_report_info, name="public-report-info"),
+    path("api/report/public/<str:token>/verify/", public_report_verify_student, name="public-report-verify"),
+    path("api/report/public/<str:token>/parent-setup/", public_parent_setup, name="public-parent-setup"),
 
 ]

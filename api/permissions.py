@@ -65,19 +65,23 @@ def RequiresActiveStudentSubscription(*, allow_page=False):
                 
             student_profile = getattr(user, "student_profile", None)
             if allow_page:
-                data,returned_count = student_profile.get_course_allowed(request, is_session=True)
- 
+                if not student_profile:
+                    return False
+                data, returned_count = student_profile.get_course_allowed(request, is_session=True)
+
                 if returned_count == 2:
                     return len(data) == 2
                 return data
-            
-            is_allowed = student_profile.check_session_data(request)
-            ##### IF allow_page=True is not passed then RequiresActiveStudentSubscription()
-            if is_allowed:
-                return True
 
+            if not student_profile:
+                # No student profile — fall through to parent/other-role checks below
+                pass
+            else:
+                is_allowed = student_profile.check_session_data(request)
+                ##### IF allow_page=True is not passed then RequiresActiveStudentSubscription()
+                if is_allowed:
+                    return True
 
-            if student_profile:
                 active = self._is_subscription_active(
                     student_profile=student_profile,
                     org_id=student_profile.organization_id,
