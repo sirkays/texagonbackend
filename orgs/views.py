@@ -433,9 +433,12 @@ def gamification_leaderboard(request):
         )
         badges_map = {row["student_id"]: int(row["c"]) for row in badge_counts}
 
-        # Streaks
-        streaks = Streak.objects.filter(student__in=students)
-        streak_map = {s.student_id: int(s.current_days or 0) for s in streaks}
+        # Streaks (ForeignKey: pick most recent per student)
+        streaks = Streak.objects.filter(student__in=students).order_by("student_id", "-last_activity")
+        streak_map = {}
+        for s in streaks:
+            if s.student_id not in streak_map:
+                streak_map[s.student_id] = int(s.current_days or 0)
 
         # Compose + sort
         rows = []

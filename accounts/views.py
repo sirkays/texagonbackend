@@ -1550,7 +1550,7 @@ def dashboard_overview(request):
     # streak
     streak_days = 0
     if student:
-        streak = Streak.objects.filter(student=student).order_by("-id").first()
+        streak = Streak.objects.filter(student=student).order_by("-last_activity").first()
         streak_days = streak.current_days if streak else 0
 
     # ---- Gamification: XP & Achievements & Leaderboard ----
@@ -1843,12 +1843,16 @@ def parent_overview(request):
                 "event_type": r["event_type"],
             }
 
-        # Streak map (OneToOne, safe to query in bulk)
+        # Streak map (ForeignKey, order by most recent activity)
         streak_rows = (
             Streak.objects.filter(student__in=students)
+            .order_by("student_id", "-last_activity")
             .values("student_id", "current_days", "longest_days", "last_activity")
         )
-        streak_map = {r["student_id"]: r for r in streak_rows}
+        streak_map = {}
+        for r in streak_rows:
+            if r["student_id"] not in streak_map:
+                streak_map[r["student_id"]] = r
 
         # Upcoming tests (global list for events + per-child next test)
         upcoming_tests_qs = (

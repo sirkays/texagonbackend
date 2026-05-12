@@ -66,7 +66,8 @@ def compute_rule_value(*, org_id: int, student_id: int, rule: dict) -> int:
         return qs.values(f"meta__{distinct_key}").distinct().count()
     
     if metric == "consecutive":
-        return build_streak(qs).count()
+        day_count, _ = build_streak(qs)
+        return day_count
     return 0
 
 

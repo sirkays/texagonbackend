@@ -249,13 +249,13 @@ class PointTransaction(TimeStampedModel):
 
 class Streak(TimeStampedModel):
     """
-    Optional: keep streak calculated from daily activity,
-    or update it directly when logging 'daily_active' events.
+    Tracks a student's consecutive-day activity streak.
+    One row per (student, season) pair.
     """
-    student = models.OneToOneField(
+    student = models.ForeignKey(
         "academics.StudentProfile",
         on_delete=models.CASCADE,
-        related_name="streak",
+        related_name="streaks",
     )
     season = models.ForeignKey(
         LeaderboardSeason,
@@ -269,41 +269,54 @@ class Streak(TimeStampedModel):
     longest_days = models.PositiveIntegerField(default=0)
     last_activity = models.DateField(null=True, blank=True)
 
+    class Meta:
+        unique_together = ("student", "season")
+        indexes = [
+            models.Index(fields=["student", "season"]),
+        ]
+
     @classmethod
     def set_student_streak(cls, student, org, event_type, code):
+        """
+        Recompute the current streak from ActivityEvent records and save it.
+        """
+        if event_type != "daily_active" or code != "streak_champion":
+            return
 
         ev_qs = ActivityEvent.objects.filter(
             student=student,
             organization=org,
             event_type=event_type,
         )
-        if event_type == "daily_active" and code == "streak_champion":
-            total = build_streak(ev_qs).count()
-            
-            occurred_at = timezone.now()
 
-            # 1) Prefer active season if it contains the date
-            active = LeaderboardSeason.get_active(None)
-            if active and active.contains(occurred_at):
-                return active
+        day_count, _ = build_streak(ev_qs)
 
+        # Resolve the current season
+        occurred_at = timezone.now()
+
+        # 1) Prefer active season if it contains the date
+        active = LeaderboardSeason.get_active(None)
+        if active and active.contains(occurred_at):
+            season = active
+        else:
             # 2) Otherwise find by date range
-            season =  (LeaderboardSeason.objects
-                    .filter(start_at__lte=occurred_at, end_at__gt=occurred_at)
-            .order_by("-start_at")
-            .first())
-
-            streak, is_created = Streak.objects.update_or_create(
-                student=student,
-                season=season,
-                defaults={
-                    "current_days":total,
-                    "last_activity":timezone.localdate()
-                }
+            season = (
+                LeaderboardSeason.objects
+                .filter(start_at__lte=occurred_at, end_at__gt=occurred_at)
+                .order_by("-start_at")
+                .first()
             )
 
-            if streak.longest_days < total:
-                streak.longest_days = total
-                streak.save()
+        streak, is_created = cls.objects.update_or_create(
+            student=student,
+            season=season,
+            defaults={
+                "current_days": day_count,
+                "last_activity": timezone.localdate(),
+            }
+        )
 
+        if streak.longest_days < day_count:
+            streak.longest_days = day_count
+            streak.save(update_fields=["longest_days"])
 

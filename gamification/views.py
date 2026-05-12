@@ -852,7 +852,7 @@ def parent_rewards(request):
         for student in students:
             org = getattr(student, "organization", None)
             total_points = _sum_points(student)
-            streak_obj = Streak.objects.filter(student=student).first()
+            streak_obj = Streak.objects.filter(student=student).order_by("-last_activity").first()
             current_streak = streak_obj.current_days if streak_obj else 0
 
             # -----------------------

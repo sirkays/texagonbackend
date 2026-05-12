@@ -573,7 +573,9 @@ def achievements_overview(request):
         org_id = getattr(org, "id", None)
 
         total_points = _sum_points(student)
-        streak_obj = getattr(student, "streak", None)
+
+        # Streak: now ForeignKey, so query for the most relevant streak record
+        streak_obj = Streak.objects.filter(student=student).order_by("-last_activity").first()
         streak_current = int(getattr(streak_obj, "current_days", 0) or 0)
         streak_best = int(getattr(streak_obj, "longest_days", 0) or 0)
 
@@ -589,9 +591,8 @@ def achievements_overview(request):
             .values_list("badge_id", flat=True)
         )
         badges_total = badges_qs.count()
-        badges_earned = len(awarded_ids)
-
         badges = []
+        badges_earned = 0
         for b in badges_qs:
             earned = (b.id in awarded_ids) or (total_points >= (b.points or 0))
             item = {
@@ -602,6 +603,8 @@ def achievements_overview(request):
                 "color": b.color or "bg-gray-400",
                 "earned": bool(earned),
             }
+            if earned:
+                badges_earned += 1
             if not earned and (b.points or 0) > 0:
                 item["progress"] = int(total_points)
                 item["total"] = int(b.points)
@@ -671,7 +674,8 @@ def achievements_overview(request):
                     return 0
                 return int(ev_qs.values(f"meta__{distinct_key}").distinct().count())
             if metric == "consecutive":
-                return build_streak(ev_qs).count()
+                day_count, _ = build_streak(ev_qs)
+                return day_count
             return 0
 
         def build(defn: AchievementDefinition, earned: bool, progress: int = None, total: int = None, earned_date=None):

@@ -43,8 +43,8 @@ def unlock_achievement(student, definition, value: int, meta: dict | None = None
     obj, created = AchievementAcquired.objects.get_or_create(
         student=student,
         definition=definition,
-        season=season,
         defaults={
+            "season": season,
             "value_at_unlock": int(value),
             "meta": meta or {},
         },
