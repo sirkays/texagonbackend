@@ -1166,6 +1166,13 @@ def post_login(request):
     # Check if this user also has active AdminAccess
     has_admin_access = AdminAccess.user_has_admin_access(user)
 
+    # Determine if nickname has been explicitly customised.
+    # Auto-generated usernames match the email-prefix pattern; anything else
+    # (including values set by the user) is treated as a custom nickname.
+    email_prefix = (user.email or "").split("@")[0].lower()
+    username_lower = (user.username or "").lower()
+    has_nickname = bool(user.username) and username_lower != email_prefix
+
     return Response(
         {
             "detail": "User access granted",
@@ -1173,6 +1180,8 @@ def post_login(request):
             "role": membership.role,
             "is_generated": user.is_generated,
             "has_admin_access": has_admin_access,
+            "has_nickname": has_nickname,
+            "nickname": user.username,
         },
         status=status.HTTP_200_OK,
     )
@@ -2978,6 +2987,20 @@ def update_profile(request):
                 if "phone" in data:
                     user.phone = data.get("phone", "").strip()
 
+                # Allow updating username / nickname from profile page
+                nickname = data.get("nickname") or data.get("username")
+                if nickname:
+                    nickname = nickname.strip()
+                    if " " in nickname:
+                        return Response({"detail": "Nickname cannot contain spaces."}, status=status.HTTP_400_BAD_REQUEST)
+                    if len(nickname) < 3:
+                        return Response({"detail": "Nickname must be at least 3 characters."}, status=status.HTTP_400_BAD_REQUEST)
+                    if len(nickname) > 50:
+                        return Response({"detail": "Nickname must be 50 characters or fewer."}, status=status.HTTP_400_BAD_REQUEST)
+                    if User.objects.filter(username__iexact=nickname).exclude(pk=user.pk).exists():
+                        return Response({"detail": "That nickname is already taken."}, status=status.HTTP_400_BAD_REQUEST)
+                    user.username = nickname
+
                 user.save()
                 return None
 
@@ -3118,12 +3141,22 @@ def fetch_profile(request):
         )
 
     # COMMON USER DATA
+    # Determine if nickname has been explicitly customised.
+    # Auto-generated usernames match the email-prefix pattern; anything else
+    # (including values set by the user) is treated as a custom nickname.
+    email_prefix = (user.email or "").split("@")[0].lower()
+    username_lower = (user.username or "").lower()
+    has_nickname = bool(user.username) and username_lower != email_prefix
+
     user_data = {
         "id": user.id,
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
-        "phone": user.phone
+        "phone": user.phone,
+        "username": user.username,
+        "nickname": user.username,
+        "has_nickname": has_nickname,
     }
 
     # TEACHER
@@ -3169,6 +3202,45 @@ def fetch_profile(request):
             },
         }, status=status.HTTP_200_OK
     )
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def set_nickname(request):
+    """
+    Dedicated endpoint to set / update a user's nickname (username).
+    POST /accounts/api/set-nickname/
+    Body: { "nickname": "<desired_nickname>" }
+    """
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response(
+            {"detail": "Invalid or missing session token."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    nickname = (request.data.get("nickname") or "").strip()
+
+    if not nickname:
+        return Response({"detail": "Nickname is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if " " in nickname:
+        return Response({"detail": "Nickname cannot contain spaces."}, status=status.HTTP_400_BAD_REQUEST)
+    if len(nickname) < 3:
+        return Response({"detail": "Nickname must be at least 3 characters."}, status=status.HTTP_400_BAD_REQUEST)
+    if len(nickname) > 50:
+        return Response({"detail": "Nickname must be 50 characters or fewer."}, status=status.HTTP_400_BAD_REQUEST)
+    if User.objects.filter(username__iexact=nickname).exclude(pk=user.pk).exists():
+        return Response({"detail": "That nickname is already taken. Please choose another."}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.username = nickname
+    user.save(update_fields=["username"])
+
+    return Response(
+        {"detail": "Nickname set successfully.", "nickname": user.username},
+        status=status.HTTP_200_OK,
+    )
+
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])

@@ -10,6 +10,7 @@ urlpatterns = [
     path("api/confirm-email-change/", views.ConfirmEmailChangeView.as_view({"post": "post"}), name="api-confirm-email"),
     path("api/update-profile/", views.update_profile, name="update_profile"),
     path("api/fetch-profile/", views.fetch_profile, name="fetch_profile"),
+    path("api/set-nickname/", views.set_nickname, name="set_nickname"),
 
 
     # PARENT OVERVIEW
