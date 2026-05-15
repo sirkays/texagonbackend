@@ -31,6 +31,7 @@ from assessments.models import (
     TestAttempt,
     Assignment,
     Submission,
+    SubmissionComment,
 )
 from attendance.models import (
     AttendanceSession,
@@ -204,6 +205,10 @@ class SubmissionSerializer(serializers.ModelSerializer):
         model = Submission
         fields = "__all__"
 
+class SubmissionCommentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubmissionComment
+        fields = "__all__"
 
 class AttendanceSessionSerializer(serializers.ModelSerializer):
     class Meta:

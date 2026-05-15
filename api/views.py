@@ -25,7 +25,7 @@ from .serializers import (
     ParentProfileSerializer, ParentChildLinkSerializer,
     CourseSerializer, EnrollmentSerializer, ModuleSerializer, LessonSerializer, MaterialSerializer,
     BookmarkSerializer, NoteSerializer,
-    TestSerializer, QuestionSerializer, ChoiceSerializer, TestAttemptSerializer, AssignmentSerializer, SubmissionSerializer,
+    TestSerializer, QuestionSerializer, ChoiceSerializer, TestAttemptSerializer, AssignmentSerializer, SubmissionSerializer, SubmissionCommentSerializer,
     AttendanceSessionSerializer, AttendanceRecordSerializer,
     BadgeSerializer, BadgeAwardSerializer, PointTransactionSerializer, StreakSerializer,
     LiveSessionSerializer, TutoringBookingSerializer,TutoringBookingTeacherSerializer,
@@ -40,7 +40,7 @@ from academics.models import (
     ParentProfile, ParentChildLink,
 )
 from learning.models import Course, Enrollment, Module, Lesson, Material, Bookmark, Note
-from assessments.models import Test, Question, Choice, TestAttempt, Assignment, Submission
+from assessments.models import Test, Question, Choice, TestAttempt, Assignment, Submission, SubmissionComment
 from attendance.models import AttendanceSession, AttendanceRecord
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak
 from live.models import (PrivateTutoring, AvailableDay, TutoringBooking, LiveSession,PrivateTutoringRating)
@@ -662,6 +662,10 @@ class AssignmentViewSet(APIKeySessionViewSet):
 class SubmissionViewSet(APIKeySessionViewSet):
     queryset = Submission.objects.all()
     serializer_class = SubmissionSerializer
+
+class SubmissionCommentViewSet(APIKeySessionViewSet):
+    queryset = SubmissionComment.objects.all()
+    serializer_class = SubmissionCommentSerializer
 
 
 class AttendanceSessionViewSet(APIKeySessionViewSet):

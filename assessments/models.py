@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 from django.utils import timezone
 from core.models import TimeStampedModel
 from decimal import Decimal
@@ -97,6 +98,7 @@ class TestAttempt(TimeStampedModel):
 
 class Assignment(TimeStampedModel):
     course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="assignments")
+    lesson = models.ForeignKey("learning.Lesson", on_delete=models.SET_NULL, null=True, blank=True, related_name="assignments")
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     due_at = models.DateTimeField(null=True, blank=True)
@@ -107,12 +109,18 @@ class Submission(TimeStampedModel):
     student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="submissions")
     text = models.TextField(blank=True)
     file = models.FileField(upload_to="assignments/submissions/", blank=True, null=True)
+    attachments = models.JSONField(default=list, blank=True)
     submitted_at = models.DateTimeField(default=timezone.now)
     score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     feedback = models.TextField(blank=True)
 
     class Meta:
         unique_together = ("assignment", "student")
+
+class SubmissionComment(TimeStampedModel):
+    submission = models.ForeignKey(Submission, on_delete=models.CASCADE, related_name="comments")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="submission_comments")
+    text = models.TextField()
 
 
 

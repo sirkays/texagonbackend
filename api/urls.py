@@ -7,7 +7,7 @@ from .views import (
     ParentProfileViewSet, ParentChildLinkViewSet,
     CourseViewSet, EnrollmentViewSet, ModuleViewSet, LessonViewSet, MaterialViewSet,
     BookmarkViewSet, NoteViewSet,
-    TestViewSet, QuestionViewSet, ChoiceViewSet, TestAttemptViewSet, AssignmentViewSet, SubmissionViewSet,
+    TestViewSet, QuestionViewSet, ChoiceViewSet, TestAttemptViewSet, AssignmentViewSet, SubmissionViewSet, SubmissionCommentViewSet,
     AttendanceSessionViewSet, AttendanceRecordViewSet,
     BadgeViewSet, BadgeAwardViewSet, PointTransactionViewSet, StreakViewSet,
     LiveSessionViewSet, TutoringBookingViewSet,
@@ -49,6 +49,7 @@ router.register(r"choices", ChoiceViewSet)
 router.register(r"test-attempts", TestAttemptViewSet)
 router.register(r"assignments", AssignmentViewSet)
 router.register(r"submissions", SubmissionViewSet)
+router.register(r"submission-comments", SubmissionCommentViewSet)
 router.register(r"attendance-sessions", AttendanceSessionViewSet)
 router.register(r"attendance-records", AttendanceRecordViewSet)
 router.register(r"badges", BadgeViewSet)
