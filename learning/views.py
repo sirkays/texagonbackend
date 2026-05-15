@@ -2,6 +2,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 import traceback
 import os
+import re
 import json
 import uuid
 import logging
@@ -1575,7 +1576,7 @@ def cloudinary_signature(request):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-@authentication_classes([SessionTokenAuthentication])  # ✅ ADD
+@authentication_classes([SessionTokenAuthentication])
 def presign_s3(request):
     filename = (request.data.get("filename") or "").strip()
     content_type = (request.data.get("content_type") or "application/octet-stream").strip()
@@ -1583,9 +1584,13 @@ def presign_s3(request):
     if not filename:
         return Response({"detail": "filename is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ✅ create a safe unique key
-    ext = os.path.splitext(filename)[1].lower()
-    key = f"lessons/{uuid.uuid4().hex}{ext}"
+    # Preserve original filename — split name and extension
+    base, ext = os.path.splitext(filename)
+    ext = ext.lower()
+
+    # Sanitize the base name: lowercase, replace spaces/special chars with underscores
+    safe_base = re.sub(r"[^\w\-]", "_", base.strip()).strip("_") or "file"
+    safe_base = re.sub(r"_+", "_", safe_base)  # collapse consecutive underscores
 
     s3 = boto3.client(
         "s3",
@@ -1593,6 +1598,24 @@ def presign_s3(request):
         aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
         region_name=settings.AWS_S3_REGION_NAME,
     )
+
+    # Build a unique key — append a counter if the object already exists in S3
+    from botocore.exceptions import ClientError as BotoCoreClientError
+
+    candidate_key = f"lessons/{safe_base}{ext}"
+    counter = 1
+    while True:
+        try:
+            s3.head_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=candidate_key)
+            # Object exists — try the next suffix
+            candidate_key = f"lessons/{safe_base}_{counter}{ext}"
+            counter += 1
+        except BotoCoreClientError as e:
+            # 404 → key is free; anything else (e.g. 403) → key is free too
+            # (we still generate the presigned URL; S3 enforces permissions on upload)
+            break
+
+    key = candidate_key
 
     upload_url = s3.generate_presigned_url(
         ClientMethod="put_object",
@@ -1604,7 +1627,7 @@ def presign_s3(request):
         ExpiresIn=60 * 15,  # 15 mins to upload
     )
 
-    return Response({"upload_url": upload_url, "key": key})
+    return Response({"upload_url": upload_url, "key": key, "filename": os.path.basename(key)})
 
 
 
