@@ -201,6 +201,16 @@ class AssignmentSerializer(serializers.ModelSerializer):
 
 
 class SubmissionSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField(read_only=True)
+
+    def get_student_name(self, obj):
+        try:
+            user = obj.student.user
+            full = f"{user.first_name} {user.last_name}".strip()
+            return full or user.email
+        except Exception:
+            return str(obj.student_id)
+
     class Meta:
         model = Submission
         fields = "__all__"

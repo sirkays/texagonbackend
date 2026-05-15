@@ -707,8 +707,26 @@ def presign_attachment_download(request):
     return Response({"files": results})
 
 class SubmissionViewSet(APIKeySessionViewSet):
-    queryset = Submission.objects.all()
     serializer_class = SubmissionSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Submission.objects.select_related(
+            "student__user", "assignment"
+        ).prefetch_related("comments")
+
+        # Filter by assignment if provided
+        assignment_id = self.request.query_params.get("assignment")
+        if assignment_id:
+            qs = qs.filter(assignment_id=assignment_id)
+
+        # Students can only see their own submissions
+        student = getattr(user, "student_profile", None)
+        teacher = getattr(user, "teacher_profile", None)
+        if student and not teacher:
+            qs = qs.filter(student=student)
+
+        return qs.order_by("-submitted_at")
 
     def create(self, request, *args, **kwargs):
         """
