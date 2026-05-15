@@ -12,6 +12,7 @@ from .views import (dashboard_summary,courses_list,courses_stats_header,course_f
     admin_complaint_detail,admin_complaint_add_response,invoice_pdf,
     classroom_students, classroom_students_bulk_update,
     report_student_performance, report_revenue, report_course_completion,
+    admin_bulk_enroll_students, admin_enroll_classroom_to_course,
 
 
 )
@@ -34,6 +35,8 @@ urlpatterns = [
     path("api/admin/courses/<int:course_id>/", course_detail, name="course-detail"),
     path("api/admin/courses/<int:course_id>/update/", course_update, name="course-update"),
     path("api/admin/courses/<int:course_id>/delete/", course_delete, name="course-delete"),
+    path("api/admin/courses/<int:course_id>/bulk-enroll/", admin_bulk_enroll_students, name="course-bulk-enroll"),
+    path("api/admin/courses/<int:course_id>/enroll-classroom/", admin_enroll_classroom_to_course, name="course-enroll-classroom"),
 
     path("api/admin/module/list/", modules_list, name="module-admin-list"),
     path("api/admin/module/lessons/<int:module_id>/", module_lessons, name="module-admin-lesson"),

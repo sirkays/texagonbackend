@@ -3382,3 +3382,237 @@ def report_course_completion(request):
         return Response({"detail": "Unexpected error", "error": str(e)},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+# ---------------------------------------------------------------
+# Bulk Course Assignment
+# ---------------------------------------------------------------
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_bulk_enroll_students(request, course_id: int):
+    """
+    POST /orgs/api/admin/courses/<course_id>/bulk-enroll/
+
+    Assign a public course to multiple students at once.
+
+    Body:
+      {
+        "student_ids": [<int>, ...]   # list of StudentProfile IDs
+      }
+
+    Returns:
+      {
+        "enrolled": <count of new enrollments created>,
+        "already_enrolled": <count skipped (already enrolled)>,
+        "not_found": <count skipped (student not in org)>,
+        "details": [...]
+      }
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Validate course exists, belongs to org, and is public
+        course = (
+            Course.objects
+            .select_related("subject", "classroom", "teacher__user")
+            .filter(id=course_id, organization=org)
+            .first()
+        )
+        if not course:
+            return Response({"detail": "Course not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        if course.course_type != "public":
+            return Response({"detail": "Only public courses can be bulk-assigned."}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = request.data or {}
+        student_ids = data.get("student_ids", [])
+
+        if not isinstance(student_ids, list) or not student_ids:
+            return Response({"detail": "'student_ids' must be a non-empty list of integers."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            student_ids = [int(i) for i in student_ids]
+        except (TypeError, ValueError):
+            return Response({"detail": "All student IDs must be integers."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Fetch students that belong to this org
+        students_qs = StudentProfile.objects.filter(id__in=student_ids, organization=org)
+        found_ids = set(students_qs.values_list("id", flat=True))
+        not_found_ids = [i for i in student_ids if i not in found_ids]
+
+        # Already enrolled
+        already_enrolled_ids = set(
+            Enrollment.objects.filter(student_id__in=found_ids, course=course)
+            .values_list("student_id", flat=True)
+        )
+
+        to_enroll_ids = found_ids - already_enrolled_ids
+
+        leaderboard_season = resolve_season(org, timezone.now())
+
+        enrolled_count = 0
+        details = []
+
+        with transaction.atomic():
+            for student in students_qs.filter(id__in=to_enroll_ids).select_related("user"):
+                Enrollment.objects.create(
+                    student=student,
+                    course=course,
+                    leaderboard_season=leaderboard_season,
+                )
+                enrolled_count += 1
+                details.append({
+                    "student_id": student.id,
+                    "name": student.user.get_full_name() or student.user.email,
+                    "status": "enrolled",
+                })
+
+        for sid in already_enrolled_ids:
+            details.append({"student_id": sid, "status": "already_enrolled"})
+        for sid in not_found_ids:
+            details.append({"student_id": sid, "status": "not_found"})
+
+        return Response(
+            {
+                "course_id": course.id,
+                "course_name": course.name,
+                "enrolled": enrolled_count,
+                "already_enrolled": len(already_enrolled_ids),
+                "not_found": len(not_found_ids),
+                "details": details,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_enroll_classroom_to_course(request, course_id: int):
+    """
+    POST /orgs/api/admin/courses/<course_id>/enroll-classroom/
+
+    Assign a public course to every student currently in a given classroom.
+
+    Body:
+      {
+        "classroom_id": <int>
+      }
+
+    Returns same shape as admin_bulk_enroll_students.
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Validate course
+        course = (
+            Course.objects
+            .select_related("subject", "classroom", "teacher__user")
+            .filter(id=course_id, organization=org)
+            .first()
+        )
+        if not course:
+            return Response({"detail": "Course not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        if course.course_type != "public":
+            return Response({"detail": "Only public courses can be bulk-assigned."}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = request.data or {}
+        classroom_id = data.get("classroom_id")
+        if not classroom_id:
+            return Response({"detail": "'classroom_id' is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            classroom_id = int(classroom_id)
+        except (TypeError, ValueError):
+            return Response({"detail": "'classroom_id' must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
+
+        classroom = Classroom.objects.filter(id=classroom_id, organization=org).first()
+        if not classroom:
+            return Response({"detail": "Classroom not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        students_qs = StudentProfile.objects.filter(
+            organization=org,
+            current_classroom=classroom,
+        ).select_related("user")
+
+        if not students_qs.exists():
+            return Response(
+                {
+                    "course_id": course.id,
+                    "course_name": course.name,
+                    "classroom": classroom.name,
+                    "enrolled": 0,
+                    "already_enrolled": 0,
+                    "not_found": 0,
+                    "details": [],
+                    "message": "No students found in this classroom.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        student_ids = set(students_qs.values_list("id", flat=True))
+
+        already_enrolled_ids = set(
+            Enrollment.objects.filter(student_id__in=student_ids, course=course)
+            .values_list("student_id", flat=True)
+        )
+
+        to_enroll_ids = student_ids - already_enrolled_ids
+        leaderboard_season = resolve_season(org, timezone.now())
+
+        enrolled_count = 0
+        details = []
+
+        with transaction.atomic():
+            for student in students_qs.filter(id__in=to_enroll_ids):
+                Enrollment.objects.create(
+                    student=student,
+                    course=course,
+                    leaderboard_season=leaderboard_season,
+                )
+                enrolled_count += 1
+                details.append({
+                    "student_id": student.id,
+                    "name": student.user.get_full_name() or student.user.email,
+                    "status": "enrolled",
+                })
+
+        for sid in already_enrolled_ids:
+            details.append({"student_id": sid, "status": "already_enrolled"})
+
+        return Response(
+            {
+                "course_id": course.id,
+                "course_name": course.name,
+                "classroom": classroom.name,
+                "enrolled": enrolled_count,
+                "already_enrolled": len(already_enrolled_ids),
+                "not_found": 0,
+                "details": details,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
