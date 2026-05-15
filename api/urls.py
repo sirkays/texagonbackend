@@ -23,6 +23,7 @@ from .views import (
     teacher_tutoring_bookings,
     CancelTutoringBookingView,
     verify_session,
+    presign_attachment_download,
 )
 
 router = DefaultRouter()
@@ -92,6 +93,7 @@ urlpatterns = [
         name="cancel-tutoring-booking",
     ),
 
+    path("presign-attachment-download/", presign_attachment_download, name="presign_attachment_download"),
     path("auth/session/verify/", verify_session),
 ]
 

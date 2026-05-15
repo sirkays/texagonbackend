@@ -659,6 +659,53 @@ class AssignmentViewSet(APIKeySessionViewSet):
     queryset = Assignment.objects.all()
     serializer_class = AssignmentSerializer
 
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+@authentication_classes([SessionTokenAuthentication])
+def presign_attachment_download(request):
+    """
+    Given a list of S3 keys (or full URLs), return presigned download URLs.
+    Cloudinary/full URLs are returned as-is. S3 keys get presigned.
+    Body: { "keys": ["lessons/abc.pdf", "https://..."] }
+    """
+    import boto3
+
+    keys = request.data.get("keys", [])
+    if not keys or not isinstance(keys, list):
+        return Response({"detail": "keys list is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    results = []
+    for key in keys:
+        key = (key or "").strip()
+        if not key:
+            continue
+        # If it's already a full URL, return it directly
+        if key.startswith("http://") or key.startswith("https://"):
+            results.append({"key": key, "url": key, "filename": key.split("/")[-1].split("?")[0]})
+        else:
+            # S3 key → presign GET
+            try:
+                s3 = boto3.client(
+                    "s3",
+                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                    region_name=settings.AWS_S3_REGION_NAME,
+                )
+                signed_url = s3.generate_presigned_url(
+                    ClientMethod="get_object",
+                    Params={"Bucket": settings.AWS_STORAGE_BUCKET_NAME, "Key": key},
+                    ExpiresIn=60 * 60,  # 1 hour
+                )
+                # Extract a nice filename from the key
+                import os
+                filename = os.path.basename(key)
+                results.append({"key": key, "url": signed_url, "filename": filename})
+            except Exception as e:
+                results.append({"key": key, "url": None, "error": str(e)})
+
+    return Response({"files": results})
+
 class SubmissionViewSet(APIKeySessionViewSet):
     queryset = Submission.objects.all()
     serializer_class = SubmissionSerializer
