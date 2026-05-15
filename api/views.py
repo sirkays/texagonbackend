@@ -710,6 +710,47 @@ class SubmissionViewSet(APIKeySessionViewSet):
     queryset = Submission.objects.all()
     serializer_class = SubmissionSerializer
 
+    def create(self, request, *args, **kwargs):
+        """
+        Auto-assign the student from the session token.
+        If the student already has a submission for this assignment,
+        update it instead of returning a 400 unique_together error.
+        """
+        user = request.user
+        student = getattr(user, "student_profile", None)
+        if not student:
+            return Response(
+                {"detail": "No student profile found for this user."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        assignment_id = request.data.get("assignment")
+        if not assignment_id:
+            return Response(
+                {"detail": "assignment field is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if submission already exists → update it
+        existing = Submission.objects.filter(
+            assignment_id=assignment_id, student=student
+        ).first()
+
+        data = {**request.data, "student": student.id}
+
+        if existing:
+            serializer = self.get_serializer(existing, data=data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(student=student)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
 class SubmissionCommentViewSet(APIKeySessionViewSet):
     queryset = SubmissionComment.objects.all()
     serializer_class = SubmissionCommentSerializer
