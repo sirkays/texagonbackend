@@ -43,4 +43,8 @@ urlpatterns = [
 
     path("api/auth/verify-password/", views.verify_password, name="verify-password"),
 
+    # Teacher onboarding tour state (tied to user account)
+    path("api/teacher/onboarding-status/", views.teacher_onboarding_status, name="teacher-onboarding-status"),
+    path("api/teacher/onboarding-complete/", views.teacher_onboarding_complete, name="teacher-onboarding-complete"),
+
 ]

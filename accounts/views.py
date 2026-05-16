@@ -1310,6 +1310,26 @@ def teacher_dashboard_overview(request):
         if not teacher:
             return Response({"detail": "Teacher profile not found."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Ensure onboarding state is saved if it has not been saved
+        import json
+        onboarding_data = teacher.has_seen_onboarding
+        if isinstance(onboarding_data, str):
+            try:
+                onboarding_data = json.loads(onboarding_data)
+            except Exception:
+                onboarding_data = {}
+                
+        if not isinstance(onboarding_data, dict):
+            onboarding_data = {}
+            
+        if "dashboard" not in onboarding_data:
+            new_data = dict(onboarding_data)
+            print(new_data, " seen boarding...")
+            new_data["dashboard"] = False
+            teacher.has_seen_onboarding = new_data
+            teacher.save(update_fields=["has_seen_onboarding"])
+        print(teacher.has_seen_onboarding, " has seen boarding... 2")
+
         now = timezone.now()
         current_first, current_last = _month_bounds(now)
         recent_days = now - timedelta(days=7)
@@ -3327,5 +3347,115 @@ def fetch_admin_access_orgs(request):
             "organizations": list(orgs),
             "selected_organization": selected_org_data,
         },
+        status=status.HTTP_200_OK,
+    )
+
+
+# ─── Teacher Onboarding Status ───────────────────────────────────────────────
+
+def _get_or_create_teacher_profile(user):
+    """
+    Return the user's TeacherProfile, auto-creating one if it does not exist.
+    Falls back to the user's first organization membership to satisfy the
+    required organization FK.
+    """
+    try:
+        return user.teacher_profile
+    except TeacherProfile.DoesNotExist:
+        pass
+
+    # Attempt to find an organization via existing memberships.
+    from orgs.models import OrganizationMembership
+    membership = OrganizationMembership.objects.filter(user=user, is_active=True).first()
+    if membership:
+        org = membership.organization
+    else:
+        # Last resort: grab any org (shouldn't normally happen).
+        from orgs.models import Organization
+        org = Organization.objects.first()
+
+    if not org:
+        return None
+
+    return TeacherProfile.objects.create(user=user, organization=org)
+
+
+@api_view(["GET"])
+@authentication_classes([SessionTokenAuthentication])
+@permission_classes([IsAuthenticated])
+def teacher_onboarding_status(request):
+    """
+    Return whether the authenticated teacher has completed the dashboard
+    onboarding tour for a specific page.
+
+    GET /accounts/api/teacher/onboarding-status/?page=dashboard
+    Response: { "has_seen_onboarding": true | false }
+    """
+    teacher_profile = _get_or_create_teacher_profile(request.user)
+    if teacher_profile is None:
+        return Response(
+            {"detail": "Teacher profile not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    page = request.query_params.get("page", "dashboard")
+    onboarding_data = teacher_profile.has_seen_onboarding
+    import json
+    if isinstance(onboarding_data, str):
+        try:
+            onboarding_data = json.loads(onboarding_data)
+        except Exception:
+            onboarding_data = {}
+            
+    if not isinstance(onboarding_data, dict):
+        onboarding_data = {}
+    
+    has_seen = onboarding_data.get(page, False)
+
+    return Response(
+        {"has_seen_onboarding": has_seen},
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@authentication_classes([SessionTokenAuthentication])
+@permission_classes([IsAuthenticated])
+def teacher_onboarding_complete(request):
+    """
+    Mark the authenticated teacher's onboarding tour as complete for a specific page.
+
+    POST /accounts/api/teacher/onboarding-complete/
+    Body: { "page": "dashboard" }
+    Response: { "has_seen_onboarding": true }
+    """
+    teacher_profile = _get_or_create_teacher_profile(request.user)
+    if teacher_profile is None:
+        return Response(
+            {"detail": "Teacher profile not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    page = request.data.get("page", "dashboard")
+    onboarding_data = teacher_profile.has_seen_onboarding
+    import json
+    if isinstance(onboarding_data, str):
+        try:
+            onboarding_data = json.loads(onboarding_data)
+        except Exception:
+            onboarding_data = {}
+            
+    if not isinstance(onboarding_data, dict):
+        onboarding_data = {}
+
+    if not onboarding_data.get(page):
+        # Create a new dict to ensure Django detects the state change
+        new_data = dict(onboarding_data)
+        new_data[page] = True
+        teacher_profile.has_seen_onboarding = new_data
+        teacher_profile.save(update_fields=["has_seen_onboarding"])
+
+    return Response(
+        {"has_seen_onboarding": True},
         status=status.HTTP_200_OK,
     )

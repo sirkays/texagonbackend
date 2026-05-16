@@ -230,6 +230,10 @@ class TeacherProfile(TimeStampedModel):
     languages = models.ManyToManyField(Language, blank=True)
     specialties = models.ManyToManyField(Subject, blank=True)
 
+    # Tracks whether the teacher has completed the dashboard onboarding tour.
+    # Stored server-side so it persists across devices, browsers, and logout/login cycles.
+    has_seen_onboarding = models.JSONField(default=dict, blank=True, null=True)
+
     def __str__(self):
         return f"Teacher: {self.user.get_full_name() or self.user.username} Email: {self.user.email}"
 
@@ -252,7 +256,7 @@ class ParentProfile(TimeStampedModel):
 
     # use TimeStampedModel.created_at (no new field needed)
     last_billed_at = models.DateTimeField(null=True, blank=True)
-
+    has_seen_onboarding = models.JSONField(default=dict, blank=True)
     def __str__(self):
         return f"Parent: {self.user.get_full_name() or self.user.username}"
 
