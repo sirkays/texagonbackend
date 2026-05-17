@@ -13,7 +13,7 @@ class Course(NamedModel):
     )
     organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="courses")
     subject = models.ForeignKey("academics.Subject", on_delete=models.PROTECT)
-    classroom = models.ForeignKey("academics.Classroom", on_delete=models.PROTECT)
+    classroom = models.ForeignKey("academics.Classroom", on_delete=models.PROTECT, blank=True, null=True)
     teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="courses")
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
@@ -32,7 +32,7 @@ class Course(NamedModel):
         return f"{self.subject.name} Teacher: {self.teacher.user.email}, Name: {self.name}"
 
     class Meta:
-        unique_together = ("organization", "subject", "classroom", "teacher")
+        unique_together = (("organization", "subject", "classroom", "teacher"),)
 
 class CoursePassCriteria(models.Model):
     course = models.OneToOneField(Course, on_delete=models.CASCADE, related_name="pass_criteria")

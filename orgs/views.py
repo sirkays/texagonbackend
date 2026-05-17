@@ -1388,14 +1388,14 @@ def course_create(request):
             return Response({"detail": "name is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         subject_id, classroom_id, teacher_id = _get_ids_from_payload(data, org)
-        if not subject_id or not classroom_id or not teacher_id:
-            return Response({"detail": "subject, classroom and teacher are required."},
+        if not subject_id or not teacher_id:
+            return Response({"detail": "subject and teacher are required."},
                             status=status.HTTP_400_BAD_REQUEST)
 
         exists = Course.objects.filter(
             organization=org,
             subject_id=subject_id,
-            classroom_id=classroom_id,
+            classroom_id=classroom_id,  # None is a valid value here
             teacher_id=teacher_id
         ).exists()
         if exists:
@@ -1455,7 +1455,10 @@ def course_update(request, course_id: int):
         if any(k in data for k in ["subject_id", "subject", "classroom_id", "classroom", "teacher_id", "teacher"]):
             subject_id, classroom_id, teacher_id = _get_ids_from_payload(data, org)
             c.subject_id = subject_id or c.subject_id
-            c.classroom_id = classroom_id or c.classroom_id
+            # Allow explicitly setting classroom to None (no classroom)
+            c.classroom_id = classroom_id if classroom_id is not None else (
+                None if "classroom" in data or "classroom_id" in data else c.classroom_id
+            )
             c.teacher_id = teacher_id or c.teacher_id
 
             dup = Course.objects.filter(
