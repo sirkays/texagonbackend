@@ -69,7 +69,6 @@ class TestAttemptSerializer(serializers.ModelSerializer):
             "submitted_at",
             "score",
             "status",
-            "answers",        # JSON of answers; keep if you want to show what the student picked
             "is_submitted",
             "is_graded",
             "is_open_now",

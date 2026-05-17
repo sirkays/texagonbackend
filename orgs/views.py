@@ -2961,12 +2961,16 @@ def admin_available_courses_for_student(request, student_id: int):
         # Reuse your course card shape (optional). Here’s a minimal option:
         data = []
         for c in qs:
-            teacher = c.teacher.user.get_full_name() or c.teacher.user.email or ""
+            teacher = ""
+            try:
+                teacher = c.teacher.user.get_full_name() or c.teacher.user.email or ""
+            except Exception:
+                pass
             data.append({
                 "id": c.id,
                 "name": c.name,
-                "subject": c.subject.name,
-                "classroom": c.classroom.name,
+                "subject": getattr(c.subject, "name", ""),
+                "classroom": getattr(c.classroom, "name", ""),  # classroom is optional
                 "teacher": teacher,
                 "course_type": c.course_type,
             })

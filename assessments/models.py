@@ -81,7 +81,6 @@ class TestAttempt(TimeStampedModel):
     started_at = models.DateTimeField(default=timezone.now)
     submitted_at = models.DateTimeField(null=True, blank=True)
     score = models.DecimalField(max_digits=7, decimal_places=2, default=0)
-    answers = models.JSONField(default=dict, blank=True)  # {question_id: ["A", ...] or "True"/"text"}
     status = models.CharField(max_length=16, default="in_progress")  # in_progress, submitted, graded
     client_submission_id = models.UUIDField(null=True, blank=True, db_index=True)
     auto_submitted = models.BooleanField(default=False)

@@ -1146,7 +1146,6 @@ def submit_test(request, test_id: int):
                 attempt = existing_same_run
                 attempt.submitted_at = now
                 attempt.score = score
-                attempt.answers = normalized_answers
                 attempt.status = "submitted"
                 attempt.client_submission_id = client_submission_id
                 attempt.auto_submitted = auto_submitted
@@ -1167,7 +1166,6 @@ def submit_test(request, test_id: int):
                     started_at=started_at,
                     submitted_at=now,
                     score=score,
-                    answers=normalized_answers,
                     status="submitted",
                     client_submission_id=client_submission_id,
                     auto_submitted=auto_submitted,
@@ -1357,17 +1355,11 @@ def _build_submission_response(
 
     result = "PASS" if percentage >= pass_mark else "FAIL"
 
-    answers = attempt.answers or []
-
     if auto_graded is None:
-        auto_graded = sum(
-            1 for item in answers if item.get("auto_graded")
-        )
+        auto_graded = attempt.answers_rows.filter(is_auto_graded=True).count()
 
     if pending_manual is None:
-        pending_manual = sum(
-            1 for item in answers if not item.get("auto_graded")
-        )
+        pending_manual = attempt.answers_rows.filter(is_auto_graded=False).count()
 
     if answered is None:
         answered = attempt.answers_rows.count()
@@ -2090,6 +2082,7 @@ def add_question(request, test_id: int):
 
         type_mapping = {
             "single-choice": "scq",
+            "multiple-choice": "mcq",
             "true-false": "tf",
             "short-answer": "short",
             "essay": "essay"
@@ -2678,6 +2671,7 @@ def student_performance_detail(request):
 
         test_summary = {
             "testTitle": test.title,
+            "testId": str(test.id),
             "score": float(attempt.score),
             "totalMarks": float(total_marks),
             "percentage": float(percentage),
@@ -2695,7 +2689,7 @@ def student_performance_detail(request):
             .prefetch_related("choices")
         )
 
-        answer_rows = (
+        answer_rows = list(
             TestAnswer.objects
             .filter(attempt=attempt)
             .select_related("question", "selected_choice")
@@ -2704,6 +2698,12 @@ def student_performance_detail(request):
 
         # Map question_id -> TestAnswer row
         answers_by_qid = {row.question_id: row for row in answer_rows}
+
+
+
+        # Pre-load all Choice objects for this test to resolve IDs -> text
+        all_choices_qs = Choice.objects.filter(question__test=test)
+        choice_map: dict = {c.id: c for c in all_choices_qs}
 
         answers = []
 
@@ -2715,74 +2715,76 @@ def student_performance_detail(request):
             correct_text = ""
             status_q = "Not answered"
 
-            # If no answer row at all
-            if not row:
-                answers.append({
-                    "question": q.body,
-                    "selected": selected_text,
-                    "correct": correct_text,
-                    "status": status_q,
-                })
-                continue
-
             choices = list(q.choices.all())
             correct_choices = [c for c in choices if c.is_correct]
-            correct_text = ", ".join(c.text for c in correct_choices)
 
-            if q.qtype in ["scq", "mcq", "tf"]:
-                # ---------- MCQ ----------
-                if q.qtype == "mcq":
-                    selected_ids = row.selected_choice_ids or []
-                    # make sure they're ints
-                    selected_ids = [int(x) for x in selected_ids if str(x).isdigit()]
+            if choices:
+                correct_text = ", ".join(c.text for c in correct_choices)
 
-                    selected_choices = [c for c in choices if c.id in selected_ids]
-                    selected_text = ", ".join(c.text for c in selected_choices)
-
-                    correct_ids = {c.id for c in correct_choices}
-                    status_q = "Correct" if set(selected_ids) == correct_ids else "Incorrect"
-
-                # ---------- SCQ / TF ----------
-                else:
-                    selected_choice = row.selected_choice
-                    if selected_choice:
-                        selected_text = selected_choice.text
+            # ---- Path A: TestAnswer row exists ----
+            if row is not None:
+                if q.qtype in ["scq", "mcq", "tf"]:
+                    # ---------- MCQ ----------
+                    if q.qtype == "mcq":
+                        selected_ids = row.selected_choice_ids or []
+                        selected_ids = [int(x) for x in selected_ids if str(x).isdigit()]
+                        selected_choices = [c for c in choices if c.id in selected_ids]
+                        selected_text = ", ".join(c.text for c in selected_choices)
+                        correct_ids = {c.id for c in correct_choices}
+                        status_q = "Correct" if set(selected_ids) == correct_ids else "Incorrect"
+                    # ---------- SCQ / TF ----------
                     else:
-                        # fallback if something was stored as text
-                        selected_text = (row.answer_text or "").strip()
-
-                    status_q = "Correct" if (selected_choice and selected_choice.is_correct) else "Incorrect"
-
-            else:
-                # ---------- SHORT / ESSAY ----------
-                selected_text = (row.answer_text or "").strip()
-                correct_text = ""
-
-                if row.is_auto_graded:
-                    if row.awarded_points >= q.points:
-                        status_q = "Correct"
-                    elif row.awarded_points > 0:
-                        status_q = "Partially Correct"
-                    else:
-                        status_q = "Incorrect"
+                        selected_choice = row.selected_choice
+                        if selected_choice:
+                            selected_text = selected_choice.text
+                            status_q = "Correct" if selected_choice.is_correct else "Incorrect"
+                        else:
+                            # selected_choice is NULL — try raw ID first
+                            sc_id = row.selected_choice_id
+                            if sc_id and sc_id in choice_map:
+                                resolved = choice_map[sc_id]
+                                selected_text = resolved.text
+                                status_q = "Correct" if resolved.is_correct else "Incorrect"
+                            else:
+                                awarded = float(row.awarded_points or 0)
+                                q_pts = float(q.points or 1)
+                                if awarded >= q_pts:
+                                    status_q = "Correct"
+                                    selected_text = correct_text or "(answered correctly)"
+                                else:
+                                    selected_text = (row.answer_text or "").strip()
+                                    if not selected_text:
+                                        selected_text = "(answer not available — choices were updated)"
+                                    status_q = "Incorrect"
                 else:
-                    status_q = "Pending"
+                    # ---------- SHORT / ESSAY ----------
+                    selected_text = (row.answer_text or "").strip()
+                    correct_text = ""
+                    if row.is_auto_graded:
+                        if row.awarded_points >= q.points:
+                            status_q = "Correct"
+                        elif row.awarded_points > 0:
+                            status_q = "Partially Correct"
+                        else:
+                            status_q = "Incorrect"
+                    else:
+                        status_q = "Pending"
+
+            # ---- Path C: Genuinely not answered ----
+            # (selected_text and status_q already set to defaults above)
 
             answers.append({
                 "question": q.body,
                 "selected": selected_text,
                 "correct": correct_text,
                 "status": status_q,
-                # optional extras if you want in the payload:
-                # "awardedPoints": float(row.awarded_points),
-                # "maxPoints": float(q.points),
             })
 
         payload = {
             "student": student_info,
             "test": test_summary,
             "answers": answers,
-        }
+        }   
         return Response(payload)
 
     except Exception as e:
