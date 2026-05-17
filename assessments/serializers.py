@@ -41,6 +41,7 @@ class TestMiniSerializer(serializers.ModelSerializer):
             "end_at",
             "course_id",
             "course_name",
+            "require_browser_code",
         ]
         read_only_fields = fields
 

@@ -1628,6 +1628,9 @@ def update_test(request, test_id: int):
         if "end_at" in data:
             test.end_at = _to_aware_utc(data["end_at"]) if data["end_at"] else None
 
+        if "require_browser_code" in data:
+            test.require_browser_code = bool(data["require_browser_code"])
+
         settings_dict = test.settings or {}
         if "difficulty" in data:
             settings_dict["difficulty"] = data["difficulty"]
@@ -1822,6 +1825,7 @@ def create_test(request):
             total_marks=data.get("total_marks", 100),
             duration_minutes=max(1, int(data.get("duration", 30))),
             visibility="draft",
+            require_browser_code=bool(data.get("require_browser_code", True)),
             settings={
                 "difficulty": data.get("difficulty", "Medium"),
                 "category": data.get("category", ""),
@@ -1970,7 +1974,7 @@ def publish_test(request, test_id: int):
         test.visibility = 'published' if is_published else 'draft'
         test.save()
         
-        serialized_test = _serialize_test(test)
+        serialized_test = _serialize_test(test, include_questions=True)
         
         return Response({
             "test": serialized_test,
