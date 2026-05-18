@@ -142,7 +142,12 @@ class ParentWriteSerializer(serializers.Serializer):
 
         with transaction.atomic():
             # Create or attach user
-            user, created = User.objects.get_or_create(email=email, defaults={"is_active": True})
+            user = User.objects.filter(email=email).first()
+            if not user:
+                user = User.objects.create_user(email=email, is_active=True)
+                created = True
+            else:
+                created = False
             # Fill in names if given
             if name:
                 # naive "split" to first_name/last_name if you use Django's standard fields

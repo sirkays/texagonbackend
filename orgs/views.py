@@ -2145,11 +2145,17 @@ class StudentsViewSet(mixins.ListModelMixin,
         name = (payload["name"] or "").strip()
         first, last = (name.split(" ", 1) + [""])[:2]
 
-        user, created = User.objects.get_or_create(
-            email=email,
-            primary_org=org,
-            defaults={"first_name": first, "last_name": last or ""}
-        )
+        user = User.objects.filter(email=email).first()
+        if user:
+            created = False
+        else:
+            user = User.objects.create_user(
+                email=email,
+                primary_org=org,
+                first_name=first,
+                last_name=last or ""
+            )
+            created = True
         if not created:
             # If user exists, update their display name (non-destructive)
             if first and not user.first_name:
@@ -2432,11 +2438,15 @@ class TeacherViewSet(viewsets.ModelViewSet):
         first, *rest = name.split(" ", 1)
         last = rest[0] if rest else ""
         # Get or create the user by email
-        user, _ = User.objects.get_or_create(
-            email=email,
-            primary_org=org,
-            defaults={"first_name": first, "last_name": last, "is_active": True}
-        )
+        user = User.objects.filter(email=email).first()
+        if not user:
+            user = User.objects.create_user(
+                email=email,
+                primary_org=org,
+                first_name=first,
+                last_name=last,
+                is_active=True
+            )
         # Optional user fields
         if "phone" in data:
             user.phone = data["phone"] or user.phone
