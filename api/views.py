@@ -640,6 +640,7 @@ class NoteViewSet(APIKeySessionViewSet):
 
 
 class TestViewSet(APIKeySessionViewSet):
+    queryset = Test.objects.all()
     serializer_class = TestSerializer
 
     def get_queryset(self):
@@ -692,6 +693,7 @@ class TestAttemptViewSet(APIKeySessionViewSet):
     serializer_class = TestAttemptSerializer
 
 class AssignmentViewSet(APIKeySessionViewSet):
+    queryset = Assignment.objects.all()
     serializer_class = AssignmentSerializer
 
     def get_queryset(self):
