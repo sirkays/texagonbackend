@@ -640,8 +640,44 @@ class NoteViewSet(APIKeySessionViewSet):
 
 
 class TestViewSet(APIKeySessionViewSet):
-    queryset = Test.objects.all()
     serializer_class = TestSerializer
+
+    def get_queryset(self):
+        try:
+            request = self.request
+            org, msg = _resolve_org(request)
+            if not org:
+                return Test.objects.none()
+
+            qs = Test.objects.filter(course__organization_id=org.id).select_related("course").order_by("-created_at")
+
+            user = request.user
+            student = getattr(user, "student_profile", None)
+            if isinstance(student, StudentProfile):
+                if student.organization_id != org.id:
+                    return Test.objects.none()
+
+                enrolled_course_ids = Enrollment.objects.filter(
+                    student=student,
+                    status=Enrollment.Status.ACTIVE,
+                ).values("course_id")
+                qs = qs.filter(course_id__in=Subquery(enrolled_course_ids))
+
+            teacher = getattr(user, "teacher_profile", None)
+            if isinstance(teacher, TeacherProfile) and not user.is_staff and not user.is_superuser:
+                if teacher.organization_id != org.id:
+                    return Test.objects.none()
+                qs = qs.filter(course__teacher_id=teacher.id)
+
+            course_id = request.query_params.get("course")
+            if course_id:
+                qs = qs.filter(course_id=course_id)
+
+            return qs
+
+        except Exception as e:
+            print(f"Error in TestViewSet.get_queryset: {str(e)}")
+            return Test.objects.none()
 
 class QuestionViewSet(APIKeySessionViewSet):
     queryset = Question.objects.all()
@@ -656,8 +692,48 @@ class TestAttemptViewSet(APIKeySessionViewSet):
     serializer_class = TestAttemptSerializer
 
 class AssignmentViewSet(APIKeySessionViewSet):
-    queryset = Assignment.objects.all()
     serializer_class = AssignmentSerializer
+
+    def get_queryset(self):
+        try:
+            request = self.request
+            org, msg = _resolve_org(request)
+            if not org:
+                return Assignment.objects.none()
+
+            qs = Assignment.objects.filter(course__organization_id=org.id).select_related("course", "lesson").order_by("-created_at")
+
+            user = request.user
+            student = getattr(user, "student_profile", None)
+            if isinstance(student, StudentProfile):
+                if student.organization_id != org.id:
+                    return Assignment.objects.none()
+
+                enrolled_course_ids = Enrollment.objects.filter(
+                    student=student,
+                    status=Enrollment.Status.ACTIVE,
+                ).values("course_id")
+                qs = qs.filter(course_id__in=Subquery(enrolled_course_ids))
+
+            teacher = getattr(user, "teacher_profile", None)
+            if isinstance(teacher, TeacherProfile) and not user.is_staff and not user.is_superuser:
+                if teacher.organization_id != org.id:
+                    return Assignment.objects.none()
+                qs = qs.filter(course__teacher_id=teacher.id)
+
+            course_id = request.query_params.get("course")
+            if course_id:
+                qs = qs.filter(course_id=course_id)
+
+            lesson_id = request.query_params.get("lesson")
+            if lesson_id:
+                qs = qs.filter(lesson_id=lesson_id)
+
+            return qs
+
+        except Exception as e:
+            print(f"Error in AssignmentViewSet.get_queryset: {str(e)}")
+            return Assignment.objects.none()
 
 
 @api_view(["POST"])
