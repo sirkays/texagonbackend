@@ -7,14 +7,15 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.views.generic import TemplateView
 from django.contrib.sitemaps.views import sitemap
-from corefrontend.sitemaps import StaticViewSitemap # Import your sitemap classes
-# from blog.sitemaps import BlogSitemap
+from corefrontend.sitemaps import StaticViewSitemap, BlogSitemap, ProjectSitemap
 
 # Create a dictionary of your sitemaps
 sitemaps = {
     'static': StaticViewSitemap,
-    # 'blog': BlogSitemap,
+    'blog': BlogSitemap,
+    'projects': ProjectSitemap,
 }
+
 
 def healthz(_request):
     return JsonResponse({"ok": True})
@@ -33,7 +34,7 @@ urlpatterns = [
     path('billing/', include('billing.urls')),
     path('orgs/', include('orgs.urls')),
     path('code-ide/', include('codeide.urls')),
-    path('store/api/', include('store.urls')),
+    # path('store/api/', include('store.urls')),
     path('notifications/', include('notifications.urls')),
     path('api/attendance/', include('attendance.urls')),
     path('konnect/', include('konnect.urls')),
@@ -42,7 +43,7 @@ urlpatterns = [
     path('', include('corefrontend.urls')),
     path('blog/', include('blog.urls')),
     path('projects/', include('projects.urls')),
-    path('robots.txt', TemplateView.as_view(template_name="robots.txt", content_type="text/plain")),
+    path('robots.txt', TemplateView.as_view(template_name="base/robots.txt", content_type="text/plain")),
     path('sitemap.xml', sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
 ]
 

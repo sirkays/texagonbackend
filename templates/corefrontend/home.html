@@ -1,5 +1,22 @@
 {% extends 'base/base.html' %}
 {% load static %}
+{% block title %}Techxagon Academy | Coding, Robotics & AI Education for Secondary Schools{% endblock %}
+{% block meta_description %}Techxagon Academy equips secondary school students with future-ready tech skills — coding, robotics, AI, cybersecurity, UI/UX and data science — through hands-on school partnerships across Africa.{% endblock %}
+{% block og_title %}Techxagon Academy | Coding, Robotics & AI Education for Secondary Schools{% endblock %}
+{% block og_description %}Hands-on 4IR technology programs for secondary school students. Coding, Robotics, AI, Cybersecurity, UI/UX, Web Dev and Data Science — through scalable school partnerships across Africa.{% endblock %}
+{% block twitter_title %}Techxagon Academy | Coding, Robotics & AI Education for Secondary Schools{% endblock %}
+{% block twitter_description %}Hands-on 4IR technology programs for secondary school students. Coding, Robotics, AI, Cybersecurity, UI/UX, Web Dev and Data Science — through scalable school partnerships across Africa.{% endblock %}
+{% block extra_schema %}
+,{
+  "@type": "WebPage",
+  "@id": "https://techxagonacademy.com/#webpage",
+  "url": "https://techxagonacademy.com/",
+  "name": "Techxagon Academy | Coding, Robotics & AI Education for Secondary Schools",
+  "description": "Techxagon Academy equips secondary school students with future-ready tech skills through hands-on school partnerships across Africa.",
+  "isPartOf": { "@id": "https://techxagonacademy.com/#website" },
+  "about": { "@id": "https://techxagonacademy.com/#organization" }
+}
+{% endblock %}
 {% block content %}
 
 <style>

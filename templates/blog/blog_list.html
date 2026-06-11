@@ -1,5 +1,22 @@
 {% extends 'base/base.html' %}
 {% load static %}
+
+{% block title %}Blog — Tech Education Insights & News | Techxagon Academy{% endblock %}
+{% block meta_description %}Read the latest from Techxagon Academy — articles on coding education, robotics, AI, cybersecurity and STEM learning for secondary school students and educators.{% endblock %}
+{% block og_title %}Blog — Tech Education Insights & News | Techxagon Academy{% endblock %}
+{% block og_description %}Read the latest from Techxagon Academy — articles on coding education, robotics, AI, cybersecurity and STEM learning for students and educators.{% endblock %}
+{% block twitter_title %}Blog — Tech Education Insights & News | Techxagon Academy{% endblock %}
+{% block twitter_description %}Read the latest from Techxagon Academy — articles on coding education, robotics, AI, cybersecurity and STEM learning for students and educators.{% endblock %}
+{% block extra_schema %}
+,{
+  "@type": "CollectionPage",
+  "name": "Techxagon Academy Blog",
+  "description": "Articles on coding education, robotics, AI, cybersecurity and STEM learning.",
+  "url": "https://techxagonacademy.com/blog/list/",
+  "isPartOf": { "@id": "https://techxagonacademy.com/#website" }
+}
+{% endblock %}
+
 {% block content %}
 
 {# ── Helper: category colour mapping ──────────────────────────────────────── #}

@@ -1,5 +1,27 @@
 {% extends 'base/base.html' %}
 {% load static %}
+{% block title %}TechxaBlocks — Visual Coding Platform for Students | Techxagon Academy{% endblock %}
+{% block meta_description %}Learn to code with TechxaBlocks — Techxagon Academy's block-based visual programming platform designed for beginners and secondary school students.{% endblock %}
+{% block og_title %}TechxaBlocks — Visual Coding Platform | Techxagon Academy{% endblock %}
+{% block og_description %}Learn to code with TechxaBlocks — Techxagon Academy's block-based visual programming platform designed for beginners and secondary school students.{% endblock %}
+{% block twitter_title %}TechxaBlocks — Visual Coding Platform | Techxagon Academy{% endblock %}
+{% block twitter_description %}Learn to code with TechxaBlocks — Techxagon Academy's block-based visual programming platform designed for beginners and secondary school students.{% endblock %}
+{% block extra_schema %}
+,{
+  "@type": "SoftwareApplication",
+  "name": "TechxaBlocks",
+  "applicationCategory": "EducationalApplication",
+  "description": "Block-based visual programming platform for beginners and secondary school students.",
+  "url": "https://techxagonacademy.com/techxablocks/",
+  "operatingSystem": "Web",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "NGN"
+  },
+  "creator": { "@id": "https://techxagonacademy.com/#organization" }
+}
+{% endblock %}
     {% block extra_css %}
     <style>
 .techxablocks-blend{

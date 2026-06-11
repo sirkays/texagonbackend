@@ -1,5 +1,42 @@
 {% extends 'base/base.html' %}
 {% load static %}
+
+{% block title %}{{ post.title }} | Techxagon Academy Blog{% endblock %}
+{% block meta_description %}{{ post.excerpt }}{% endblock %}
+{% block og_title %}{{ post.title }} | Techxagon Academy Blog{% endblock %}
+{% block og_description %}{{ post.excerpt }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block og_image %}{% if post.featured_image %}{{ request.scheme }}://{{ request.get_host }}{{ post.featured_image.url }}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'assets/og-image.jpg' %}{% endif %}{% endblock %}
+{% block twitter_title %}{{ post.title }} | Techxagon Academy Blog{% endblock %}
+{% block twitter_description %}{{ post.excerpt }}{% endblock %}
+{% block twitter_image %}{% if post.featured_image %}{{ request.scheme }}://{{ request.get_host }}{{ post.featured_image.url }}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'assets/og-image.jpg' %}{% endif %}{% endblock %}
+{% block extra_schema %}
+,{
+  "@type": "Article",
+  "headline": "{{ post.title }}",
+  "description": "{{ post.excerpt }}",
+  "url": "{{ request.build_absolute_uri }}",
+  "datePublished": "{{ post.published_at|date:'c' }}",
+  "dateModified": "{{ post.updated_at|date:'c' }}",
+  "author": {
+    "@type": "Person",
+    "name": "{% if post.author.authorprofile %}{{ post.author.authorprofile.display_name }}{% else %}{{ post.author.get_full_name }}{% endif %}"
+  },
+  "publisher": { "@id": "https://techxagonacademy.com/#organization" },
+  "image": "{% if post.featured_image %}{{ request.scheme }}://{{ request.get_host }}{{ post.featured_image.url }}{% endif %}",
+  "isPartOf": { "@id": "https://techxagonacademy.com/#website" },
+  "mainEntityOfPage": "{{ request.build_absolute_uri }}"
+},
+{
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://techxagonacademy.com/" },
+    { "@type": "ListItem", "position": 2, "name": "Blog", "item": "https://techxagonacademy.com/blog/list/" },
+    { "@type": "ListItem", "position": 3, "name": "{{ post.title }}" }
+  ]
+}
+{% endblock %}
+
 {% block content %}
 
 <main id="main" class="flex-1">

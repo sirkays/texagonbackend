@@ -1,5 +1,11 @@
 {% extends "base/base.html" %}
 {% load static %}
+{% block title %}Gallery | Techxagon Academy{% endblock %}
+{% block meta_description %}See Techxagon Academy in action. Photos from our hands-on coding, robotics and AI programs, student projects and school partnership events.{% endblock %}
+{% block og_title %}Gallery | Techxagon Academy{% endblock %}
+{% block og_description %}See Techxagon Academy in action. Photos from our hands-on coding, robotics and AI programs, student projects and school partnership events.{% endblock %}
+{% block twitter_title %}Gallery | Techxagon Academy{% endblock %}
+{% block twitter_description %}See Techxagon Academy in action. Photos from our hands-on coding, robotics and AI programs, student projects and school partnership events.{% endblock %}
 
 {% block content %}
 
@@ -20,15 +26,23 @@
         <!-- Gallery Grid -->
         <div class="mt-16 grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
 
-            <img src="{% static 'assets/gallery/children_on_learn.jpg' %}" 
+            <img src="{% static 'assets/gallery/children_on_learn.jpg' %}"
+                 alt="Students learning on Techxagon Academy's platform"
+                 loading="lazy"
                  class="rounded-xl shadow-soft hover:scale-105 transition duration-300 cursor-pointer">
 
-            <img src="{% static 'assets/gallery/Kid-23.jpg' %}" 
+            <img src="{% static 'assets/gallery/Kid-23.jpg' %}"
+                 alt="Student working on a hands-on tech project at Techxagon Academy"
+                 loading="lazy"
                  class="rounded-xl shadow-soft hover:scale-105 transition duration-300 cursor-pointer">
 
-            <img src="{% static 'assets/gallery/kid-24.jpg' %}" 
+            <img src="{% static 'assets/gallery/kid-24.jpg' %}"
+                 alt="Student building a robotics project at Techxagon Academy"
+                 loading="lazy"
                  class="rounded-xl shadow-soft hover:scale-105 transition duration-300 cursor-pointer">
-            <img src="{% static 'assets/gallery/kid-25.jpg' %}" 
+            <img src="{% static 'assets/gallery/kid-25.jpg' %}"
+                 alt="Student exploring coding at Techxagon Academy"
+                 loading="lazy"
                  class="rounded-xl shadow-soft hover:scale-105 transition duration-300 cursor-pointer">
 
 

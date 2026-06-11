@@ -1,5 +1,40 @@
 {% extends 'base/base.html' %}
 {% load static %}
+
+{% block title %}{{ project.title }} — Student Project | Techxagon Academy{% endblock %}
+{% block meta_description %}{{ project.excerpt|default:project.subtitle }}{% endblock %}
+{% block og_title %}{{ project.title }} — Student Project | Techxagon Academy{% endblock %}
+{% block og_description %}{{ project.excerpt|default:project.subtitle }}{% endblock %}
+{% block og_image %}{% if project.thumbnail %}{{ request.scheme }}://{{ request.get_host }}{{ project.thumbnail.url }}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'assets/og-image.jpg' %}{% endif %}{% endblock %}
+{% block twitter_title %}{{ project.title }} — Student Project | Techxagon Academy{% endblock %}
+{% block twitter_description %}{{ project.excerpt|default:project.subtitle }}{% endblock %}
+{% block twitter_image %}{% if project.thumbnail %}{{ request.scheme }}://{{ request.get_host }}{{ project.thumbnail.url }}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'assets/og-image.jpg' %}{% endif %}{% endblock %}
+{% block extra_schema %}
+,{
+  "@type": "CreativeWork",
+  "name": "{{ project.title }}",
+  "description": "{{ project.excerpt|default:project.subtitle }}",
+  "url": "{{ request.build_absolute_uri }}",
+  "dateCreated": "{{ project.created_at|date:'c' }}",
+  "dateModified": "{{ project.updated_at|date:'c' }}",
+  "author": {
+    "@type": "Person",
+    "name": "{{ project.student_name }}"
+  },
+  "publisher": { "@id": "https://techxagonacademy.com/#organization" },
+  "image": "{% if project.thumbnail %}{{ request.scheme }}://{{ request.get_host }}{{ project.thumbnail.url }}{% endif %}",
+  "isPartOf": { "@id": "https://techxagonacademy.com/#website" }
+},
+{
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://techxagonacademy.com/" },
+    { "@type": "ListItem", "position": 2, "name": "Student Projects", "item": "https://techxagonacademy.com/projects/students/" },
+    { "@type": "ListItem", "position": 3, "name": "{{ project.title }}" }
+  ]
+}
+{% endblock %}
+
 {% block content %}
 
 <style>

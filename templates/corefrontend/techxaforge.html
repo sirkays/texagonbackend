@@ -1,5 +1,27 @@
 {% extends 'base/base.html' %}
 {% load static %}
+{% block title %}TechxaForge — Web Development Platform for Students | Techxagon Academy{% endblock %}
+{% block meta_description %}Build real websites with TechxaForge — Techxagon Academy's web development learning platform. Learn HTML, CSS, JavaScript and modern web technologies hands-on.{% endblock %}
+{% block og_title %}TechxaForge — Web Development Platform | Techxagon Academy{% endblock %}
+{% block og_description %}Build real websites with TechxaForge — Techxagon Academy's web development learning platform. Learn HTML, CSS, JavaScript and modern web technologies.{% endblock %}
+{% block twitter_title %}TechxaForge — Web Development Platform | Techxagon Academy{% endblock %}
+{% block twitter_description %}Build real websites with TechxaForge — Techxagon Academy's web development learning platform. Learn HTML, CSS, JavaScript and modern web technologies.{% endblock %}
+{% block extra_schema %}
+,{
+  "@type": "SoftwareApplication",
+  "name": "TechxaForge",
+  "applicationCategory": "EducationalApplication",
+  "description": "Web development learning platform for secondary school students. Learn HTML, CSS, JavaScript and modern web technologies.",
+  "url": "https://techxagonacademy.com/techxaforge/",
+  "operatingSystem": "Web",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "NGN"
+  },
+  "creator": { "@id": "https://techxagonacademy.com/#organization" }
+}
+{% endblock %}
     {% block extra_css %}
     <style>
         .hero-blend-image{

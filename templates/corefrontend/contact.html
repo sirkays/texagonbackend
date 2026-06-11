@@ -1,6 +1,20 @@
 {% extends 'base/base.html' %}
 {% load static %}
-
+{% block title %}Contact Us | Techxagon Academy{% endblock %}
+{% block meta_description %}Get in touch with Techxagon Academy. Reach us for school partnerships, program enquiries, tutoring opportunities, or general questions. Based in Abuja, Nigeria.{% endblock %}
+{% block og_title %}Contact Us | Techxagon Academy{% endblock %}
+{% block og_description %}Get in touch with Techxagon Academy. Reach us for school partnerships, program enquiries, tutoring opportunities, or general questions.{% endblock %}
+{% block twitter_title %}Contact Us | Techxagon Academy{% endblock %}
+{% block twitter_description %}Get in touch with Techxagon Academy. Reach us for school partnerships, program enquiries, tutoring opportunities, or general questions.{% endblock %}
+{% block extra_schema %}
+,{
+  "@type": "ContactPage",
+  "name": "Contact Techxagon Academy",
+  "url": "https://techxagonacademy.com/contact/",
+  "description": "Get in touch with Techxagon Academy for school partnerships, program enquiries and general questions.",
+  "isPartOf": { "@id": "https://techxagonacademy.com/#website" }
+}
+{% endblock %}
 {% block content %}
 <main id="main">
     <!-- Hero -->

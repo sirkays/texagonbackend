@@ -1,6 +1,22 @@
 {% extends 'base/base.html' %}
 {% load static %}
-
+{% block title %}AI & Robotics Program — Hands-On Learning | Techxagon Academy{% endblock %}
+{% block meta_description %}Explore Techxagon Academy's AI & Robotics program — hands-on learning with sensors, actuators, machine learning and embedded systems for secondary school students.{% endblock %}
+{% block og_title %}AI & Robotics Program — Hands-On Learning | Techxagon Academy{% endblock %}
+{% block og_description %}Explore Techxagon Academy's AI & Robotics program — hands-on learning with sensors, actuators, machine learning and embedded systems.{% endblock %}
+{% block twitter_title %}AI & Robotics Program — Hands-On Learning | Techxagon Academy{% endblock %}
+{% block twitter_description %}Explore Techxagon Academy's AI & Robotics program — hands-on learning with sensors, actuators, machine learning and embedded systems.{% endblock %}
+{% block extra_schema %}
+,{
+  "@type": "Course",
+  "name": "AI & Robotics Program",
+  "description": "Hands-on learning with sensors, actuators, machine learning and embedded systems for secondary school students.",
+  "provider": { "@id": "https://techxagonacademy.com/#organization" },
+  "url": "https://techxagonacademy.com/project/robotics/",
+  "educationalLevel": "Secondary School",
+  "isPartOf": { "@id": "https://techxagonacademy.com/#website" }
+}
+{% endblock %}
 {% block content %}
 
 <!-- ═══════════════════════════════════════════════════════════

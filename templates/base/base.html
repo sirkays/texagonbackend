@@ -5,6 +5,8 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    {% block google_verification %}{% endblock %}
+    {% block extra_head %}{% endblock %}
     <title>{% block title %}Techxagon Academy | Future-Ready Tech Skills for Secondary Schools{% endblock %}</title>
     
     <meta name="description" content="{% block meta_description %}Techxagon Academy equips secondary school students with hands-on tech skills—coding, robotics, cybersecurity, UI/UX, web dev and data science—through school partnerships.{% endblock %}" />
@@ -45,11 +47,19 @@
       "@context": "https://schema.org",
       "@graph": [
         {
-          "@type": "Organization",
+          "@type": ["Organization", "EducationalOrganization"],
           "@id": "https://techxagonacademy.com/#organization",
           "name": "Techxagon Academy",
+          "alternateName": "Techxagon",
           "url": "https://techxagonacademy.com/",
-          "logo": "https://techxagonacademy.com/assets/logo.png",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "{{ request.scheme }}://{{ request.get_host }}{% static 'assets/logo.png' %}",
+            "width": 512,
+            "height": 512
+          },
+          "image": "{{ request.scheme }}://{{ request.get_host }}{% static 'assets/og-image.jpg' %}",
+          "description": "Techxagon Academy equips secondary school students with future-ready tech skills — coding, robotics, AI, cybersecurity, UI/UX and data science — through hands-on school partnerships across Africa.",
           "sameAs": [
             "https://facebook.com/people/Techxagon-Academy",
             "https://www.instagram.com/techxagonacademy",
@@ -59,6 +69,7 @@
           "address": {
             "@type": "PostalAddress",
             "addressLocality": "Abuja",
+            "addressRegion": "FCT",
             "addressCountry": "NG"
           },
           "contactPoint": [
@@ -69,19 +80,18 @@
               "telephone": "+234-708-408-3162",
               "availableLanguage": ["en"]
             }
-          ]
+          ],
+          "foundingDate": "2023",
+          "knowsAbout": ["Coding Education", "Robotics", "Artificial Intelligence", "Cybersecurity", "UI/UX Design", "Web Development", "Data Science", "STEM Education"]
         },
         {
           "@type": "WebSite",
           "@id": "https://techxagonacademy.com/#website",
           "url": "https://techxagonacademy.com/",
           "name": "Techxagon Academy",
+          "description": "Future-ready tech skills for secondary schools across Africa",
           "publisher": { "@id": "https://techxagonacademy.com/#organization" },
-          "potentialAction": {
-            "@type": "SearchAction",
-            "target": "https://techxagonacademy.com/blog/?s={search_term_string}",
-            "query-input": "required name=search_term_string"
-          }
+          "inLanguage": "en"
         }
         {% block extra_schema %}{% endblock %}
       ]
