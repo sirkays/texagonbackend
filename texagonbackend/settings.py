@@ -27,6 +27,8 @@ FLAT_SHIPPING = Decimal("1000.99")
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     'http://127.0.0.1:3000',
+    "http://localhost:3001",
+    'http://127.0.0.1:3001',
     "https://texagonbackend.onrender.com",
     "https://texagon.onrender.com",
     "https://learn.techxagonacademy.com",
@@ -54,9 +56,10 @@ if os.environ.get('LOCAL') == "0":
     ]
 
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SECURE_SSL_REDIRECT = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    # Allow overriding SSL redirect via env var (useful for local S3 testing with LOCAL=0)
+    SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "1") == "1"
+    SESSION_COOKIE_SECURE = os.environ.get("SECURE_SSL_REDIRECT", "1") == "1"
+    CSRF_COOKIE_SECURE = os.environ.get("SECURE_SSL_REDIRECT", "1") == "1"
 
 
 SESSION_COOKIE_SAMESITE = "None"
@@ -94,6 +97,7 @@ INSTALLED_APPS = [
     'corefrontend',
     'blog',
     'projects',
+    'app_updates',
     "rest_framework",
     "rest_framework_api_key",
     'django.contrib.sites',
@@ -102,6 +106,10 @@ INSTALLED_APPS = [
 ]
 
 SITE_ID = 1
+
+# Prevent Django from trying to redirect POST requests to trailing-slash URLs.
+# All API URL patterns already include trailing slashes explicitly.
+APPEND_SLASH = False
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
@@ -224,8 +232,15 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# ── Environment-based storage switching ──
+IS_LOCAL = os.environ.get("LOCAL", "1") == "1"
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "cloudinary").lower()
-IS_S3 = STORAGE_BACKEND == "s3"
+
+# Force local filesystem storage when running locally, regardless of STORAGE_BACKEND
+if IS_LOCAL:
+    IS_S3 = False
+else:
+    IS_S3 = STORAGE_BACKEND == "s3"
 
 # Always define STORAGES (Django 5.2+)
 # - "default" will be S3 when IS_S3 is True

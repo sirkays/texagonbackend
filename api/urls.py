@@ -25,6 +25,8 @@ from .views import (
     verify_session,
     presign_attachment_download,
 )
+from .dashboard_views import student_dashboard_overview
+from .student_cbt_views import student_cbt_list, student_cbt_start, student_cbt_submit
 
 router = DefaultRouter()
 router.register(r"organizations", OrganizationViewSet)
@@ -95,6 +97,11 @@ urlpatterns = [
 
     path("presign-attachment-download/", presign_attachment_download, name="presign_attachment_download"),
     path("auth/session/verify/", verify_session),
+    path("student/dashboard/overview/", student_dashboard_overview, name="student_dashboard_overview"),
+    
+    path("student/cbt/list/", student_cbt_list, name="student_cbt_list"),
+    path("student/cbt/start/", student_cbt_start, name="student_cbt_start"),
+    path("student/cbt/submit/", student_cbt_submit, name="student_cbt_submit"),
 ]
 
 

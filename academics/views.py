@@ -898,6 +898,12 @@ def teacher_analytics_view(request):
         valid_enrollment_statuses = [Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED]
         valid_attempt_statuses = ["submitted", "graded"]
 
+        # Identify active student IDs: students with at least one active enrollment under this teacher
+        active_student_ids = Enrollment.objects.filter(
+            course__teacher=teacher_profile,
+            status=Enrollment.Status.ACTIVE
+        ).values_list("student_id", flat=True).distinct()
+
         # -----------------------------
         # Precompute test -> total_points (sum of question.points) for all teacher tests
         # -----------------------------
@@ -916,13 +922,14 @@ def teacher_analytics_view(request):
         # -----------------------------
         # Overall Stats
         # -----------------------------
-        total_students = StudentProfile.objects.filter(organization=organization).count()
+        total_students = active_student_ids.count()
 
         # Overall pass rate across teacher courses (based on percent using question points)
         overall_attempts_rows = (
             TestAttempt.objects.filter(
                 test__in=list(test_total_points.keys()),
                 status__in=valid_attempt_statuses,
+                student_id__in=active_student_ids,
             )
             .values("score", "test_id")
         )
@@ -947,6 +954,7 @@ def teacher_analytics_view(request):
         course_completions = Enrollment.objects.filter(
             course__in=public_teacher_courses,
             status=Enrollment.Status.COMPLETED,
+            student_id__in=active_student_ids
         ).count()
 
         # Frontend expects "change" (you can keep empty string to avoid dummy)
@@ -981,7 +989,11 @@ def teacher_analytics_view(request):
 
         # Preload enrollments for teacher courses (Active/Completed only)
         enrollments_rows = (
-            Enrollment.objects.filter(course__in=teacher_courses, status__in=valid_enrollment_statuses)
+            Enrollment.objects.filter(
+                course__in=teacher_courses,
+                status__in=valid_enrollment_statuses,
+                student_id__in=active_student_ids
+            )
             .select_related("student__user", "course")
         )
 
@@ -995,6 +1007,7 @@ def teacher_analytics_view(request):
             TestAttempt.objects.filter(
                 test__in=list(test_total_points.keys()),
                 status__in=valid_attempt_statuses,
+                student_id__in=active_student_ids,
             )
             .values("student_id", "test_id", "score")
         )
@@ -1138,12 +1151,8 @@ def teacher_analytics_view(request):
             student_pct_sum[student_id] = student_pct_sum.get(student_id, Decimal("0")) + s_sum
             student_pct_count[student_id] = student_pct_count.get(student_id, 0) + s_count
 
-        # Candidate students are those enrolled (Active/Completed) in teacher courses
-        candidate_student_ids = list(
-            Enrollment.objects.filter(course__in=teacher_courses, status__in=valid_enrollment_statuses)
-            .values_list("student_id", flat=True)
-            .distinct()
-        )
+        # Candidate students are active students under this teacher
+        candidate_student_ids = list(active_student_ids)
 
         # Build rows
         top_rows = []
@@ -1158,6 +1167,7 @@ def teacher_analytics_view(request):
             for row in Enrollment.objects.filter(
                 course__in=teacher_courses,
                 status=Enrollment.Status.COMPLETED,
+                student_id__in=active_student_ids
             )
             .values("student_id")
             .annotate(c=Count("id"))
@@ -1202,7 +1212,11 @@ def teacher_analytics_view(request):
             total_pts = published_points.get(test.id, Decimal("0"))
 
             attempts = list(
-                TestAttempt.objects.filter(test=test, status__in=valid_attempt_statuses)
+                TestAttempt.objects.filter(
+                    test=test,
+                    status__in=valid_attempt_statuses,
+                    student_id__in=active_student_ids
+                )
                 .values("score")
             )
             total_attempts = len(attempts)
@@ -1546,17 +1560,7 @@ def student_certificates_list(request):
     if course_id:
         qs = qs.filter(course_id=course_id)
 
-    # ✅ Only return certificates whose download window is open:
-    # downloadable_at = acquired_at + (download_after_days * 1 day)
-    qs = qs.annotate(
-        downloadable_at_db=ExpressionWrapper(
-            F("acquired_at") + (F("download_after_days") * Value(timedelta(days=1))),
-            output_field=DateTimeField(),
-        )
-    ).filter(
-        downloadable_at_db__lte=Now(),
-        status=EnrollmentCertificate.Status.ISSUED,  # optional but recommended
-    )
+
 
     # Optional: limit/pagination-lite
     limit = request.query_params.get("limit")

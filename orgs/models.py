@@ -3,6 +3,10 @@ from django.conf import settings
 from core.models import TimeStampedModel, NamedModel
 
 class Organization(NamedModel):
+    class VideoConferencing(models.TextChoices):
+        KONNECT = "konnect", "Konnect"
+        LIVE = "live", "Live (Legacy)"
+
     slug = models.SlugField(unique=True)
     logo = models.ImageField(upload_to="org_logos/", blank=True, null=True)
     address = models.TextField(blank=True)
@@ -13,6 +17,13 @@ class Organization(NamedModel):
     contact_phone = models.CharField(max_length=32, blank=True)
     is_active = models.BooleanField(default=True)
     year = models.CharField(default="2026")
+    allow_unsubscribed_users = models.BooleanField(default=False)
+    video_conferencing = models.CharField(
+        max_length=16,
+        choices=VideoConferencing.choices,
+        default=VideoConferencing.KONNECT,
+        help_text="Video conferencing provider used by this organisation.",
+    )
 
     class Meta:
         indexes = [models.Index(fields=["slug"])]
@@ -59,6 +70,16 @@ class AcademicSession(NamedModel):
     end_date = models.DateField()
     is_current = models.BooleanField(default=False)
 
+    def save(self, *args, **kwargs):
+        if self.is_current:
+            # Unset is_current for all other sessions in the same organization
+            AcademicSession.objects.filter(
+                organization=self.organization, 
+                is_current=True
+            ).exclude(pk=self.pk).update(is_current=False)
+        super().save(*args, **kwargs)
+
     class Meta:
         unique_together = ("organization", "name")
         ordering = ["-start_date"]
+

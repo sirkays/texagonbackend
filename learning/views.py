@@ -90,11 +90,17 @@ def my_materials(request):
     try:
         user = request.user
         student = _get_student_for_user(user)
-        data, returned_count = student.get_course_allowed(request, is_session=True)
 
+        # get_course_allowed accesses request.session which may not exist for token-auth.
+        # Wrap in try/except so token-auth requests still work.
         enrolled_course_ids = None
-        if returned_count == 2:
-            enrolled_course_ids = data[0]
+        returned_count = 0
+        try:
+            data, returned_count = student.get_course_allowed(request, is_session=True)
+            if returned_count == 2:
+                enrolled_course_ids = data[0]
+        except Exception:
+            pass  # Token-auth: skip session-based restriction; rely on enrollment check below
 
         def _as_int(v, default):
             try:
@@ -114,22 +120,26 @@ def my_materials(request):
         # ---------- Materials ----------
         allowed_statuses = [Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED]
 
-        # 1) Who can we see?
-        if my_only or not student:
-            m_base = Material.objects.filter(owner=user)
-        else:
-            m_base = Material.objects.filter(
-                Q(owner=user)
-            ).filter(
-                lesson__module__course__enrollments__student=student,
-                lesson__module__course__enrollments__status__in=allowed_statuses,
-            ).distinct()
+        # 1) Always start from materials owned by this user.
+        # Do NOT use chained .filter().filter() on the same reverse-FK (causes cross-join / SQLite * error).
+        m_base = Material.objects.filter(owner=user)
 
-        # 2) Limit to enrolled courses list if provided
-        if enrolled_course_ids is not None:
-            m_base = m_base.filter(lesson__module__course__pk__in=enrolled_course_ids)
+        if not my_only and student:
+            # Use a separate subquery for enrolled course IDs — avoids the multiplication error.
+            enrolled_ids = list(
+                Enrollment.objects.filter(
+                    student=student,
+                    status__in=allowed_statuses,
+                ).values_list("course_id", flat=True)
+            )
+            if enrolled_ids:
+                m_base = m_base.filter(lesson__module__course__pk__in=enrolled_ids)
 
-        # 3) Search (apply independently)
+        # 2) Do not filter the queryset by enrolled_course_ids anymore, so they show up as locked rather than hidden.
+        # But we still keep enrolled_course_ids to compute 'blur' on each item.
+        pass
+
+        # 3) Search
         if q:
             m_base = m_base.filter(
                 Q(title__icontains=q) |
@@ -145,21 +155,28 @@ def my_materials(request):
 
         def _safe_url(file_field, fallback_url):
             try:
-                return file_field.url if file_field else (fallback_url or None)
+                url = file_field.url if file_field else (fallback_url or None)
+                if url and url.startswith('/'):
+                    return request.build_absolute_uri(url)
+                return url
             except Exception:
-                return fallback_url or None
+                url = fallback_url or None
+                if url and url.startswith('/'):
+                    return request.build_absolute_uri(url)
+                return url
 
         # Videos
         videos = []
         for m in m_base.filter(kind=Material.Kind.VIDEO)[:v_lim]:
-            general_activation_date =  m.lesson.module.course.general_activation_date
-            blur = False
-            if general_activation_date:
-                blur =  returned_count == 2 and  timezone.now() > general_activation_date
+            course_id = m.lesson.module.course_id
+            blur = (enrolled_course_ids is not None) and (course_id not in enrolled_course_ids)
             if blur:
                 file = ""
             else:
-                file =  _safe_url(getattr(m, "file", None), getattr(m, "url", None)) if m.file or m.url else None
+                if m.file and getattr(settings, "IS_LOCAL", False) and getattr(m, 'lesson', None):
+                    file = request.build_absolute_uri(f"/learning/api/stream-video/{m.lesson.id}/")
+                else:
+                    file = _safe_url(getattr(m, "file", None), getattr(m, "url", None)) if m.file or m.url else None
             
             videos.append({
                 "id": str(m.id),
@@ -176,14 +193,15 @@ def my_materials(request):
         # Audio
         audio = []
         for m in m_base.filter(kind=Material.Kind.AUDIO)[:a_lim]:
-            general_activation_date =  m.lesson.module.course.general_activation_date
-            blur = False
-            if general_activation_date:
-                blur =  returned_count == 2 and  timezone.now() > general_activation_date
+            course_id = m.lesson.module.course_id
+            blur = (enrolled_course_ids is not None) and (course_id not in enrolled_course_ids)
             if blur:
                 file = ""
             else:
-                file =  _safe_url(getattr(m, "file", None), getattr(m, "url", None)) if m.file or m.url else None
+                if m.file and getattr(settings, "IS_LOCAL", False) and getattr(m, 'lesson', None):
+                    file = request.build_absolute_uri(f"/learning/api/stream-video/{m.lesson.id}/")
+                else:
+                    file = _safe_url(getattr(m, "file", None), getattr(m, "url", None)) if m.file or m.url else None
             
             audio.append({
                 "id": str(m.id),
@@ -199,10 +217,8 @@ def my_materials(request):
         # PDFs
         pdfs = []
         for m in m_base.filter(kind=Material.Kind.PDF)[:p_lim]:
-            general_activation_date =  m.lesson.module.course.general_activation_date
-            blur = False
-            if general_activation_date:
-                blur =  returned_count == 2 and  timezone.now() > general_activation_date
+            course_id = m.lesson.module.course_id
+            blur = (enrolled_course_ids is not None) and (course_id not in enrolled_course_ids)
             if blur:
                 file = ""
             else:
@@ -354,9 +370,11 @@ def learning_modules(request):
         student = _get_student_for_user(user)
         data, returned_count = student.get_course_allowed(request, is_session=True)
 
-        enrolled_course_ids = None
+        allowed_course_ids = None
         if returned_count == 2:
-            enrolled_course_ids = data[0]
+            allowed_course_ids = data[0]
+
+        enrolled_course_ids = None
 
 
         # -------- parse limits/search --------
@@ -448,23 +466,33 @@ def learning_modules(request):
                 Material.objects.filter(owner=user, active=True, lesson__isnull=False)
                 .values_list("lesson_id", flat=True)
             )
-            general_activation_date = c.general_activation_date
-            blur = False
-            if general_activation_date:
-                blur =  returned_count == 2 and  timezone.now() > c.general_activation_date
+            blur = (returned_count == 2) and (allowed_course_ids is not None) and (c.id not in allowed_course_ids) if c else False
             if blur:
                 file = ""
             else:
-                file = ls.file.url if ls.file else None
+                try:
+                    file = request.build_absolute_uri(ls.file.url) if ls.file else None
+                except ValueError:
+                    file = None
+            
+            lesson_url_val = file if blur else _lesson_url(ls)
+            if lesson_url_val and lesson_url_val.startswith('/'):
+                lesson_url_val = request.build_absolute_uri(lesson_url_val)
+                
+            try:
+                cover_image_url = request.build_absolute_uri(ls.cover_image.url) if ls.cover_image else None
+            except ValueError:
+                cover_image_url = None
             
             return {
                 "id": ls.id,
                 "title": ls.name,
                 "content_type": ls.content_type,
                 "duration": _fmt_duration(ls.duration_seconds),
-                "url": file if blur else _lesson_url(ls),
+                "url": lesson_url_val,
                 "file": file,
-                "cover_image": ls.cover_image.url if ls.cover_image else None,
+                "cover_image": cover_image_url,
+                "course_id": c.id if c else None,
                 "course": getattr(c, "name", None),
                 "subject": subject_name,
                 "instructor": instructor,
@@ -583,10 +611,100 @@ def _material_to_dict(request, m: Material, lesson: Lesson) -> Dict[str, Any]:
         "created_at": m.created_at.isoformat(),
         "lesson": {
             "id": lesson.id,
-            "content_type": lesson.content_type,
-            "duration_seconds": lesson.duration_seconds,
-        },
+            "title": lesson.name,
+        } if lesson else None,
     }
+
+@api_view(["GET"])
+def stream_local_video(request, lesson_id: int):
+    import os, re
+    from django.http import StreamingHttpResponse, HttpResponse
+    from django.conf import settings
+    from .models import Lesson
+
+    lesson = Lesson.objects.filter(id=lesson_id).first()
+    if not lesson:
+        return HttpResponse(status=404)
+        
+    path = None
+    if lesson.file:
+        try:
+            path = lesson.file.path
+        except ValueError:
+            pass
+    
+    if not path:
+        value = (lesson.url or "").strip()
+        if value and not (value.startswith("http://") or value.startswith("https://")):
+            path = os.path.join(settings.MEDIA_ROOT, value.replace('/', os.sep))
+            
+    if not path or not os.path.exists(path):
+        return HttpResponse(status=404)
+
+    size = os.path.getsize(path)
+    range_header = request.META.get('HTTP_RANGE', '').strip()
+    range_match = re.match(r'bytes=(?P<start>\d+)-(?P<end>\d*)', range_header) if range_header else None
+
+    # Detect content type by file extension
+    lower_path = path.lower()
+    if lower_path.endswith('.pdf'):
+        content_type = 'application/pdf'
+    elif lower_path.endswith('.mp3') or lower_path.endswith('.m4a'):
+        content_type = 'audio/mpeg'
+    elif lower_path.endswith('.wav'):
+        content_type = 'audio/wav'
+    elif lower_path.endswith('.aac'):
+        content_type = 'audio/aac'
+    elif lower_path.endswith('.ogg'):
+        content_type = 'audio/ogg'
+    elif lower_path.endswith('.webm'):
+        content_type = 'video/webm'
+    elif lower_path.endswith('.mov'):
+        content_type = 'video/quicktime'
+    elif lower_path.endswith('.avi'):
+        content_type = 'video/x-msvideo'
+    else:
+        content_type = 'video/mp4'
+
+    if range_match:
+        start = int(range_match.group('start'))
+        end = range_match.group('end')
+        end = int(end) if end else size - 1
+        length = end - start + 1
+        
+        def file_iterator():
+            with open(path, 'rb') as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk_size = min(8192, remaining)
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    yield chunk
+                    remaining -= len(chunk)
+                    
+        response = StreamingHttpResponse(file_iterator(), status=206, content_type=content_type)
+        response['Content-Range'] = f'bytes {start}-{end}/{size}'
+        response['Accept-Ranges'] = 'bytes'
+        response['Content-Length'] = str(length)
+    else:
+        def file_iterator():
+            with open(path, 'rb') as f:
+                chunk = f.read(8192)
+                while chunk:
+                    yield chunk
+                    chunk = f.read(8192)
+        response = StreamingHttpResponse(file_iterator(), content_type=content_type)
+        response['Accept-Ranges'] = 'bytes'
+        response['Content-Length'] = str(size)
+
+    # For PDFs: instruct browser to render inline (not download)
+    if content_type == 'application/pdf':
+        filename = os.path.basename(path)
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+
+    return response
 
 
 
@@ -633,12 +751,17 @@ def save_lesson_to_my_materials(request, lesson_id: int):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        # Enforce subscription course general activation check if subscription has expired
+        if student:
+            data, returned_count = student.get_course_allowed(request, is_session=True)
+            if returned_count == 2:
+                if course.id not in data[0]:
+                    return Response({"detail": "Course access has expired. Please renew your subscription."}, status=status.HTTP_403_FORBIDDEN)
+
         # Determine kind + sources
         kind = _kind_from_lesson(lesson)
         src_url = (lesson.url or "").strip() or None
         has_file = bool(getattr(lesson, "file", None) and lesson.file)
-        if not src_url and not has_file:
-            return Response({"detail": "Lesson has no file or URL to save."}, status=status.HTTP_400_BAD_REQUEST)
 
         # ✅ Idempotent lookup by lesson FK
         existing = (
@@ -745,14 +868,20 @@ def save_lesson_to_my_materials(request, lesson_id: int):
 
 
 
-def _safe_file_or_url(ls: Lesson) -> Optional[str]:
+def _safe_file_or_url(request, ls: Lesson) -> Optional[str]:
     """Prefer file.url if present, else fall back to ls.url."""
+    from django.conf import settings
     try:
         if ls.file:
-            return ls.file.url
+            if getattr(settings, "IS_LOCAL", False) and getattr(ls, 'content_type', '') in ('video', 'audio'):
+                return request.build_absolute_uri(f"/learning/api/stream-video/{ls.id}/")
+            return request.build_absolute_uri(ls.file.url)
     except Exception:
         pass
-    return ls.url or None
+    url = ls.url or None
+    if url and url.startswith('/'):
+        return request.build_absolute_uri(url)
+    return url
 
 
 def _int(v, default=None, cap=None) -> Optional[int]:
@@ -789,9 +918,11 @@ def resource_materials(request):
 
         data, returned_count = student.get_course_allowed(request, is_session=True)
         print(data, "ddd")
-        course_ids = None
+        allowed_course_ids = None
         if returned_count == 2:
-            course_ids = data[0]
+            allowed_course_ids = data[0]
+
+        course_ids = None
 
         q = (request.query_params.get("q") or "").strip()
         course_id = _int(request.query_params.get("course_id"))
@@ -890,17 +1021,14 @@ def resource_materials(request):
         # PDFs
         pdfs: List[Dict[str, Any]] = []
         for ls in pdfs_qs:
-            general_activation_date = ls.module.course.general_activation_date
-            blur = False
-            if general_activation_date:
-                blur =  returned_count == 2 and  timezone.now() > general_activation_date
+            blur = (returned_count == 2) and (allowed_course_ids is not None) and (ls.module.course_id not in allowed_course_ids)
 
             if blur:
                 file = ""
             else:
-                file =  _safe_file_or_url(ls) if ls.file else None
+                file =  _safe_file_or_url(request, ls) if ls.file else None
                 if ls.url and file is None:
-                    file = ls.url
+                    file = request.build_absolute_uri(ls.url) if ls.url.startswith('/') else ls.url
             pdfs.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -921,20 +1049,20 @@ def resource_materials(request):
         videos: List[Dict[str, Any]] = []
         for ls in vids_qs:
             try:
-                thumb_nail = ls.cover_image.url if ls.cover_image else None
+                thumb_nail = request.build_absolute_uri(ls.cover_image.url) if ls.cover_image else None
             except ValueError:
                 thumb_nail = None
-            general_activation_date = ls.module.course.general_activation_date
-            blur = False
-            if general_activation_date:
-                blur =  returned_count == 2 and  timezone.now() > general_activation_date
+            blur = (returned_count == 2) and (allowed_course_ids is not None) and (ls.module.course_id not in allowed_course_ids)
 
             if blur:
                 file = ""
             else:
-                file =  _safe_file_or_url(ls) if ls.file else None
-                if ls.url and file is None:
-                    file = ls.url
+                if getattr(settings, "IS_LOCAL", False) and getattr(ls, 'file', None):
+                    file = request.build_absolute_uri(f"/learning/api/stream-video/{ls.id}/")
+                else:
+                    file =  _safe_file_or_url(request, ls) if ls.file else None
+                    if ls.url and file is None:
+                        file = request.build_absolute_uri(ls.url) if ls.url.startswith('/') else ls.url
             videos.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -954,17 +1082,17 @@ def resource_materials(request):
         # Audio
         audio: List[Dict[str, Any]] = []
         for ls in auds_qs:
-            general_activation_date = ls.module.course.general_activation_date
-            blur = False
-            if general_activation_date:
-                blur =  returned_count == 2 and  timezone.now() > general_activation_date
+            blur = (returned_count == 2) and (allowed_course_ids is not None) and (ls.module.course_id not in allowed_course_ids)
 
             if blur:
                 file = ""
             else:
-                file =  _safe_file_or_url(ls) if ls.file else None
-                if ls.url and file is None:
-                    file = ls.url
+                if getattr(settings, "IS_LOCAL", False) and getattr(ls, 'file', None):
+                    file = request.build_absolute_uri(f"/learning/api/stream-video/{ls.id}/")
+                else:
+                    file =  _safe_file_or_url(request, ls) if ls.file else None
+                    if ls.url and file is None:
+                        file = request.build_absolute_uri(ls.url) if ls.url.startswith('/') else ls.url
             audio.append({
                 "id": str(ls.id),
                 "title": ls.name,
@@ -997,7 +1125,7 @@ def resource_materials(request):
         if not journals:
             journals = []
 
-        return Response({
+        response_data = {
             # categories for your chip list (strings)
             "categories": categories,
             # also return ids so you can wire filters later if needed
@@ -1009,7 +1137,15 @@ def resource_materials(request):
             "videos": videos,
             "audio": audio,
             "journals": journals,
-        }, status=status.HTTP_200_OK)
+        }
+        try:
+            import json
+            with open('resources_debug.json', 'w') as f:
+                json.dump(response_data, f, indent=2)
+        except Exception:
+            pass
+
+        return Response(response_data, status=status.HTTP_200_OK)
 
     except Exception as e:
         err = {"detail": "Failed to load resource materials.", "error": f"{type(e).__name__}: {e}"}
@@ -1047,9 +1183,9 @@ def _get_teacher_for_user(user) -> Optional[TeacherProfile]:
 def _serialize_lesson(lesson: Lesson) -> Dict[str, Any]:
     """Convert lesson model to API response format."""
     if lesson.duration_seconds:
-        duration_min = int(lesson.duration_seconds)/60
+        duration_min = int(round(lesson.duration_seconds / 60))
     else:
-        duration_min = ""
+        duration_min = 0
     return {
         "id": lesson.id,
         "title": lesson.name,
@@ -1139,8 +1275,8 @@ def list_modules(request):
             s = search_filter.strip()
             if s:
                 qs = qs.filter(Q(name__icontains=s) | Q(description__icontains=s))
-        # Optional: filter by course id
-        course_filter = request.query_params.get("course")
+        # Optional: filter by course id (accepts 'course' or 'course_id')
+        course_filter = request.query_params.get("course") or request.query_params.get("course_id")
         if course_filter:
             try:
                 qs = qs.filter(course_id=int(course_filter))
@@ -1577,7 +1713,43 @@ def cloudinary_signature(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def presign_s3(request):
+    # ── LOCAL MODE: save file directly to local filesystem ──
+    if getattr(settings, "IS_LOCAL", False):
+        uploaded_file = request.FILES.get("file")
+        filename = (request.data.get("filename") or "").strip()
+
+        if not uploaded_file and not filename:
+            return Response({"detail": "file or filename is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if uploaded_file:
+            from django.core.files.storage import default_storage
+            name = uploaded_file.name
+            base, ext = os.path.splitext(name)
+            safe_base = re.sub(r"[^\w\-]", "_", base.strip()).strip("_") or "file"
+            safe_base = re.sub(r"_+", "_", safe_base)
+            safe_name = f"lessons/{safe_base}{ext}"
+            saved_path = default_storage.save(safe_name, uploaded_file)
+            return Response({
+                "upload_url": None,
+                "key": saved_path,
+                "filename": os.path.basename(saved_path),
+                "mode": "local"
+            })
+        else:
+            # Filename-only request — return key for multipart upload
+            base, ext = os.path.splitext(filename)
+            safe_base = re.sub(r"[^\w\-]", "_", base.strip()).strip("_") or "file"
+            safe_base = re.sub(r"_+", "_", safe_base)
+            return Response({
+                "upload_url": None,
+                "key": f"lessons/{safe_base}{ext}",
+                "filename": f"{safe_base}{ext}",
+                "mode": "local"
+            })
+
+    # ── S3 MODE (production) ──
     filename = (request.data.get("filename") or "").strip()
     content_type = (request.data.get("content_type") or "application/octet-stream").strip()
 
@@ -1597,6 +1769,7 @@ def presign_s3(request):
         aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
         aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
         region_name=settings.AWS_S3_REGION_NAME,
+        endpoint_url=getattr(settings, "AWS_S3_ENDPOINT_URL", None),
     )
 
     # Build a unique key — append a counter if the object already exists in S3
@@ -1641,8 +1814,21 @@ def lesson_media_url(request, lesson_id: int):
     if not lesson:
         return Response({"detail": "Lesson not found."}, status=status.HTTP_404_NOT_FOUND)
 
+    # For students, enforce general activation check if subscription has expired
+    student = getattr(request.user, "student_profile", None)
+    if student:
+        data, returned_count = student.get_course_allowed(request, is_session=True)
+        if returned_count == 2:
+            if lesson.module.course_id not in data[0]:
+                return Response({"detail": "Course access has expired. Please renew your subscription."}, status=status.HTTP_403_FORBIDDEN)
+
     if lesson.file:
-        return Response({"url": lesson.file.url})
+        try:
+            if getattr(settings, "IS_LOCAL", False):
+                return Response({"url": request.build_absolute_uri(f"/learning/api/stream-video/{lesson.id}/")})
+            return Response({"url": request.build_absolute_uri(lesson.file.url)})
+        except ValueError:
+            pass
 
     value = (lesson.url or "").strip()
     if not value:
@@ -1652,14 +1838,20 @@ def lesson_media_url(request, lesson_id: int):
     if value.startswith("http://") or value.startswith("https://"):
         return Response({"url": value})
 
-    # ✅ Otherwise treat as S3 key → presign GET
+    # ✅ Otherwise treat as storage key
     key = value
 
+    # -------- LOCAL MODE: return local media URL --------
+    if getattr(settings, "IS_LOCAL", False):
+        return Response({"url": request.build_absolute_uri(f"/learning/api/stream-video/{lesson.id}/")})
+
+    # ── S3 MODE: presign GET ──
     s3 = boto3.client(
         "s3",
         aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
         aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
         region_name=settings.AWS_S3_REGION_NAME,
+        endpoint_url=getattr(settings, "AWS_S3_ENDPOINT_URL", None),
     )
 
     signed_get = s3.generate_presigned_url(
@@ -2147,20 +2339,37 @@ def delete_saved_material(request):
 @authentication_classes([SessionTokenAuthentication])
 def my_courses(request):
     try:
-        def _course_to_dict(course):
-            # Keep it minimal (matches your frontend: { id, name })
-            return {
-                "id": course.id,
-                "name": course.name,
-            }
+        from billing.models import UserAccountSubscription
+        from django.utils import timezone
 
         student = _get_student_for_user(request.user)
         if not student:
             return Response({"detail": "Student profile not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        subscription_active = UserAccountSubscription.has_subscription(student.user, student.organization)
+        now = timezone.now()
+
+        def _course_to_dict(course):
+            modules = [{"id": m.id, "name": m.name} for m in course.modules.filter(active=True).order_by("order")]
+            has_course_general_access = (
+                course.course_type == "public" and
+                course.general_activation and
+                (course.general_activation_date is None or course.general_activation_date > now)
+            )
+            has_access = subscription_active or has_course_general_access
+            return {
+                "id": course.id,
+                "name": course.name,
+                "modules": modules,
+                "general_activation": course.general_activation,
+                "general_activation_date": course.general_activation_date.isoformat() if course.general_activation_date else None,
+                "has_access": has_access,
+            }
+
         enrollments = (
             Enrollment.objects
             .select_related("course")
+            .prefetch_related("course__modules")
             .filter(
                 student=student,
                 status=Enrollment.Status.ACTIVE,
@@ -2171,6 +2380,9 @@ def my_courses(request):
 
         courses = [_course_to_dict(e.course) for e in enrollments]
     except Exception as e:
+        import traceback
+        if getattr(settings, "DEBUG", False):
+            print(traceback.format_exc())
         return Response({}, status=status.HTTP_404_NOT_FOUND)
     return Response({"courses": courses}, status=status.HTTP_200_OK)
 
@@ -2182,6 +2394,8 @@ def my_courses(request):
 @authentication_classes([SessionTokenAuthentication])
 def my_lessons(request):
     student = _get_student_for_user(request.user)
+    data, returned_count = student.get_course_allowed(request, is_session=True) if student else (([], None), 0)
+    allowed_course_ids = data[0] if returned_count == 2 else None
 
     lessons = (
         Lesson.objects.filter(
@@ -2196,6 +2410,12 @@ def my_lessons(request):
     )
 
     data = LessonSerializer(lessons, many=True).data
+    for item in data:
+        course_id = item.get("course_id")
+        blur = False
+        if returned_count == 2 and allowed_course_ids is not None:
+            blur = course_id not in allowed_course_ids
+        item["blur"] = blur
     return Response(data)
 
 

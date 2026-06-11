@@ -39,6 +39,8 @@ urlpatterns = [
     path('api/presign-s3/', views.presign_s3, name='create_presigned_upload'),
 
     path('api/lesson-media-url/<int:lesson_id>/', views.lesson_media_url, name='lesson_media_url'),
+    
+    path('api/stream-video/<int:lesson_id>/', views.stream_local_video, name='stream_local_video'),
 
     path('api/toggle-code-submit/', views.toggle_code_submit, name='toggle_code_submit'),
     

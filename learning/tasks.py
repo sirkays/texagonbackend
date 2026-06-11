@@ -10,7 +10,8 @@ from django.db.models import Q
 from django.utils import timezone
 
 from core.utils import resolve_season
-from gamification.services.engine import log_event
+from gamification.models import Streak
+from gamification.services.engine import log_event, evaluate_student_gamification
 from codeide.models import CodeProject
 from learning.models import CoursePassCriteria, Enrollment
 from assessments.models import TestAttempt
@@ -205,6 +206,22 @@ def recalc_progress_chunk(
                             dedupe_key=f"course_completed:org={org.id}:student={enr.student_id}:course={enr.course_id}",
                             occurred_at=getattr(enr, "updated_at", None),
                         )
+
+                        # daily activity for streak
+                        log_event(
+                            student=enr.student,
+                            org=org,
+                            event_type="daily_active",
+                            value=1,
+                            meta={"source": "course_completion"},
+                            dedupe_key=f"daily_active:org={org.id}:student={enr.student_id}:date={timezone.now().date().isoformat()}",
+                        )
+
+                        # update streak
+                        Streak.set_student_streak(enr.student, org, "daily_active", "streak_champion")
+
+                        # immediate gamification evaluation
+                        evaluate_student_gamification(enr.student, org)
 
                 if commit:
                     fields = ["progress_pct", "status", "updated_at"]

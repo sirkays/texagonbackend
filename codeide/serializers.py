@@ -241,13 +241,27 @@ class CodeProjectDetailSerializer(serializers.ModelSerializer):
 class StudentProjectSerializer(serializers.ModelSerializer):
     files = ProjectFileSerializer(many=True, read_only=True)
     comments = CodeCommentSerializer(many=True, read_only=True)
+    graded_by_name = serializers.SerializerMethodField()
+    lesson_title = serializers.SerializerMethodField()
 
     class Meta:
         model = CodeProject
         fields = [
             "id", "title", "lesson", "status",
             "score", "feedback",
-            "graded_at", "graded_by_id",
+            "graded_at", "graded_by_id", "graded_by_name",
+            "lesson_title",
             "created_at", "updated_at",
             "files", "comments",
         ]
+
+    def get_graded_by_name(self, obj):
+        if not obj.graded_by:
+            return None
+        u = getattr(obj.graded_by, "user", None)
+        if not u:
+            return None
+        return (getattr(u, "get_full_name", lambda: "")() or u.email or str(u.pk))
+
+    def get_lesson_title(self, obj):
+        return getattr(obj.lesson, "name", "") if obj.lesson else ""

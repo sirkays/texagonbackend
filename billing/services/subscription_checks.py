@@ -114,11 +114,14 @@ def student_subscription_status(request,student) -> dict:
         .first()
     )
 
-    if sub.status == UserAccountSubscription.Status.ACTIVE and sub.end_at and sub.end_at >= now:
+    if sub and sub.status == UserAccountSubscription.Status.ACTIVE and sub.end_at and sub.end_at >= now:
         return {"ok": True, "reason": "active", "subscription_id": sub.id}
+
+    if getattr(student.organization, "allow_unsubscribed_users", False):
+        return {"ok": True, "reason": "allow_unsubscribed_users", "subscription_id": sub.id if sub else None}
         
     if student.get_course_allowed(request, is_general_activation=True).exists() :
-        return {"ok": True, "reason": "active", "subscription_id": sub.id} 
+        return {"ok": True, "reason": "active", "subscription_id": sub.id if sub else None} 
 
     if not sub:
         return {"ok": False, "reason": "missing", "subscription_id": None, "message":"Subscription not found."}

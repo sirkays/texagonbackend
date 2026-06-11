@@ -1,6 +1,9 @@
 from datetime import timedelta
 
-from django.db.models import Exists, OuterRef, F, Value, ExpressionWrapper, DateTimeField
+from django.db.models import (
+    Exists, OuterRef, F, ExpressionWrapper,
+    DateTimeField, DurationField,
+)
 from django.db.models.functions import Now
 
 from academics.models import EnrollmentCertificate, StudentEnrollmentCertificateApproval
@@ -19,9 +22,17 @@ def available_certificates_qs():
         approval=True,
     )
 
+    # Multiply download_after_days (integer) by timedelta(days=1) so Django
+    # emits a proper SQL INTERVAL expression — compatible with PostgreSQL
+    # (timestamptz + interval) and SQLite alike.
+    days_as_duration = ExpressionWrapper(
+        F("download_after_days") * timedelta(days=1),
+        output_field=DurationField(),
+    )
+
     # downloadable_at = acquired_at + download_after_days * 1 day
     downloadable_at = ExpressionWrapper(
-        F("acquired_at") + F("download_after_days") * Value(timedelta(days=1)),
+        F("acquired_at") + days_as_duration,
         output_field=DateTimeField(),
     )
 

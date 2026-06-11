@@ -41,6 +41,12 @@ def _serialize_report_list(report):
         "recipient_mode": report.recipient_mode,
         "course_id": report.course_id,
         "course_name": report.course.name if report.course else "",
+        "organization_name": report.organization.name if report.organization else "",
+        "organization_logo": (
+            report.organization.logo.url
+            if report.organization and report.organization.logo
+            else None
+        ),
         "recipients_count": report.recipients.count(),
         "published_at": report.published_at,
         "period_start": report.period_start,
@@ -50,7 +56,46 @@ def _serialize_report_list(report):
     }
 
 
-def _serialize_report_detail(report, student=None):
+
+def _resolve_video_url(v, request=None):
+    """
+    Return a fully-qualified, playable URL for a ReportVideo object.
+
+    Priority:
+      1. video_file (Django FileField) — build absolute URL via request or settings BASE_URL
+      2. video_url  — if it already starts with http, return as-is;
+                      otherwise treat it as a storage key and build /media/<key> absolute URL
+    """
+    base = ""
+    if request:
+        base = request.build_absolute_uri("/").rstrip("/")
+    else:
+        base = getattr(settings, "BASE_URL", "").rstrip("/")
+
+    # Prefer the uploaded file
+    if v.video_file:
+        try:
+            rel = v.video_file.url  # e.g. /media/texagon/reports/1/videos/.../file.mp4
+            if rel.startswith("http"):
+                return rel
+            return f"{base}{rel}"
+        except ValueError:
+            pass
+
+    raw = (v.video_url or "").strip()
+    if not raw:
+        return ""
+
+    # Already a full URL (YouTube, S3 signed URL, etc.)
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+
+    # Local storage key — build absolute media URL
+    # e.g. key = "lessons/Creating_Accounts.mp4" → /media/lessons/Creating_Accounts.mp4
+    return f"{base}/media/{raw.lstrip('/')}"
+
+
+def _serialize_report_detail(report, student=None, request=None):
     """Full report serialization. If student is given, include per-student scores."""
     cbt_items = []
     for item in report.cbt_items.select_related("test").all():
@@ -81,10 +126,13 @@ def _serialize_report_detail(report, student=None):
 
     videos = []
     for v in report.videos.all():
+        resolved_url = _resolve_video_url(v, request)
         videos.append({
             "id": v.id,
             "title": v.title,
-            "video_url": v.video_url,
+            # Always return the resolved, absolute playable URL as video_url
+            "video_url": resolved_url,
+            # Keep the raw file URL separately for debugging
             "video_file": v.video_file.url if v.video_file else None,
         })
 
@@ -303,7 +351,7 @@ def teacher_report_detail(request, report_id):
     if not report:
         return Response({"detail": "Report not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    data = _serialize_report_detail(report)
+    data = _serialize_report_detail(report, request=request)
 
     # Include recipients list for teacher
     recipients = []
@@ -430,8 +478,11 @@ def teacher_report_student_data(request):
     lessons = Lesson.objects.filter(module__course=course).select_related("module").order_by("module__order", "order")
     lesson_data = [{"id": l.id, "name": l.name, "module_name": l.module.name} for l in lessons]
 
-    # Students enrolled
-    enrollments = Enrollment.objects.filter(course=course).select_related("student__user", "student__current_classroom")
+    # Students enrolled (Active status only)
+    enrollments = Enrollment.objects.filter(
+        course=course,
+        status=Enrollment.Status.ACTIVE
+    ).select_related("student__user", "student__current_classroom")
     students = []
     for e in enrollments:
         s = e.student
@@ -466,21 +517,38 @@ def my_reports_list(request):
     # Check if parent
     pp = ParentProfile.objects.filter(user=user).first()
     if pp:
-        child_ids = ParentChildLink.objects.filter(parent=pp).values_list("student_id", flat=True)
+        child_links = ParentChildLink.objects.filter(parent=pp).select_related(
+            "student__user", "student__current_classroom"
+        )
+        child_ids = [link.student_id for link in child_links]
+
+        # Build a lookup map: student_id → child info dict
+        child_map = {}
+        for link in child_links:
+            s = link.student
+            child_map[s.id] = {
+                "id": s.id,
+                "name": (s.user.get_full_name() or s.user.email).strip(),
+                "admission_no": s.admission_no or "",
+                "classroom": s.current_classroom.name if s.current_classroom else "",
+            }
+
         recipient_ids = ReportRecipient.objects.filter(
             student_id__in=child_ids, report__status="published"
         ).values_list("report_id", flat=True)
-        reports = TeacherReport.objects.filter(id__in=recipient_ids).select_related("course", "organization").order_by("-published_at")
+        reports = TeacherReport.objects.filter(id__in=recipient_ids).select_related(
+            "course", "organization"
+        ).order_by("-published_at")
 
         results = []
         for r in reports:
             d = _serialize_report_list(r)
-            # Include which children are recipients
-            d["children"] = list(
+            # Include rich child objects for each child who is a recipient
+            recipient_student_ids = list(
                 ReportRecipient.objects.filter(report=r, student_id__in=child_ids)
-                .select_related("student__user")
-                .values_list("student__user__first_name", flat=True)
+                .values_list("student_id", flat=True)
             )
+            d["children"] = [child_map[sid] for sid in recipient_student_ids if sid in child_map]
             results.append(d)
         return Response({"results": results})
 
@@ -527,7 +595,7 @@ def my_report_detail(request, report_id):
             parent_viewed=True, parent_viewed_at=timezone.now()
         )
 
-    return Response(_serialize_report_detail(report, student=target_student))
+    return Response(_serialize_report_detail(report, student=target_student, request=request))
 
 
 # ─── Public Report Access + Parent Onboarding ───────────────
@@ -541,6 +609,50 @@ def public_report_info(request, token):
     ).select_related("organization", "course").first()
     if not report:
         return Response({"detail": "Report not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Optional session token authentication check
+    user = None
+    token_header = request.META.get("HTTP_X_SESSION_TOKEN")
+    if not token_header:
+        auth = request.META.get("HTTP_AUTHORIZATION", "")
+        if auth.startswith("X-Session-Token "):
+            token_header = auth[len("X-Session-Token ") :].strip()
+        elif auth.startswith("Bearer "):
+            token_header = auth[len("Bearer ") :].strip()
+
+    if token_header:
+        from api.models import SessionToken
+        try:
+            st = SessionToken.objects.select_related("user").get(key=token_header, is_active=True)
+            if st.expires_at > timezone.now():
+                user = st.user
+        except SessionToken.DoesNotExist:
+            pass
+
+    if user:
+        # Check student
+        sp = StudentProfile.objects.filter(user=user).first()
+        if sp:
+            if report.recipients.filter(student=sp).exists():
+                return Response({
+                    "authenticated": True,
+                    "report": _serialize_report_detail(report, student=sp, request=request)
+                })
+
+        # Check parent
+        pp = ParentProfile.objects.filter(user=user).first()
+        if pp:
+            child_ids = ParentChildLink.objects.filter(parent=pp).values_list("student_id", flat=True)
+            recipient = report.recipients.filter(student_id__in=child_ids).first()
+            if recipient:
+                # Mark as viewed by parent
+                report.recipients.filter(student=recipient.student).update(
+                    parent_viewed=True, parent_viewed_at=timezone.now()
+                )
+                return Response({
+                    "authenticated": True,
+                    "report": _serialize_report_detail(report, student=recipient.student, request=request)
+                })
 
     return Response({
         "report_title": report.title,
@@ -592,15 +704,28 @@ def public_report_verify_student(request, token):
         return Response({"detail": "This student is not a recipient of this report."}, status=status.HTTP_403_FORBIDDEN)
 
     # Check if parent exists
-    has_parent = ParentChildLink.objects.filter(student=student).exists()
+    links = ParentChildLink.objects.filter(student=student).select_related("parent__user")
+    has_parent = links.exists()
+
+    parent_email = None
+    parent_session_token = None
+    if has_parent:
+        parent_user = links.first().parent.user
+        parent_email = parent_user.email
+        # Create a session token for the parent
+        from api.models import SessionToken
+        session_token_obj = SessionToken.create_for_user(parent_user, hours_valid=24)
+        parent_session_token = session_token_obj.key
 
     return Response({
         "valid": True,
         "student_id": student.id,
         "student_name": (user.get_full_name() or user.email).strip(),
         "has_parent": has_parent,
+        "parent_email": parent_email,
+        "parent_session_token": parent_session_token,
         "needs_parent_setup": not has_parent,
-        "report": _serialize_report_detail(report, student=student),
+        "report": _serialize_report_detail(report, student=student, request=request),
     })
 
 
@@ -697,8 +822,84 @@ def public_parent_setup(request, token):
         report=report, student=student
     ).update(parent_viewed=True, parent_viewed_at=timezone.now())
 
+    # Create session token for the newly created parent
+    from api.models import SessionToken
+    session_token_obj = SessionToken.create_for_user(parent_user, hours_valid=24)
+    parent_session_token = session_token_obj.key
+
     return Response({
         "detail": "Parent account created successfully.",
         "parent_email": parent_user.email,
-        "report": _serialize_report_detail(report, student=student),
+        "parent_session_token": parent_session_token,
+        "report": _serialize_report_detail(report, student=student, request=request),
     }, status=status.HTTP_201_CREATED)
+
+
+# ─── Parent: Fetch Report by Share Token ────────────────────
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def parent_report_by_token(request, token):
+    """
+    Authenticated parent fetches a specific published report by its share token.
+    Verifies that at least one of the parent's linked children is a recipient.
+
+    Optional query param: ?student_id=<id>  — view a specific child's data
+    (used when multiple children are recipients of the same report).
+    """
+    user = request.user
+    requested_student_id = request.query_params.get("student_id")
+
+    pp = ParentProfile.objects.filter(user=user).first()
+    if not pp:
+        return Response({"detail": "Parent profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+    report = TeacherReport.objects.filter(
+        share_token=token, status="published"
+    ).select_related("course", "organization", "teacher__user").first()
+    if not report:
+        return Response({"detail": "Report not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Get all linked children who are recipients of this report
+    child_links = ParentChildLink.objects.filter(parent=pp).select_related(
+        "student__user", "student__current_classroom"
+    )
+    child_ids = [link.student_id for link in child_links]
+
+    recipient_qs = report.recipients.filter(student_id__in=child_ids).select_related(
+        "student__user", "student__current_classroom"
+    )
+    if not recipient_qs.exists():
+        return Response(
+            {"detail": "None of your children are recipients of this report."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Build linked_children summary for the frontend switcher
+    linked_children = []
+    for r in recipient_qs:
+        s = r.student
+        linked_children.append({
+            "id": s.id,
+            "name": (s.user.get_full_name() or s.user.email).strip(),
+            "admission_no": s.admission_no or "",
+            "classroom": s.current_classroom.name if s.current_classroom else "",
+        })
+
+    # Determine which child's data to load
+    target_recipient = None
+    if requested_student_id:
+        target_recipient = recipient_qs.filter(student_id=requested_student_id).first()
+    if not target_recipient:
+        target_recipient = recipient_qs.first()
+
+    # Mark as viewed by parent
+    report.recipients.filter(student=target_recipient.student).update(
+        parent_viewed=True, parent_viewed_at=timezone.now()
+    )
+
+    data = _serialize_report_detail(report, student=target_recipient.student, request=request)
+    data["linked_children"] = linked_children
+    return Response(data)
+

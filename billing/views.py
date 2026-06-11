@@ -661,19 +661,48 @@ def confirm_payment(request):
         subscription_payment.transaction_id = transaction_id
         subscription_payment.save(update_fields=["transaction_id", "updated_at"] if hasattr(subscription_payment, "updated_at") else ["transaction_id"])
 
-        # --- Verify with Flutterwave ---
+        # --- Verify with Flutterwave (with retry for pending/in-progress) ---
+        # Flutterwave redirects fire before the transaction is fully settled on
+        # their side. We retry up to MAX_VERIFY_ATTEMPTS times with a short delay
+        # to give Flutterwave time to move the transaction from pending → successful.
         try:
+            import time as _time
+
             is_test = False
             if subscription_payment.invoice.subscription:
-                is_test  = subscription_payment.invoice.subscription.plan.is_test
-            flw = confirm_transaction(transaction_id, is_test)  # use improved version: returns dict with ok/data/raw/error
-            flw_ok = bool(flw.get("ok"))
-            flw_data = flw.get("data") or {}
-            flw_top_status = (flw.get("status") or "").lower()
-            flw_status = (flw_data.get("status") or "").strip().lower()  # transaction outcome: successful/failed/pending/...
+                is_test = subscription_payment.invoice.subscription.plan.is_test
+
+            MAX_VERIFY_ATTEMPTS = 4
+            RETRY_DELAY_SECONDS = 2
+
+            flw = None
+            flw_ok = False
+            flw_data = {}
+            flw_top_status = ""
+            flw_status = ""
+
+            for attempt in range(1, MAX_VERIFY_ATTEMPTS + 1):
+                flw = confirm_transaction(transaction_id, is_test)
+                flw_ok = bool(flw.get("ok"))
+                flw_data = flw.get("data") or {}
+                flw_top_status = (flw.get("status") or "").lower()
+                flw_status = (flw_data.get("status") or "").strip().lower()
+
+                # Successful verify — break immediately
+                if flw_ok and flw_status in {"successful", "success"}:
+                    break
+
+                # Hard failure — no point retrying
+                if flw_ok and flw_status in {"failed", "failure", "cancelled", "canceled"}:
+                    break
+
+                # Transient: pending/inprogress or Flutterwave unreachable — retry
+                if attempt < MAX_VERIFY_ATTEMPTS:
+                    _time.sleep(RETRY_DELAY_SECONDS)
 
             _safe_meta_patch(subscription_payment, {
                 "verified_at": timezone.now().isoformat(),
+                "verify_attempts": attempt,
                 "verify_ok": flw_ok,
                 "verify_top_status": flw_top_status,
                 "verify_message": flw.get("message"),
@@ -1011,6 +1040,7 @@ def transactions_list(request):
             "invoice__subscription",
             "invoice__organization_membership",
             "invoice__organization_membership__user",
+            "invoice__invoicetype",
         ).annotate(
             effective_date=Case(
                 When(status="success", then=F("paid_at")),
@@ -1102,6 +1132,20 @@ def transactions_list(request):
                     if pay.invoice.organization_membership
                     else ""
                 )
+                inv_type_obj = getattr(pay.invoice, "invoicetype", None)
+                invoice_type_value = getattr(inv_type_obj, "invoice_type", None) or "subscription"
+                # Resolve child info for subscription payments
+                child_name = ""
+                child_admission_no = ""
+                if inv_type_obj and invoice_type_value == "subscription" and getattr(inv_type_obj, "object_type", None) == "student":
+                    try:
+                        from academics.models import StudentProfile
+                        student = StudentProfile.objects.filter(pk=inv_type_obj.object_id).select_related("user").first()
+                        if student:
+                            child_name = (student.user.get_full_name() or student.user.email or "").strip()
+                            child_admission_no = student.admission_no or ""
+                    except Exception:
+                        pass
                 d = {
                     "id": pay.id,
                     "type": "subscription",
@@ -1112,6 +1156,12 @@ def transactions_list(request):
                     "date": (date or pay.created_at).isoformat(),
                     "customer": customer_email,
                     "invoice_number": pay.invoice.number,
+                    "invoice_type": invoice_type_value,
+                    "invoice_type_object_id": getattr(inv_type_obj, "object_id", None),
+                    "invoice_type_object_type": getattr(inv_type_obj, "object_type", None),
+                    "child_name": child_name,
+                    "child_admission_no": child_admission_no,
+                    "payment_method": pay.method or "Online",
                 }
             else:  # Payment (store)
                 date = pay.created_at
@@ -1126,6 +1176,12 @@ def transactions_list(request):
                     "date": (date or pay.effective_date).isoformat(),
                     "customer": customer_email,
                     "order_id": str(pay.order.id) if pay.order else "",
+                    "invoice_type": "store",
+                    "invoice_type_object_id": None,
+                    "invoice_type_object_type": None,
+                    "child_name": "",
+                    "child_admission_no": "",
+                    "payment_method": getattr(pay, "method", "") or "Online",
                 }
             data.append(d)
         if type_param == "subscription":

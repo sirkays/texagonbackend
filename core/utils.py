@@ -496,7 +496,7 @@ def _org_signatures_to_dict(org, request=None) -> dict:
 def resolve_season(org, occurred_at):
     
     # 1) Prefer active season if it contains the date
-    active = LeaderboardSeason.get_active(None)
+    active = LeaderboardSeason.get_active(org)
     if active and active.contains(occurred_at):
         return active
 

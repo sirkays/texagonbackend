@@ -55,6 +55,7 @@ class StudentProfile(TimeStampedModel):
     # Keeping unique=True is highly recommended if you enforce uniqueness
     admission_no = models.CharField(max_length=64, blank=True, null=True) 
     dob = models.DateField(null=True, blank=True)
+    gender = models.CharField(max_length=20, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         # Only generate if admission_no is empty AND an organization is attached
@@ -115,8 +116,8 @@ class StudentProfile(TimeStampedModel):
         cached_date = cached_data.get("general_activation_date")
         date_cached_str = cached_data.get("date_cached")
 
-        # If either is missing, treat as invalid
-        if not (cached_date and date_cached_str):
+        # If date_cached_str is missing, treat as invalid
+        if not date_cached_str:
             return False
 
         # Parse date_cached (prefer ISO-8601)
@@ -176,7 +177,7 @@ class StudentProfile(TimeStampedModel):
             if isinstance(cached_date, str):
                 cached_date = parse_datetime(cached_date)
 
-            if cached_date and cached_date > now:
+            if cached_date is None or cached_date > now:
                 if is_session:
                     returned_count = 2
                     return (course_ids, cached_date), returned_count
@@ -185,16 +186,15 @@ class StudentProfile(TimeStampedModel):
         # 4️⃣ Compute fresh queryset
         leaderboard_season = resolve_season(self.organization, now)
 
+        from django.db.models import Q, Max
         queryset = self.enrollments.filter(
             leaderboard_season=leaderboard_season,
-            course__course_type="public",
             completed_at__isnull=True,
             status="active",
-            course__general_activation_date__isnull=False,
+            course__general_activation=True,
+        ).filter(
+            Q(course__general_activation_date__isnull=True) | Q(course__general_activation_date__gt=now)
         )
-
-        if is_general_activation:
-            queryset = queryset.filter(course__general_activation=True)
 
         # 5️⃣ Extract course IDs and latest activation date
         course_ids = list(queryset.values_list("course_id", flat=True))
@@ -204,14 +204,14 @@ class StudentProfile(TimeStampedModel):
         )["course__general_activation_date__max"]
 
         # 6️⃣ Cache safely (serialize datetime)
-        if max_activation_date:
+        if course_ids:
             request.session[session_key] = {
                 "course_ids": course_ids,
-                "general_activation_date": max_activation_date.isoformat(),
-                "date_cached":timezone.now().isoformat(),
+                "general_activation_date": max_activation_date.isoformat() if max_activation_date else None,
+                "date_cached": timezone.now().isoformat(),
             }
-
-            #print(request.session.get("allowed_courses_cache"))
+        else:
+            request.session.pop(session_key, None)
 
         # 7️⃣ Return based on mode
         if is_session:

@@ -11,7 +11,7 @@ from django.db.models import Q, Sum, Count, F,Avg
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework import status, viewsets
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, action
 from rest_framework.response import Response
 from rest_framework import permissions
 from rest_framework_api_key.permissions import HasAPIKey
@@ -63,6 +63,7 @@ from rest_framework.permissions import AllowAny
 
 
 @api_view(["GET"])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def verify_session(request):
     token = request.headers.get("X-Session-Token")
@@ -125,7 +126,7 @@ def login_view(request):
   
 
     st = SessionToken.create_for_user(user, hours_valid=hours_valid, ip=request.META.get("REMOTE_ADDR"))
-    return Response({"sessionToken": st.key, "expiresAt": st.expires_at.isoformat(), "userId": user.id})
+    return Response({"sessionToken": st.key, "expiresAt": st.expires_at.isoformat(), "userId": user.id, "username": user.username})
 
 
 
@@ -318,6 +319,33 @@ class OrganizationViewSet(APIKeySessionViewSet):
     queryset = Organization.objects.all()
     serializer_class = OrganizationSerializer
 
+    def get_permissions(self):
+        if self.action in ["update", "partial_update", "destroy", "create"]:
+            from core.permissions import IsAdminAccess
+            return [HasAPIKey(), IsAdminAccess()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Organization.objects.none()
+        if user.is_staff or user.is_superuser:
+            return Organization.objects.all()
+        
+        admin_access = getattr(user, "adminaccess", None)
+        if admin_access and admin_access.selected_organization:
+            return Organization.objects.filter(id=admin_access.selected_organization.id)
+            
+        teacher = getattr(user, "teacher_profile", None)
+        if teacher:
+            return Organization.objects.filter(id=teacher.organization_id)
+            
+        student = getattr(user, "student_profile", None)
+        if student:
+            return Organization.objects.filter(id=student.organization_id)
+            
+        return Organization.objects.none()
+
 class OrganizationMembershipViewSet(APIKeySessionViewSet):
     queryset = OrganizationMembership.objects.all()
     serializer_class = OrganizationMembershipSerializer
@@ -325,6 +353,28 @@ class OrganizationMembershipViewSet(APIKeySessionViewSet):
 class AcademicSessionViewSet(APIKeySessionViewSet):
     queryset = AcademicSession.objects.all()
     serializer_class = AcademicSessionSerializer
+
+    def get_queryset(self):
+        org, error_response = _resolve_org(self.request)
+        if error_response is not None:
+            self._org_error = error_response
+            return AcademicSession.objects.none()
+        self._org_error = None
+        return AcademicSession.objects.filter(organization=org)
+
+    def perform_create(self, serializer):
+        org, _ = _resolve_org(self.request)
+        serializer.save(organization=org)
+
+    def list(self, request, *args, **kwargs):
+        if hasattr(self, "_org_error") and self._org_error is not None:
+            return self._org_error
+        return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        if hasattr(self, "_org_error") and self._org_error is not None:
+            return self._org_error
+        return super().retrieve(request, *args, **kwargs)
 
 class ClassroomViewSet(APIKeySessionViewSet):
     queryset = Classroom.objects.all()
@@ -397,6 +447,36 @@ class CourseViewSet(APIKeySessionViewSet):
 class EnrollmentViewSet(APIKeySessionViewSet):
     queryset = Enrollment.objects.all()
     serializer_class = EnrollmentSerializer
+
+    def get_queryset(self):
+        org, error_response = _resolve_org(self.request)
+        if error_response is not None:
+            self._org_error = error_response
+            return Enrollment.objects.none()
+        self._org_error = None
+        qs = Enrollment.objects.filter(student__organization=org)
+        current_session = AcademicSession.objects.filter(organization=org, is_current=True).first()
+        if current_session:
+            qs = qs.filter(academic_session=current_session)
+        return qs
+
+    def perform_create(self, serializer):
+        org, _ = _resolve_org(self.request)
+        current_session = AcademicSession.objects.filter(organization=org, is_current=True).first() if org else None
+        if current_session:
+            serializer.save(academic_session=current_session)
+        else:
+            serializer.save()
+
+    def list(self, request, *args, **kwargs):
+        if hasattr(self, "_org_error") and self._org_error is not None:
+            return self._org_error
+        return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        if hasattr(self, "_org_error") and self._org_error is not None:
+            return self._org_error
+        return super().retrieve(request, *args, **kwargs)
 
 class ModuleViewSet(APIKeySessionViewSet):
     queryset = Module.objects.all()
@@ -652,6 +732,10 @@ class TestViewSet(APIKeySessionViewSet):
 
             qs = Test.objects.filter(course__organization_id=org.id).select_related("course").order_by("-created_at")
 
+            current_session = AcademicSession.objects.filter(organization=org, is_current=True).first()
+            if current_session:
+                qs = qs.filter(Q(academic_session=current_session) | Q(academic_session__isnull=True))
+
             user = request.user
             student = getattr(user, "student_profile", None)
             if isinstance(student, StudentProfile):
@@ -661,7 +745,10 @@ class TestViewSet(APIKeySessionViewSet):
                 enrolled_course_ids = Enrollment.objects.filter(
                     student=student,
                     status=Enrollment.Status.ACTIVE,
-                ).values("course_id")
+                )
+                if current_session:
+                    enrolled_course_ids = enrolled_course_ids.filter(academic_session=current_session)
+                enrolled_course_ids = enrolled_course_ids.values("course_id")
                 qs = qs.filter(course_id__in=Subquery(enrolled_course_ids))
 
             teacher = getattr(user, "teacher_profile", None)
@@ -679,6 +766,15 @@ class TestViewSet(APIKeySessionViewSet):
         except Exception as e:
             print(f"Error in TestViewSet.get_queryset: {str(e)}")
             return Test.objects.none()
+
+    def perform_create(self, serializer):
+        request = self.request
+        org, _ = _resolve_org(request)
+        current_session = AcademicSession.objects.filter(organization=org, is_current=True).first() if org else None
+        if current_session:
+            serializer.save(academic_session=current_session)
+        else:
+            serializer.save()
 
 class QuestionViewSet(APIKeySessionViewSet):
     queryset = Question.objects.all()
@@ -705,6 +801,10 @@ class AssignmentViewSet(APIKeySessionViewSet):
 
             qs = Assignment.objects.filter(course__organization_id=org.id).select_related("course", "lesson").order_by("-created_at")
 
+            current_session = AcademicSession.objects.filter(organization=org, is_current=True).first()
+            if current_session:
+                qs = qs.filter(Q(academic_session=current_session) | Q(academic_session__isnull=True))
+
             user = request.user
             student = getattr(user, "student_profile", None)
             if isinstance(student, StudentProfile):
@@ -714,7 +814,10 @@ class AssignmentViewSet(APIKeySessionViewSet):
                 enrolled_course_ids = Enrollment.objects.filter(
                     student=student,
                     status=Enrollment.Status.ACTIVE,
-                ).values("course_id")
+                )
+                if current_session:
+                    enrolled_course_ids = enrolled_course_ids.filter(academic_session=current_session)
+                enrolled_course_ids = enrolled_course_ids.values("course_id")
                 qs = qs.filter(course_id__in=Subquery(enrolled_course_ids))
 
             teacher = getattr(user, "teacher_profile", None)
@@ -736,6 +839,15 @@ class AssignmentViewSet(APIKeySessionViewSet):
         except Exception as e:
             print(f"Error in AssignmentViewSet.get_queryset: {str(e)}")
             return Assignment.objects.none()
+
+    def perform_create(self, serializer):
+        request = self.request
+        org, _ = _resolve_org(request)
+        current_session = AcademicSession.objects.filter(organization=org, is_current=True).first() if org else None
+        if current_session:
+            serializer.save(academic_session=current_session)
+        else:
+            serializer.save()
 
 
 @api_view(["POST"])
@@ -762,13 +874,22 @@ def presign_attachment_download(request):
         if key.startswith("http://") or key.startswith("https://"):
             results.append({"key": key, "url": key, "filename": key.split("/")[-1].split("?")[0]})
         else:
-            # S3 key → presign GET
+            # ── LOCAL MODE: return local media URL ──
+            if getattr(settings, "IS_LOCAL", False):
+                import os as _os
+                local_url = f"{settings.MEDIA_URL}{key}"
+                full_url = request.build_absolute_uri(local_url)
+                results.append({"key": key, "url": full_url, "filename": _os.path.basename(key)})
+                continue
+
+            # S3 key → presign GET (production)
             try:
                 s3 = boto3.client(
                     "s3",
                     aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                     aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
                     region_name=settings.AWS_S3_REGION_NAME,
+                    endpoint_url=getattr(settings, "AWS_S3_ENDPOINT_URL", None),
                 )
                 signed_url = s3.generate_presigned_url(
                     ClientMethod="get_object",
@@ -784,8 +905,16 @@ def presign_attachment_download(request):
 
     return Response({"files": results})
 
+from rest_framework.pagination import PageNumberPagination
+
+class SubmissionPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
 class SubmissionViewSet(APIKeySessionViewSet):
     serializer_class = SubmissionSerializer
+    pagination_class = SubmissionPagination
 
     def get_queryset(self):
         user = self.request.user
@@ -798,13 +927,69 @@ class SubmissionViewSet(APIKeySessionViewSet):
         if assignment_id:
             qs = qs.filter(assignment_id=assignment_id)
 
+        # Filter by classroom if provided
+        classroom_id = self.request.query_params.get("classroom")
+        if classroom_id:
+            qs = qs.filter(student__classroom_id=classroom_id)
+
         # Students can only see their own submissions
         student = getattr(user, "student_profile", None)
         teacher = getattr(user, "teacher_profile", None)
         if student and not teacher:
             qs = qs.filter(student=student)
 
+        if teacher:
+            from django.db.models import Exists, OuterRef
+            active_enrollment_exists = Enrollment.objects.filter(
+                student=OuterRef("student"),
+                course=OuterRef("assignment__course"),
+                course__teacher=teacher,
+                status=Enrollment.Status.ACTIVE
+            )
+            qs = qs.filter(Exists(active_enrollment_exists))
+
         return qs.order_by("-submitted_at")
+
+    @action(detail=True, methods=["patch"], url_path="grade")
+    def grade(self, request, pk=None):
+        """
+        Teacher-only action: PATCH /api/submissions/{id}/grade/
+        Allows grading (score + feedback) without the active-enrollment filter.
+        """
+        user = request.user
+        teacher = getattr(user, "teacher_profile", None)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=403)
+
+        # Find the submission for any course belonging to this teacher
+        submission = Submission.objects.select_related(
+            "student__user", "assignment__course"
+        ).filter(
+            pk=pk,
+            assignment__course__teacher=teacher,
+        ).first()
+
+        if not submission:
+            return Response({"detail": "Submission not found."}, status=404)
+
+        score = request.data.get("score")
+        feedback = request.data.get("feedback", "")
+
+        if score is not None:
+            try:
+                score_val = float(score)
+                if score_val < 0 or score_val > 100:
+                    return Response({"detail": "Score must be between 0 and 100."}, status=400)
+                submission.score = score_val
+            except (ValueError, TypeError):
+                return Response({"detail": "Score must be numeric."}, status=400)
+
+        submission.feedback = feedback
+        submission.save(update_fields=["score", "feedback"])
+        submission.refresh_from_db()
+
+        serializer = self.get_serializer(submission)
+        return Response(serializer.data, status=200)
 
     def create(self, request, *args, **kwargs):
         """
@@ -855,6 +1040,36 @@ class SubmissionCommentViewSet(APIKeySessionViewSet):
 class AttendanceSessionViewSet(APIKeySessionViewSet):
     queryset = AttendanceSession.objects.all()
     serializer_class = AttendanceSessionSerializer
+
+    def get_queryset(self):
+        org, error_response = _resolve_org(self.request)
+        if error_response is not None:
+            self._org_error = error_response
+            return AttendanceSession.objects.none()
+        self._org_error = None
+        qs = AttendanceSession.objects.filter(course__organization=org)
+        current_session = AcademicSession.objects.filter(organization=org, is_current=True).first()
+        if current_session:
+            qs = qs.filter(academic_session=current_session)
+        return qs
+
+    def perform_create(self, serializer):
+        org, _ = _resolve_org(self.request)
+        current_session = AcademicSession.objects.filter(organization=org, is_current=True).first() if org else None
+        if current_session:
+            serializer.save(academic_session=current_session)
+        else:
+            serializer.save()
+
+    def list(self, request, *args, **kwargs):
+        if hasattr(self, "_org_error") and self._org_error is not None:
+            return self._org_error
+        return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        if hasattr(self, "_org_error") and self._org_error is not None:
+            return self._org_error
+        return super().retrieve(request, *args, **kwargs)
 
 class AttendanceRecordViewSet(APIKeySessionViewSet):
     queryset = AttendanceRecord.objects.all()
@@ -1693,22 +1908,20 @@ def teacher_tutoring_bookings(request):
                 return Response({"detail": "id required."}, status=drf_status.HTTP_400_BAD_REQUEST)
 
             status_new = request.data.get("status")
+
+            if tab == "private":
+                item = get_object_or_404(PrivateTutoring, id=item_id, teacher=teacher)
+                
+                serializer = PrivateTutoringSerializer(item, data=request.data, partial=True)
+                if serializer.is_valid():
+                    serializer.save()
+                    return Response(serializer.data)
+                return Response(serializer.errors, status=drf_status.HTTP_400_BAD_REQUEST)
+
+            # tab == "upcoming": update TutoringBooking + Enrollment
             if not status_new:
                 return Response({"detail": "status required."}, status=drf_status.HTTP_400_BAD_REQUEST)
 
-            if tab == "private":
-                # (Your existing logic here...)
-                item = get_object_or_404(PrivateTutoring, id=item_id, teacher=teacher)
-                if status_new not in ["Active", "Inactive"]:
-                    return Response(
-                        {"detail": "Invalid status. Use 'Active' or 'Inactive'."},
-                        status=drf_status.HTTP_400_BAD_REQUEST,
-                    )
-                item.status = status_new
-                item.save()
-                return Response(PrivateTutoringSerializer(item).data)
-
-            # tab == "upcoming": update TutoringBooking + Enrollment
             booking = get_object_or_404(TutoringBooking, id=item_id, teacher=teacher)
 
             # Only allow status transitions you want
@@ -1757,8 +1970,15 @@ def teacher_tutoring_bookings(request):
                 if TutoringBooking.objects.filter(private_tutoring=item, status__in=["pending", "confirmed"]).exists():
                     return Response({"detail": "Cannot delete PrivateTutoring with active bookings."},
                                    status=status.HTTP_400_BAD_REQUEST)
+                
+                course_to_delete = item.course
+                
                 item.available_days.all().delete()
                 item.delete()
+                
+                if course_to_delete and course_to_delete.course_type == "private":
+                    if not Enrollment.objects.filter(course=course_to_delete).exists():
+                        course_to_delete.delete()
             else:
                 # Delete TutoringBooking
                 item = get_object_or_404(TutoringBooking, id=item_id, teacher=teacher)

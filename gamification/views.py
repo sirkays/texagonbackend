@@ -6,6 +6,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.db.models import Q, Sum, Count, Value, IntegerField
 from django.utils import timezone
+from django.http import JsonResponse
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.response import Response
@@ -143,7 +144,10 @@ def admin_student_leaderboard(request):
             "results": results,
         })
     except Exception as e:
-        print(e)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception("admin_student_leaderboard failed")
+        return JsonResponse({"error": str(e)}, status=500)
 
 
 
@@ -311,9 +315,10 @@ def admin_badges(request):
         active = request.query_params.get("active")
         if q:
             qs = qs.filter(Q(name__icontains=q))
-        if active in ("true", "false"):
-            pass
-            #qs = qs.filter(is_active=(active == "true"))
+        if active == "true":
+            qs = qs.filter(is_active=True)
+        elif active == "false":
+            qs = qs.filter(is_active=False)
 
         return Response(BadgeSerializer(qs, many=True).data)
 
@@ -828,8 +833,14 @@ def parent_rewards(request):
         if not parent:
             return Response(_parent_dummy(), status=status.HTTP_200_OK)
 
-        # Get children
+        # Get children — optionally filtered by child_id query param
+        child_id_param = request.query_params.get("child_id")
         children_links = ParentChildLink.objects.filter(parent=parent)
+        if child_id_param and child_id_param != "all":
+            try:
+                children_links = children_links.filter(student__id=int(child_id_param))
+            except (ValueError, TypeError):
+                pass
         student_ids = list(children_links.values_list("student_id", flat=True))
         students = StudentProfile.objects.filter(id__in=student_ids).select_related("user", "organization")
 
@@ -931,8 +942,13 @@ def parent_rewards(request):
             })
 
 
-        # ---------- Leaderboard (top by points globally) ----------
-        points_agg = PointTransaction.objects.values("student_id").annotate(total=Sum("points")).order_by("-total")
+        # ---------- Leaderboard (top by points, season-filtered) ----------
+        org = getattr(students.first(), "organization", None) if students.exists() else None
+        season = resolve_season(org, timezone.now()) if org else None
+        points_qs = PointTransaction.objects.values("student_id")
+        if season:
+            points_qs = points_qs.filter(season=season)
+        points_agg = points_qs.annotate(total=Sum("points")).order_by("-total")
         top_points = list(points_agg[:limit_leaderboard * page_leaderboard])
         start = (page_leaderboard - 1) * limit_leaderboard
         paginated_points = top_points[start : start + limit_leaderboard]

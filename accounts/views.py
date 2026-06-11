@@ -1328,21 +1328,27 @@ def teacher_dashboard_overview(request):
             new_data["dashboard"] = False
             teacher.has_seen_onboarding = new_data
             teacher.save(update_fields=["has_seen_onboarding"])
-        print(teacher.has_seen_onboarding, " has seen boarding... 2")
 
         now = timezone.now()
         current_first, current_last = _month_bounds(now)
         recent_days = now - timedelta(days=7)
 
+        # Identify active student IDs: students with at least one active enrollment under this teacher
+        active_student_ids = Enrollment.objects.filter(
+            course__teacher=teacher,
+            status=Enrollment.Status.ACTIVE
+        ).values_list("student_id", flat=True).distinct()
+
         # ---------- STATS ----------
         stats = []
 
-        current_students = (
-            Enrollment.objects.filter(course__teacher=teacher)
-            .values("student").distinct().count()
-        )
+        current_students = active_student_ids.count()
         prev_students = (
-            Enrollment.objects.filter(course__teacher=teacher, created_at__lt=current_first)
+            Enrollment.objects.filter(
+                course__teacher=teacher,
+                student_id__in=active_student_ids,
+                created_at__lt=current_first
+            )
             .values("student").distinct().count()
         )
         growth_students = current_students - prev_students
@@ -1394,9 +1400,13 @@ def teacher_dashboard_overview(request):
                 "_dt": lesson.created_at,  # internal sort key
             })
 
-        # enrollments (unchanged)
+        # enrollments filtered by active_student_ids
         enroll_qs = (
-            Enrollment.objects.filter(course__teacher=teacher, created_at__gte=recent_days)
+            Enrollment.objects.filter(
+                course__teacher=teacher,
+                student_id__in=active_student_ids,
+                created_at__gte=recent_days
+            )
             .values("course_id")
             .annotate(count=Count("id"), last_time=Max("created_at"))
             .order_by("-last_time")
@@ -1412,9 +1422,13 @@ def teacher_dashboard_overview(request):
                     "_dt": row["last_time"],
                 })
 
-        # attempts (unchanged)
+        # attempts filtered by active_student_ids
         attempt_qs = (
-            TestAttempt.objects.filter(test__course__teacher=teacher, submitted_at__gte=recent_days)
+            TestAttempt.objects.filter(
+                test__course__teacher=teacher,
+                student_id__in=active_student_ids,
+                submitted_at__gte=recent_days
+            )
             .values("test_id")
             .annotate(count=Count("id"), last_time=Max("submitted_at"))
             .order_by("-last_time")
@@ -1439,7 +1453,10 @@ def teacher_dashboard_overview(request):
 
         # ---------- PERFORMANCE ----------
         course_completion_rate = (
-            Enrollment.objects.filter(course__teacher=teacher)
+            Enrollment.objects.filter(
+                course__teacher=teacher,
+                student_id__in=active_student_ids
+            )
             .aggregate(avg=Avg("progress_pct"))["avg"] or 0
         )
         course_completion_rate = int(course_completion_rate)
@@ -1447,7 +1464,10 @@ def teacher_dashboard_overview(request):
         student_satisfaction = 4.8
 
         pass_rate = (
-            TestAttempt.objects.filter(test__course__teacher=teacher)
+            TestAttempt.objects.filter(
+                test__course__teacher=teacher,
+                student_id__in=active_student_ids
+            )
             .aggregate(
                 pass_rate=Avg(
                     Case(
@@ -1466,11 +1486,19 @@ def teacher_dashboard_overview(request):
             "test_pass_rate": test_pass_rate,
         }
         # ---------- TOP COURSES ----------
+        # Filter top courses stats by active students
         top_qs = (
             Course.objects.filter(teacher=teacher)
             .annotate(
-                students=Count("enrollments", distinct=True),
-                progress=Avg("enrollments__progress_pct"),
+                students=Count(
+                    "enrollments",
+                    filter=Q(enrollments__student_id__in=active_student_ids),
+                    distinct=True
+                ),
+                progress=Avg(
+                    "enrollments__progress_pct",
+                    filter=Q(enrollments__student_id__in=active_student_ids)
+                ),
             )
             .order_by("-students")[:3]
         )
@@ -1804,13 +1832,20 @@ def parent_overview(request):
         active_map = {r["student_id"]: r["c"] for r in active_counts}
         completed_map = {r["student_id"]: r["c"] for r in completed_counts}
 
-        # Average test score per student (graded)
-        avg_scores = (
-            TestAttempt.objects.filter(student__in=students, status="submitted")
-            .values("student_id")
-            .annotate(avg=Avg("score"))
-        )
-        avg_score_map = {r["student_id"]: (r["avg"] or 0) for r in avg_scores}
+        # Average test score per student as percentage (graded)
+        avg_score_map = {}
+        for student in students:
+            attempts = TestAttempt.objects.filter(student=student, status="submitted").select_related('test')
+            if attempts.exists():
+                pcts = []
+                for a in attempts:
+                    if a.score and a.test and a.test.total_marks > 0:
+                        pcts.append((float(a.score) / float(a.test.total_marks)) * 100)
+                    else:
+                        pcts.append(float(a.score or 0))
+                avg_score_map[student.id] = sum(pcts) / len(pcts)
+            else:
+                avg_score_map[student.id] = 0
 
         # Badges count per student
         badge_counts = (
@@ -2019,11 +2054,15 @@ def parent_overview(request):
             .order_by("-submitted_at")[:5]
         )
         for attempt in recent_tests:
+            score_val = attempt.score
+            total_val = attempt.test.total_marks if attempt.test else 0
+            score_str = str(int(score_val)) if score_val == int(score_val) else str(score_val)
+            total_str = str(int(total_val)) if total_val == int(total_val) else str(total_val)
             recent_activity.append({
                 "type": "test",
                 "child": attempt.student.user.get_full_name() or attempt.student.user.email.split("@")[0],
                 "title": f"Took {attempt.test.title}",
-                "description": f"Scored {attempt.score}%",
+                "description": f"Scored {score_str} out of {total_str}",
                 "time": get_time_ago(attempt.submitted_at),
                 "_ts": attempt.submitted_at,
                 "icon": "Target",
@@ -2266,18 +2305,30 @@ def build_subject_progress(student, course, enrollment, start_date, end_date):
         test__course=course,
         submitted_at__isnull=False,
         submitted_at__range=[start_date, end_date]
-    ).order_by('-submitted_at')
+    ).select_related('test').order_by('-submitted_at')
 
-    # Calculate average score and last score
+    # Calculate average score and last score as percentages
     if recent_attempts.exists():
-        scores = [float(attempt.score) for attempt in recent_attempts if attempt.score]
-        avg_score = sum(scores) / len(scores) if scores else 0
-        last_score = float(recent_attempts.first().score) if recent_attempts.first().score else 0
+        scores_pct = []
+        for attempt in recent_attempts:
+            if attempt.score and attempt.test and attempt.test.total_marks > 0:
+                pct = (float(attempt.score) / float(attempt.test.total_marks)) * 100
+                scores_pct.append(pct)
+            else:
+                scores_pct.append(float(attempt.score or 0))
+                
+        avg_score = sum(scores_pct) / len(scores_pct) if scores_pct else 0
+        
+        first_attempt = recent_attempts.first()
+        if first_attempt.score and first_attempt.test and first_attempt.test.total_marks > 0:
+            last_score = (float(first_attempt.score) / float(first_attempt.test.total_marks)) * 100
+        else:
+            last_score = float(first_attempt.score or 0)
         
         # Determine trend based on recent performance
-        if len(scores) >= 2:
-            recent_avg = sum(scores[:2]) / 2 if len(scores) >= 2 else scores[0]
-            older_avg = sum(scores[2:4]) / len(scores[2:4]) if len(scores) > 2 else recent_avg
+        if len(scores_pct) >= 2:
+            recent_avg = sum(scores_pct[:2]) / 2 if len(scores_pct) >= 2 else scores_pct[0]
+            older_avg = sum(scores_pct[2:4]) / len(scores_pct[2:4]) if len(scores_pct) > 2 else recent_avg
             
             if recent_avg > older_avg + 5:
                 trend = "up"
@@ -2318,10 +2369,15 @@ def calculate_period_stats(student, start_date, end_date):
 
     tests_completed = test_attempts.count()
     
-    # Calculate average score
+    # Calculate average score as percentage
     if test_attempts.exists():
-        scores = [float(attempt.score) for attempt in test_attempts if attempt.score]
-        average_score = int(sum(scores) / len(scores)) if scores else 0
+        pct_scores = []
+        for attempt in test_attempts:
+            if attempt.score and attempt.test and attempt.test.total_marks > 0:
+                pct_scores.append((float(attempt.score) / float(attempt.test.total_marks)) * 100)
+            else:
+                pct_scores.append(float(attempt.score or 0))
+        average_score = int(sum(pct_scores) / len(pct_scores)) if pct_scores else 0
     else:
         average_score = 0
 
@@ -2729,6 +2785,8 @@ def get_children_progress(request):
                 "parent_profile_id":parent_profile_id,
                 "name": student_user.get_full_name() or student_user.email,
                 "age": age,
+                "dob": student.dob.strftime("%Y-%m-%d") if student.dob else None,
+                "gender": student.gender or "",
                 "grade": student.current_classroom.name if student.current_classroom else "Not Assigned",
                 "school": student.organization.name,
                 "avatar": student_user.avatar.url if getattr(student_user, "avatar", None) else None,
@@ -2757,6 +2815,287 @@ def get_children_progress(request):
     except Exception as e:
         print(e)
         return Response({"children": []}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ============================================================================
+# Parent Tutoring Sessions Endpoint
+# ============================================================================
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def parent_tutoring_sessions(request):
+    """
+    Returns tutoring session data for a parent's children.
+
+    Since the platform uses a structured enrollment/course model, tutoring
+    sessions here are represented as course enrollments with course_type='private'
+    (private 1-on-1 tutor courses). Upcoming = active enrollments, Past = completed.
+
+    Also returns a list of available teachers (tutors) in the parent's org.
+
+    Query params:
+      - child_id  (optional) filter by specific child student profile id
+
+    Response:
+      {
+        "upcoming": [...],
+        "past": [...],
+        "tutors": [...],
+        "stats": { totalTutoring, upcomingCount, confirmedTutors, cancelledBookings, activeTutors }
+      }
+    """
+    try:
+        parent_profile = ParentProfile.objects.select_related("organization").get(user=request.user)
+    except ParentProfile.DoesNotExist:
+        return Response({"detail": "Parent profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    child_id_param = request.GET.get("child_id")
+
+    children_links_qs = (
+        ParentChildLink.objects
+        .filter(parent=parent_profile)
+        .select_related("student__user", "student__current_classroom", "student__organization")
+    )
+    if child_id_param and child_id_param != "all":
+        try:
+            children_links_qs = children_links_qs.filter(student__id=int(child_id_param))
+        except (ValueError, TypeError):
+            pass
+
+    students = [link.student for link in children_links_qs]
+    org = parent_profile.organization
+
+    def _fmt_session_status(enrollment):
+        """Map enrollment status to tutoring session status."""
+        if enrollment.status == Enrollment.Status.ACTIVE:
+            return "confirmed"
+        elif enrollment.status == Enrollment.Status.COMPLETED:
+            return "completed"
+        elif enrollment.status == Enrollment.Status.DROPPED:
+            return "cancelled"
+        return "pending"
+
+    def _payment_status_from_enrollment(enrollment):
+        """Map enrollment/payment state to payment status string."""
+        if enrollment.status == Enrollment.Status.COMPLETED:
+            return "completed"
+        elif enrollment.status == Enrollment.Status.ACTIVE:
+            return "paid"
+        elif enrollment.status == Enrollment.Status.DROPPED:
+            return "refunded"
+        return "pending"
+
+    # Private enrollments only (1-on-1 tutoring courses)
+    from live.models import TutoringBooking
+
+    bookings = (
+        TutoringBooking.objects.filter(
+            student__in=students
+        )
+        .select_related("student__user", "teacher__user", "private_tutoring__course")
+        .order_by("-id")
+    )
+
+    upcoming = []
+    past = []
+
+    for booking in bookings:
+        student = booking.student
+        teacher = booking.teacher
+        private_tutoring = booking.private_tutoring
+        course = private_tutoring.course if private_tutoring else None
+        
+        child_name = student.user.get_full_name() or student.user.email.split("@")[0]
+        tutor_name = (
+            teacher.user.get_full_name() or teacher.user.email.split("@")[0]
+            if teacher else "Tutor"
+        )
+        tutor_avatar = None
+        if teacher and getattr(teacher.user, "avatar", None):
+            try:
+                tutor_avatar = teacher.user.avatar.url
+            except Exception:
+                pass
+
+        session_status = booking.status.lower() # "pending", "confirmed", "completed", "cancelled"
+        
+        # paymentStatus mapping
+        if session_status in ("confirmed", "completed"):
+            payment_status = "paid"
+        elif session_status == "cancelled":
+            payment_status = "refunded"
+        else:
+            payment_status = "pending"
+
+        # Use course subject name if available
+        subject = course.name if course else (private_tutoring.title if private_tutoring else "Private Tutoring")
+        try:
+            if course and hasattr(course, "subject") and course.subject:
+                subject = course.subject.name
+        except Exception:
+            pass
+
+        # Date: use booking created_at or created as proxy
+        created_dt = getattr(booking, "created_at", None) or getattr(booking, "created", None) or timezone.now()
+        date_str = created_dt.strftime("%A, %b %d")
+        time_str = "N/A"
+        
+        duration_mins = booking.duration_hours * 60
+        if booking.price % 1 == 0:
+            cost_str = f"₦{int(booking.price):,}"
+        else:
+            cost_str = f"₦{booking.price:,}"
+        
+        if booking.session_start_time and booking.session_end_time:
+            try:
+                start_str = booking.session_start_time.strftime("%I:%M %p").lstrip('0')
+                end_str = booking.session_end_time.strftime("%I:%M %p").lstrip('0')
+                time_str = f"{start_str} - {end_str}"
+            except Exception:
+                pass
+
+        session_data = {
+            "id": booking.id,
+            "subject": subject,
+            "tutor": tutor_name,
+            "tutorAvatar": tutor_avatar,
+            "child": child_name,
+            "date": date_str,
+            "time": time_str,
+            "duration": duration_mins,
+            "cost": cost_str,
+            "status": session_status,
+            "paymentStatus": payment_status,
+            "notes": booking.notes or (f"Course: {course.name}" if course else ""),
+        }
+
+        if session_status in ("confirmed", "pending"):
+            upcoming.append(session_data)
+        else:
+            past.append({**session_data, "actualDuration": duration_mins if session_status == "completed" else 0})
+
+    # Available tutors — teachers in same org with active offerings
+    from live.models import PrivateTutoring, AvailableDay, TutoringBooking, PrivateTutoringRating
+    from django.db.models import Avg
+
+    private_tutorings = (
+        PrivateTutoring.objects
+        .filter(teacher__organization=org, active=True)
+        .select_related("teacher__user", "course")
+        .prefetch_related("teacher__languages", "teacher__specialties", "available_days")
+    )
+
+    tutors = []
+    if private_tutorings.exists():
+        for pt in private_tutorings:
+            teacher = pt.teacher
+            course = pt.course
+            teacher_name = teacher.user.get_full_name() or teacher.user.email.split("@")[0]
+            avatar_url = None
+            if getattr(teacher.user, "avatar", None):
+                try:
+                    avatar_url = teacher.user.avatar.url
+                except Exception:
+                    pass
+
+            specialties = [s.name for s in teacher.specialties.all()[:4]]
+            languages = [l.language_name for l in teacher.languages.all()[:3]]
+
+            # Availability days mapping
+            day_map = {
+                "monday": "Mon", "tuesday": "Tue", "wednesday": "Wed", "thursday": "Thu",
+                "friday": "Fri", "saturday": "Sat", "sunday": "Sun",
+            }
+            days = list(pt.available_days.values_list("day", flat=True))
+            availability_days = [day_map.get(d, d) for d in days]
+
+            # Calculate average rating
+            rating = (
+                PrivateTutoringRating.objects
+                .filter(
+                    tutoring_booking__private_tutoring=pt,
+                    is_active=True,
+                    tutoring_booking__status=TutoringBooking.Status.COMPLETED,
+                )
+                .aggregate(avg=Avg("rating"))
+            )["avg"] or 4.5
+
+            total_sessions = TutoringBooking.objects.filter(teacher=teacher).count()
+
+            tutors.append({
+                "id": pt.id,
+                "teacherName": teacher_name,
+                "avatar": avatar_url,
+                "course": course.name if course else (specialties[0] if specialties else "General"),
+                "title": pt.title or f"Teacher at {org.name}",
+                "modules": specialties,
+                "rate": f"₦{pt.rate_per_hour}/month",
+                "hoursPerDay": pt.hours_per_day,
+                "availabilityDays": availability_days,
+                "technologies": languages,
+                "specialization": pt.notes or "Specialist educator.",
+                "rating": float(rating),
+                "totalSessions": total_sessions,
+                "verified": True,
+                "premiumTutor": False,
+            })
+    else:
+        # Fallback to returning all teachers in organization as generic tutor profiles
+        teachers_qs = (
+            TeacherProfile.objects
+            .filter(organization=org)
+            .select_related("user")
+            .prefetch_related("specialties", "languages")
+        )
+        for t in teachers_qs:
+            teacher_name = t.user.get_full_name() or t.user.email.split("@")[0]
+            avatar_url = None
+            if getattr(t.user, "avatar", None):
+                try:
+                    avatar_url = t.user.avatar.url
+                except Exception:
+                    pass
+
+            specialties = [s.name for s in t.specialties.all()[:4]]
+            languages = [l.language_name for l in t.languages.all()[:3]]
+
+            # Count courses taught
+            active_courses = Course.objects.filter(teacher=t, is_active=True, course_type="public")
+            course_count = active_courses.count()
+
+            tutors.append({
+                "id": t.id,
+                "teacherName": teacher_name,
+                "avatar": avatar_url,
+                "course": specialties[0] if specialties else "General",
+                "title": t.bio[:80] if t.bio else f"Teacher at {org.name}",
+                "modules": specialties,
+                "rate": "Contact for rate",
+                "hoursPerDay": 0,
+                "availabilityDays": [],
+                "technologies": languages,
+                "specialization": t.bio or "Specialist educator.",
+                "rating": 4.5,
+                "totalSessions": course_count,
+                "verified": True,
+                "premiumTutor": False,
+            })
+
+    stats = {
+        "totalTutoring": len(upcoming) + len(past),
+        "upcomingCount": len(upcoming),
+        "confirmedTutors": len([u for u in upcoming if u["status"] == "confirmed"]),
+        "cancelledBookings": len([p for p in past if p["status"] == "cancelled"]),
+        "activeTutors": len(tutors),
+    }
+
+    return Response({
+        "upcoming": upcoming,
+        "past": past,
+        "tutors": tutors,
+        "stats": stats,
+    }, status=status.HTTP_200_OK)
 
 
 @api_view(["POST"])
@@ -2829,6 +3168,110 @@ def reset_child_password(request):
         {
             "detail": "Password reset successfully.",
             "childName": student_user.get_full_name() or student_user.email,
+        },
+        status=status.HTTP_200_OK
+    )
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def update_child_profile(request):
+    """
+    Update profile details for a child.
+    Expects: { "childId": <student_id>, "fullName": <optional name string>, "dob": <optional YYYY-MM-DD date>, "gender": <optional gender string> }
+    """
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response(
+            {"detail": "Invalid or missing session token."}, 
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    try:
+        parent_profile = ParentProfile.objects.get(user=user)
+    except ParentProfile.DoesNotExist:
+        return Response(
+            {"detail": "Parent profile not found."}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    child_id = request.data.get("childId")
+    if not child_id:
+        return Response(
+            {"detail": "childId is required."}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        child_link = ParentChildLink.objects.select_related(
+            'student', 
+            'student__user'
+        ).get(
+            parent=parent_profile,
+            student__id=child_id
+        )
+    except ParentChildLink.DoesNotExist:
+        return Response(
+            {"detail": "Child not found or not linked to this parent."}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    student = child_link.student
+    student_user = student.user
+
+    # Update Full Name
+    full_name = request.data.get("fullName")
+    if full_name is not None:
+        full_name = full_name.strip()
+        if not full_name:
+            return Response(
+                {"detail": "fullName cannot be empty."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        parts = full_name.split(None, 1)
+        if len(parts) == 1:
+            student_user.first_name = parts[0]
+            student_user.last_name = ""
+        else:
+            student_user.first_name = parts[0]
+            student_user.last_name = parts[1]
+        student_user.save()
+
+    # Update DOB
+    dob = request.data.get("dob")
+    if dob is not None:
+        if dob == "":
+            student.dob = None
+        else:
+            try:
+                from django.utils.dateparse import parse_date
+                parsed_dob = parse_date(dob)
+                if parsed_dob is None:
+                    raise ValueError()
+                student.dob = parsed_dob
+            except ValueError:
+                return Response(
+                    {"detail": "Invalid dob format. Use YYYY-MM-DD."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+    # Update Gender
+    gender = request.data.get("gender")
+    if gender is not None:
+        student.gender = gender.strip()
+
+    student.save()
+
+    return Response(
+        {
+            "detail": "Child profile updated successfully.",
+            "child": {
+                "id": student.id,
+                "name": student_user.get_full_name(),
+                "dob": student.dob.strftime("%Y-%m-%d") if student.dob else None,
+                "gender": student.gender or "",
+            }
         },
         status=status.HTTP_200_OK
     )

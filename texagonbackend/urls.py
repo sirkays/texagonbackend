@@ -38,6 +38,7 @@ urlpatterns = [
     path('api/attendance/', include('attendance.urls')),
     path('konnect/', include('konnect.urls')),
 
+    path('', include('app_updates.urls')),
     path('', include('corefrontend.urls')),
     path('blog/', include('blog.urls')),
     path('projects/', include('projects.urls')),

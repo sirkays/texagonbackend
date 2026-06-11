@@ -12,8 +12,8 @@ class AcademicSessionInline(admin.TabularInline):
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "city", "state", "country", "contact_email", "is_active", "created_at")
-    list_filter = ("is_active", "country", "state")
+    list_display = ("name", "slug", "city", "state", "country", "contact_email", "is_active", "video_conferencing", "created_at")
+    list_filter = ("is_active", "country", "state", "video_conferencing")
     search_fields = ("name", "slug", "city", "state", "country", "contact_email", "contact_phone")
     prepopulated_fields = {"slug": ("name",)}
     inlines = [OrganizationMembershipInline, AcademicSessionInline]

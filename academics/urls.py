@@ -15,6 +15,7 @@ from .report_views import (
     teacher_report_student_data,
     my_reports_list, my_report_detail,
     public_report_info, public_report_verify_student, public_parent_setup,
+    parent_report_by_token,
 )
 
 urlpatterns = [
@@ -78,5 +79,8 @@ urlpatterns = [
     path("api/report/public/<str:token>/", public_report_info, name="public-report-info"),
     path("api/report/public/<str:token>/verify/", public_report_verify_student, name="public-report-verify"),
     path("api/report/public/<str:token>/parent-setup/", public_parent_setup, name="public-parent-setup"),
+
+    # ─── Parent: Report by Share Token ──────────────────────
+    path("api/report/parent/<str:token>/", parent_report_by_token, name="parent-report-by-token"),
 
 ]

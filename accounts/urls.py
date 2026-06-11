@@ -22,6 +22,8 @@ urlpatterns = [
 
     path('api/parent/children/', views.get_children_progress, name='parent-children'),
     path('api/parent/reset-child-password/', views.reset_child_password, name='reset-child-password'),
+    path('api/parent/update-child-profile/', views.update_child_profile, name='update-child-profile'),
+    path('api/parent/tutoring-sessions/', views.parent_tutoring_sessions, name='parent-tutoring-sessions'),
 
 
     ##### ENDPOINT FOR SETTING ADMIN ACCESS

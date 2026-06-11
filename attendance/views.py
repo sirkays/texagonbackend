@@ -82,11 +82,11 @@ def mark_attendance(request):
         session.topic = topic
         session.save(update_fields=["topic"])
 
-    # Validate student IDs against course enrollments
+    # Validate student IDs against active course enrollments
     enrolled_ids = set(
         Enrollment.objects.filter(
             course=course,
-            status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
+            status=Enrollment.Status.ACTIVE,
         ).values_list("student_id", flat=True)
     )
 
@@ -184,7 +184,11 @@ def course_attendance(request, course_id):
                 return Response({"detail": "Invalid end_date."}, status=status.HTTP_400_BAD_REQUEST)
 
     # Prefetch records (optionally filtered by student)
-    records_qs = AttendanceRecord.objects.select_related("student__user")
+    active_students_in_course = Enrollment.objects.filter(
+        course=course,
+        status=Enrollment.Status.ACTIVE
+    ).values_list("student_id", flat=True)
+    records_qs = AttendanceRecord.objects.select_related("student__user").filter(student_id__in=active_students_in_course)
     if student_id:
         records_qs = records_qs.filter(student_id=student_id)
 

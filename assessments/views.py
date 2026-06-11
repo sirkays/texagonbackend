@@ -6,7 +6,8 @@ from collections import defaultdict
 from datetime import datetime, timezone as py_tz
 from decimal import Decimal
 from typing import Any, DefaultDict, Dict, List, Optional
-from gamification.services.engine import log_event 
+from gamification.services.engine import log_event, evaluate_student_gamification
+
 from django.core.paginator import Paginator
 from gamification.models import Streak
 # ===== Django Imports =====
@@ -52,7 +53,7 @@ from accounts.models import User
 from academics.models import StudentProfile, TeacherProfile
 from api.authentication import SessionTokenAuthentication
 from api.models import SessionToken
-from assessments.models import Test, Question, Choice, TestAttempt, TestAnswer
+from assessments.models import Test, Question, Choice, TestAttempt, TestAnswer, HistoricalTestAttempt
 from core.models import StudentDevice
 from core.utils import (
     _get_student_for_user,
@@ -459,9 +460,8 @@ def available_tests(request):
             #                 secure=not settings.DEBUG, max_age=60*60*24*365)
             return resp
 
-        qs = Test.objects.filter(course_id__in=course_ids, start_at__isnull=False, end_at__isnull=False,
+        qs = Test.objects.filter(course_id__in=course_ids,
                                  visibility="published")
-
         if not is_allowed_device:
             qs = qs.filter(require_browser_code=False)
 
@@ -574,6 +574,7 @@ def available_tests(request):
                 "type": _type_from_test(t, q_count),
                 "requiresSubscription": _requires_subscription(t),
                 "course": getattr(getattr(t, "course", None), "name", None),
+                "course_id": t.course_id,
                 "startsAt": getattr(t, "start_at", None).isoformat() if _has_field(Test, "start_at") and getattr(t, "start_at", None) else None,
                 "endsAt": getattr(t, "end_at", None).isoformat() if _has_field(Test, "end_at") and getattr(t, "end_at", None) else None,
                 "items": questions_out if mode == "offline" else [],
@@ -1294,6 +1295,7 @@ def submit_test(request, test_id: int):
 
         if test.course.course_type == "public":
             transaction.on_commit(_log_after_commit)
+            transaction.on_commit(lambda s=student, o=org: evaluate_student_gamification(s, o))
 
         return _build_submission_response(
             attempt,
@@ -1525,6 +1527,7 @@ def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
     # Course/category
     course = getattr(test, "course", None)
     category = getattr(course, "name", "") if course else ""
+    test_category = settings_dict.get("category", "") or "General"
 
     # Duration and totals
     duration_minutes = getattr(test, "duration_minutes", None)
@@ -1549,6 +1552,8 @@ def _serialize_test(test, include_questions: bool = False) -> Dict[str, Any]:
         "totalPoints": total_points,
         "difficulty": difficulty,
         "category": category,
+        "course_name": category,
+        "test_category": test_category,
         "isPublished": is_published,
         "questionsCount": questions_count,
         "course_id":course.id,
@@ -1622,6 +1627,9 @@ def update_test(request, test_id: int):
 
         if "require_browser_code" in data:
             test.require_browser_code = bool(data["require_browser_code"])
+            
+        if "show_score" in data:
+            test.show_score = bool(data["show_score"])
 
         settings_dict = test.settings or {}
         if "difficulty" in data:
@@ -1818,6 +1826,7 @@ def create_test(request):
             duration_minutes=max(1, int(data.get("duration", 30))),
             visibility="draft",
             require_browser_code=bool(data.get("require_browser_code", True)),
+            show_score=bool(data.get("show_score", True)),
             settings={
                 "difficulty": data.get("difficulty", "Medium"),
                 "category": data.get("category", ""),
@@ -1863,7 +1872,7 @@ def fetch_course_students(request):
 
     enrolled_user_ids = Enrollment.objects.filter(
         course_id=course_id,
-        completed_at__isnull=True,
+        status=Enrollment.Status.ACTIVE,
     ).values_list("student_id", flat=True)
 
     qs = StudentProfile.objects.filter(
@@ -1918,6 +1927,12 @@ def delete_test(request, test_id: int):
         except Test.DoesNotExist:
             return Response({"detail": "Test not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
         
+        if test.attempts.exists():
+            return Response(
+                {"detail": "This test cannot be deleted because it has already been attempted by students."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         test.delete()
         
         return Response({
@@ -1954,8 +1969,13 @@ def publish_test(request, test_id: int):
         data = request.data or {}
 
 
-        is_published = data.get("published", data.get("isPublished", True))
-        is_published = bool(is_published)
+        is_published = data.get("published", data.get("isPublished", None))
+        if is_published is None:
+            is_published = True
+        elif isinstance(is_published, str):
+            is_published = is_published.lower() in ("true", "1", "yes", "on")
+        else:
+            is_published = bool(is_published)
                 
         # Validate test has questions before publishing
         if is_published and not test.questions.exists():
@@ -2340,6 +2360,12 @@ def student_performance_summary(request):
         filters = Q(test__course__organization=org)
         if teacher_profile:
             filters &= Q(test__course__teacher=teacher_profile)
+            # Retrieve active student IDs for this teacher
+            active_student_ids = Enrollment.objects.filter(
+                course__teacher=teacher_profile,
+                status=Enrollment.Status.ACTIVE
+            ).values_list("student_id", flat=True).distinct()
+            filters &= Q(student_id__in=active_student_ids)
         if test_id:
             filters &= Q(test_id=test_id)
 
@@ -2348,17 +2374,34 @@ def student_performance_summary(request):
             "test", "test__course", "student", "student__user", "student__current_classroom"
         )
         PASS_MARK = getattr(app_settings, "pass_mark", Decimal("45"))
+        PASS_MARK = float(PASS_MARK) / 100
 
-        PASS_MARK = float(PASS_MARK)/100
         # Aggregates
         total_attempts = attempts.count()
-        avg_score = attempts.aggregate(avg=Coalesce(Avg("score"), Decimal("0"), output_field=DecimalField())).get("avg", Decimal("0"))
-        pass_rate = attempts.filter(score__gte=F("test__total_marks") * Decimal(f"{PASS_MARK}")).count() / max(1, total_attempts) * 100 if total_attempts else 0
-        avg_completion_time = attempts.filter(submitted_at__isnull=False).aggregate(
-            avg=Coalesce(Avg(Extract(F("submitted_at") - F("started_at"), 'epoch') / 60), Value(0.0))
-        ).get("avg", 0)
+        avg_score = attempts.aggregate(
+            avg=Coalesce(Avg("score"), Decimal("0"), output_field=DecimalField())
+        ).get("avg", Decimal("0"))
+        pass_rate = (
+            attempts.filter(
+                score__gte=F("test__total_marks") * Decimal(f"{PASS_MARK}")
+            ).count() / max(1, total_attempts) * 100
+            if total_attempts else 0
+        )
 
-        
+        # Compute average completion time in Python — Extract on DurationField
+        # (datetime subtraction) is not supported by SQLite.
+        timed_attempts = list(
+            attempts.filter(submitted_at__isnull=False, started_at__isnull=False)
+        )
+        if timed_attempts:
+            total_minutes = sum(
+                (a.submitted_at - a.started_at).total_seconds() / 60.0
+                for a in timed_attempts
+            )
+            avg_completion_time = total_minutes / len(timed_attempts)
+        else:
+            avg_completion_time = 0.0
+
         payload = {
             "totalAttempts": total_attempts,
             "averageScore": round(float(avg_score), 2),
@@ -2369,8 +2412,10 @@ def student_performance_summary(request):
 
     except Exception as e:
         traceback.print_exc()
-        return Response({"detail": "Unexpected error", "error": str(e)},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"detail": "Unexpected error", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 
@@ -2505,14 +2550,20 @@ def student_performance_list(request):
         filters = Q(test__course__organization=org)
         if teacher_profile:
             filters &= Q(test__course__teacher=teacher_profile)
+            # Retrieve active student IDs for this teacher
+            active_student_ids = Enrollment.objects.filter(
+                course__teacher=teacher_profile,
+                status=Enrollment.Status.ACTIVE
+            ).values_list("student_id", flat=True).distinct()
+            filters &= Q(student_id__in=active_student_ids)
         if test_id:
             filters &= Q(test_id=test_id)
 
-        # Base queryset
+        # Base queryset — no Extract annotation, SQLite does not support
+        # Extract on DurationField (datetime subtraction). We compute
+        # completion_time in Python per-attempt inside the loop below.
         attempts_qs = TestAttempt.objects.filter(filters).select_related(
             "test", "student", "student__user", "student__current_classroom"
-        ).annotate(
-            completion_time=Extract(F("submitted_at") - F("started_at"), "epoch") / 60.0
         )
 
         if student_filter:
@@ -2525,32 +2576,57 @@ def student_performance_list(request):
         # Total count before slicing
         total = attempts_qs.count()
 
-        # Sort and paginate
-        sort_map = {
+        # Sort and paginate — completionTime sort falls back to submittedAt for
+        # SQLite (we can't annotate the duration); score / submittedAt sort fine.
+        db_sort_map = {
             "score": "score",
-            "completionTime": "completion_time",
+            "completionTime": "submitted_at",   # best proxy available in DB
             "submittedAt": "submitted_at",
         }
-        attempts = attempts_qs.order_by(f"{desc}{sort_map[sort_field]}")[offset:offset + limit]
-        PASS_MARK = getattr(app_settings, "pass_mark", Decimal("45"))
+        attempts = attempts_qs.order_by(
+            f"{desc}{db_sort_map[sort_field]}"
+        )[offset:offset + limit]
 
-        PASS_MARK = float(PASS_MARK)/100
+        PASS_MARK = getattr(app_settings, "pass_mark", Decimal("45"))
+        PASS_MARK = float(PASS_MARK) / 100
+
         performances = []
         for attempt in attempts:
             student = attempt.student
             user = student.user
             name = user.get_full_name() or user.email
-            class_grade = student.current_classroom.name if student.current_classroom else "N/A"
+            class_grade = (
+                student.current_classroom.name
+                if student.current_classroom else "N/A"
+            )
             total_marks = (
                 Question.objects
                 .filter(test=attempt.test)
                 .aggregate(total=Sum("points"))["total"]
                 or Decimal("0")
             )
-            percentage = (attempt.score / total_marks * 100) if total_marks else Decimal("0")
-            completion_time = attempt.completion_time if attempt.submitted_at else 0
-            status = "Passed" if attempt.score >= total_marks * Decimal(f"{PASS_MARK}") else "Failed"
-            submitted_at = attempt.submitted_at.isoformat() if attempt.submitted_at else ""
+            percentage = (
+                attempt.score / total_marks * 100
+                if total_marks else Decimal("0")
+            )
+
+            # Compute completion time in Python (seconds → minutes)
+            if attempt.submitted_at and attempt.started_at:
+                delta = attempt.submitted_at - attempt.started_at
+                completion_time = round(delta.total_seconds() / 60.0)
+            else:
+                completion_time = 0
+
+            # Use a distinct name so we don't shadow the DRF `status` import
+            attempt_status = (
+                "Passed"
+                if attempt.score >= total_marks * Decimal(f"{PASS_MARK}")
+                else "Failed"
+            )
+            submitted_at = (
+                attempt.submitted_at.isoformat()
+                if attempt.submitted_at else ""
+            )
 
             performances.append({
                 "id": str(attempt.id),
@@ -2561,12 +2637,11 @@ def student_performance_list(request):
                 "score": float(attempt.score),
                 "totalMarks": float(total_marks),
                 "percentage": float(percentage),
-                "completionTime": round(completion_time),
-                "status": status,
+                "completionTime": completion_time,
+                "status": attempt_status,
                 "submittedAt": submitted_at,
                 "testId": str(attempt.test.id),
                 "testTitle": attempt.test.title,
-                # "answers": []  # exclude for list; fetch in detail if needed
             })
 
         return Response({
@@ -2581,8 +2656,55 @@ def student_performance_list(request):
 
     except Exception as e:
         traceback.print_exc()
-        return Response({"detail": "Unexpected error", "error": str(e)},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"detail": "Unexpected error", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+@transaction.atomic
+def delete_test_attempt(request, attempt_id: int):
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            attempt = TestAttempt.objects.select_related("test", "student__user").get(id=attempt_id)
+        except TestAttempt.DoesNotExist:
+            return Response({"detail": "Test attempt not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if teacher has access to this attempt's test
+        if attempt.test.course.teacher != teacher:
+            return Response({"detail": "Access denied. This attempt does not belong to your course."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Create Historical record
+        HistoricalTestAttempt.objects.create(
+            test_title=attempt.test.title,
+            student_name=f"{attempt.student.user.first_name} {attempt.student.user.last_name}",
+            student_email=attempt.student.user.email,
+            original_attempt_id=attempt.id,
+            score=attempt.score,
+            started_at=attempt.started_at,
+            submitted_at=attempt.submitted_at,
+            deleted_by=user
+        )
+
+        # Delete the attempt
+        attempt.delete()
+
+        return Response({"message": "Test attempt deleted successfully and archived."}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response(
+            {"detail": "Unexpected error", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 @api_view(["GET"])
@@ -2851,10 +2973,20 @@ def teacher_module_analytics(request):
         total_count = base_qs.count()
         total_pages = math.ceil(total_count / page_size) if page_size else 1
 
+        # Identify active student IDs: students with at least one active enrollment under this teacher
+        active_student_ids = Enrollment.objects.filter(
+            course__teacher=teacher,
+            status=Enrollment.Status.ACTIVE
+        ).values_list("student_id", flat=True).distinct()
+
         # --- subqueries: per-module course enrollments & avg completion ---
         enroll_qs = (
             Enrollment.objects
-            .filter(course=OuterRef("course"), status=Enrollment.Status.ACTIVE)
+            .filter(
+                course=OuterRef("course"),
+                status=Enrollment.Status.ACTIVE,
+                student_id__in=active_student_ids
+            )
             .values("course")
             .annotate(c=Count("id"))
             .values("c")
@@ -2863,7 +2995,8 @@ def teacher_module_analytics(request):
             Enrollment.objects
             .filter(
                 course=OuterRef("course"),
-                status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED]
+                status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
+                student_id__in=active_student_ids
             )
             .values("course")
             .annotate(a=Avg("progress_pct"))
@@ -2895,7 +3028,11 @@ def teacher_module_analytics(request):
         if course_ids_in_page:
             per_course_enrollments = (
                 Enrollment.objects
-                .filter(course_id__in=course_ids_in_page, status=Enrollment.Status.ACTIVE)
+                .filter(
+                    course_id__in=course_ids_in_page,
+                    status=Enrollment.Status.ACTIVE,
+                    student_id__in=active_student_ids
+                )
                 .values("course_id")
                 .annotate(c=Count("id"))
             )
@@ -2905,6 +3042,7 @@ def teacher_module_analytics(request):
                 .filter(
                     course_id__in=course_ids_in_page,
                     status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
+                    student_id__in=active_student_ids
                 )
                 .aggregate(avg=Avg("progress_pct"))["avg"] or 0.0
             )

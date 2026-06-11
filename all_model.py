@@ -141,6 +141,16 @@ from core.storage_backends import lesson_file_storage, dynamic_storage
 from store.models import Review, Category, Product, ProductImage
 from .models import CodeSnippet, CodeSubmission, CodeComment, CodeFile, Folder
 from django.db.models.functions import Lower, Trim
+from assessments.models import (
+    Test,
+    Question,
+    Choice,
+    TestAttempt,
+    Assignment,
+    Submission,
+    SubmissionComment,
+)
+from .models import CodeSnippet, CodeProject, ProjectFile, CodeComment, CodeFile, Folder
 
 
 # --- Model classes collected from project ---
@@ -220,22 +230,32 @@ class StudentProfile(TimeStampedModel):
     def check_session_data(self, request, _retry=False):
         from billing.models import UserAccountSubscription
 
+        # ── Fast path: active subscription in DB ──────────────────────────
         if UserAccountSubscription.has_subscription(self.user, self.organization):
             return True
 
+        # ── Session-cache path (only valid for cookie-session requests) ───
+        # For token-authenticated API requests the Django session is always
+        # empty, so skip the cache entirely and rely solely on the DB check.
         session_key = "allowed_courses_cache"
+        session = getattr(request, "session", None)
+
+        # If the session backend hasn't been initialised (token auth),
+        # treat the student as not-allowed (subscription check already failed above).
+        if session is None or not hasattr(session, "get"):
+            return False
 
         # Load cache (populate if missing)
-        cached_data = request.session.get(session_key)
+        cached_data = session.get(session_key)
         if cached_data is None:
             self.get_course_allowed(request)
-            cached_data = request.session.get(session_key)
+            cached_data = session.get(session_key)
 
         if not cached_data:
             return False
 
         cached_date = cached_data.get("general_activation_date")
-        date_cached_str = cached_data.get("date_cached")  # e.g. "2026-01-20T12:34:56Z" or similar
+        date_cached_str = cached_data.get("date_cached")
 
         # If either is missing, treat as invalid
         if not (cached_date and date_cached_str):
@@ -243,26 +263,21 @@ class StudentProfile(TimeStampedModel):
 
         # Parse date_cached (prefer ISO-8601)
         try:
-            # If you store it as ISO 8601, Django can parse it nicely:
-            # from django.utils.dateparse import parse_datetime
             from django.utils.dateparse import parse_datetime
             date_cached_dt = parse_datetime(date_cached_str)
 
-            # If it parsed but is naive, make it aware in current timezone
             if date_cached_dt is None:
                 raise ValueError("Could not parse date_cached")
             if timezone.is_naive(date_cached_dt):
                 date_cached_dt = timezone.make_aware(date_cached_dt, timezone.get_current_timezone())
 
         except Exception:
-            # If parsing fails, invalidate cache
-            request.session.pop(session_key, None)
+            session.pop(session_key, None)
             return False
 
         # Expire after 1 hour
         if timezone.now() - date_cached_dt > timedelta(hours=1):
-            # delete and re-run ONCE (second call is the last)
-            request.session.pop(session_key, None)
+            session.pop(session_key, None)
             if _retry:
                 return False
             return self.check_session_data(request, _retry=True)
@@ -357,6 +372,10 @@ class TeacherProfile(TimeStampedModel):
     languages = models.ManyToManyField(Language, blank=True)
     specialties = models.ManyToManyField(Subject, blank=True)
 
+    # Tracks whether the teacher has completed the dashboard onboarding tour.
+    # Stored server-side so it persists across devices, browsers, and logout/login cycles.
+    has_seen_onboarding = models.JSONField(default=dict, blank=True, null=True)
+
     def __str__(self):
         return f"Teacher: {self.user.get_full_name() or self.user.username} Email: {self.user.email}"
 
@@ -379,7 +398,7 @@ class ParentProfile(TimeStampedModel):
 
     # use TimeStampedModel.created_at (no new field needed)
     last_billed_at = models.DateTimeField(null=True, blank=True)
-
+    has_seen_onboarding = models.JSONField(default=dict, blank=True)
     def __str__(self):
         return f"Parent: {self.user.get_full_name() or self.user.username}"
 
@@ -770,6 +789,184 @@ class OrganizationCertificateSignatures(models.Model):
 
 
 
+class TeacherReport(TimeStampedModel):
+    """
+    A report created by a teacher summarising student activities,
+    CBT results, coding projects, and class activities.
+    """
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        PUBLISHED = "published", "Published"
+
+    class RecipientMode(models.TextChoices):
+        SELECTED = "selected", "Selected Students"
+        COURSE = "course", "All in Course"
+        CLASSROOM = "classroom", "All in Classroom"
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="teacher_reports",
+    )
+    teacher = models.ForeignKey(
+        "academics.TeacherProfile",
+        on_delete=models.CASCADE,
+        related_name="created_reports",
+    )
+    course = models.ForeignKey(
+        "learning.Course",
+        on_delete=models.CASCADE,
+        related_name="teacher_reports",
+    )
+
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, help_text="Teacher notes / description")
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.DRAFT
+    )
+    recipient_mode = models.CharField(
+        max_length=16, choices=RecipientMode.choices, default=RecipientMode.SELECTED,
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    # Public share link token (for parent onboarding)
+    share_token = models.CharField(max_length=64, unique=True, db_index=True, editable=False)
+
+    # Optional: date range the report covers
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["organization", "teacher", "status"]),
+            models.Index(fields=["course", "status"]),
+        ]
+
+    def __str__(self):
+        return f"[Report] {self.title} by {self.teacher} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        if not self.share_token:
+            self.share_token = secrets.token_urlsafe(32)[:48]
+        super().save(*args, **kwargs)
+
+
+
+class ReportCBTItem(TimeStampedModel):
+    """A CBT test included in a report, with a snapshot of the student's score."""
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="cbt_items",
+    )
+    test = models.ForeignKey(
+        "assessments.Test", on_delete=models.CASCADE, related_name="+",
+    )
+    # Snapshot fields so report remains stable even if test data changes
+    test_title = models.CharField(max_length=255, blank=True)
+    total_marks = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+
+    class Meta:
+        unique_together = ("report", "test")
+        ordering = ["created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.test_title and self.test_id:
+            self.test_title = self.test.title
+        if not self.total_marks and self.test_id:
+            self.total_marks = self.test.total_marks
+        super().save(*args, **kwargs)
+
+
+
+class ReportCodingItem(TimeStampedModel):
+    """A coding project submission included in a report."""
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="coding_items",
+    )
+    lesson = models.ForeignKey(
+        "learning.Lesson", on_delete=models.CASCADE, related_name="+",
+    )
+    # Snapshot
+    lesson_title = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        unique_together = ("report", "lesson")
+        ordering = ["created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.lesson_title and self.lesson_id:
+            self.lesson_title = self.lesson.name
+        super().save(*args, **kwargs)
+
+
+
+class ReportActivity(TimeStampedModel):
+    """Custom class activity added by the teacher."""
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="activities",
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    activity_date = models.DateField(null=True, blank=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "activity_date"]
+
+
+
+class ReportVideo(TimeStampedModel):
+    """Video attachment on a report (uploaded file or external URL)."""
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="videos",
+    )
+    title = models.CharField(max_length=255, blank=True)
+    video_file = models.FileField(
+        upload_to=report_video_upload_to, max_length=512,
+        null=True, blank=True,
+    )
+    video_url = models.URLField(blank=True, help_text="External video URL (YouTube, etc.)")
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"[ReportVideo] {self.title or self.video_url}"
+
+
+
+class ReportRecipient(TimeStampedModel):
+    """
+    Tracks which students received this report and per-student score snapshots.
+    """
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="recipients",
+    )
+    student = models.ForeignKey(
+        StudentProfile, on_delete=models.CASCADE, related_name="received_reports",
+    )
+    # Per-student CBT scores snapshot: { test_id: { score, total } }
+    cbt_scores = models.JSONField(default=dict, blank=True)
+    # Per-student coding scores snapshot: { lesson_id: { score, feedback, project_title } }
+    coding_scores = models.JSONField(default=dict, blank=True)
+    # Overall teacher remark for this specific student
+    teacher_remark = models.TextField(blank=True)
+    # Whether parent has viewed this report
+    parent_viewed = models.BooleanField(default=False)
+    parent_viewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("report", "student")
+        ordering = ["student__user__first_name"]
+        indexes = [
+            models.Index(fields=["student", "report"]),
+        ]
+
+    def __str__(self):
+        return f"[Recipient] student={self.student_id} report={self.report_id}"
+
+
+
 class UserManager(BaseUserManager):
     use_in_migrations = True
 
@@ -841,7 +1038,6 @@ class AdminAccess(models.Model):
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
-        limit_choices_to=Q(is_staff=True) | Q(is_superuser=True),
     )
     organizations = models.ManyToManyField("orgs.Organization", blank=True)
     selected_organization = models.ForeignKey(
@@ -855,9 +1051,16 @@ class AdminAccess(models.Model):
     super_user = models.BooleanField(default=False)
 
     def clean(self):
-        if self.user and not (self.user.is_staff or self.user.is_superuser):
+        from orgs.models import OrganizationMembership
+        if self.user and not (
+            self.user.is_staff
+            or self.user.is_superuser
+            or OrganizationMembership.objects.filter(
+                user=self.user, role="teacher"
+            ).exists()
+        ):
             raise ValidationError({
-                "user": "AdminAccess can only be granted to staff or superusers."
+                "user": "AdminAccess can only be granted to staff, superusers, or teachers."
             })
 
     def save(self, *args, **kwargs):
@@ -942,6 +1145,336 @@ class EmailChangeRequest(models.Model):
 
     def is_valid(self) -> bool:
         return (not self.used) and (self.expires_at >= timezone.now())
+
+
+
+class StudentProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="students", blank=True, null=True)
+    current_classroom = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True)
+    
+    # Keeping unique=True is highly recommended if you enforce uniqueness
+    admission_no = models.CharField(max_length=64, blank=True, null=True) 
+    dob = models.DateField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        # Only generate if admission_no is empty AND an organization is attached
+        if not self.admission_no and self.organization:
+            
+            org_year = self.organization.year
+            # Custom alphabet: Numbers + Uppercase letters (removed lookalikes like 0, O, I, 1 for clarity if desired, but here is a standard alphanumeric mix)
+            alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' 
+            
+            while True:
+                # Generate a 6-character random string
+                unique_str = generate(alphabet, 6)
+                
+                # Format: e.g., 2026/A4K9X2
+                new_admission_no = f"{org_year}/{unique_str}"
+                
+                # Check for collisions; break the loop if unique
+                if not StudentProfile.objects.filter(admission_no=new_admission_no).exists():
+                    self.admission_no = new_admission_no
+                    break
+
+        # Call the parent class's save method
+        super().save(*args, **kwargs)
+
+
+    def __str__(self):
+        return f"Student: {self.user.get_full_name() or self.user.username}"
+
+
+
+    def check_session_data(self, request, _retry=False):
+        from billing.models import UserAccountSubscription
+
+        if UserAccountSubscription.has_subscription(self.user, self.organization):
+            return True
+
+        session_key = "allowed_courses_cache"
+
+        # Load cache (populate if missing)
+        cached_data = request.session.get(session_key)
+        if cached_data is None:
+            self.get_course_allowed(request)
+            cached_data = request.session.get(session_key)
+
+        if not cached_data:
+            return False
+
+        cached_date = cached_data.get("general_activation_date")
+        date_cached_str = cached_data.get("date_cached")  # e.g. "2026-01-20T12:34:56Z" or similar
+
+        # If either is missing, treat as invalid
+        if not (cached_date and date_cached_str):
+            return False
+
+        # Parse date_cached (prefer ISO-8601)
+        try:
+            # If you store it as ISO 8601, Django can parse it nicely:
+            # from django.utils.dateparse import parse_datetime
+            from django.utils.dateparse import parse_datetime
+            date_cached_dt = parse_datetime(date_cached_str)
+
+            # If it parsed but is naive, make it aware in current timezone
+            if date_cached_dt is None:
+                raise ValueError("Could not parse date_cached")
+            if timezone.is_naive(date_cached_dt):
+                date_cached_dt = timezone.make_aware(date_cached_dt, timezone.get_current_timezone())
+
+        except Exception:
+            # If parsing fails, invalidate cache
+            request.session.pop(session_key, None)
+            return False
+
+        # Expire after 1 hour
+        if timezone.now() - date_cached_dt > timedelta(hours=1):
+            # delete and re-run ONCE (second call is the last)
+            request.session.pop(session_key, None)
+            if _retry:
+                return False
+            return self.check_session_data(request, _retry=True)
+
+        return True
+
+
+
+    def get_course_allowed(self, request, **kwargs):
+        from core.utils import resolve_season
+        from billing.models import UserAccountSubscription
+
+        is_session = kwargs.get("is_session", False)
+        is_general_activation = kwargs.get("is_general_activation", False)
+
+        now = timezone.now()
+        session_key = "allowed_courses_cache"
+
+        # 1️⃣ Check session cache
+        cached_data = request.session.get(session_key)
+
+        course_ids = []
+        cached_date = None
+        returned_count = 0
+
+        # 2️⃣ User has active subscription or unrestricted access
+        if (
+            UserAccountSubscription.has_subscription(self.user, self.organization)
+        ):
+            returned_count = 1
+            return True, returned_count
+
+        # 3️⃣ Use cached data if still valid
+        if cached_data:
+            cached_date = cached_data.get("general_activation_date")
+            course_ids = cached_data.get("course_ids", [])
+
+            if isinstance(cached_date, str):
+                cached_date = parse_datetime(cached_date)
+
+            if cached_date and cached_date > now:
+                if is_session:
+                    returned_count = 2
+                    return (course_ids, cached_date), returned_count
+                return self.enrollments.filter(course_id__in=course_ids)
+
+        # 4️⃣ Compute fresh queryset
+        leaderboard_season = resolve_season(self.organization, now)
+
+        queryset = self.enrollments.filter(
+            leaderboard_season=leaderboard_season,
+            course__course_type="public",
+            completed_at__isnull=True,
+            status="active",
+            course__general_activation_date__isnull=False,
+        )
+
+        if is_general_activation:
+            queryset = queryset.filter(course__general_activation=True)
+
+        # 5️⃣ Extract course IDs and latest activation date
+        course_ids = list(queryset.values_list("course_id", flat=True))
+
+        max_activation_date = queryset.aggregate(
+            Max("course__general_activation_date")
+        )["course__general_activation_date__max"]
+
+        # 6️⃣ Cache safely (serialize datetime)
+        if max_activation_date:
+            request.session[session_key] = {
+                "course_ids": course_ids,
+                "general_activation_date": max_activation_date.isoformat(),
+                "date_cached":timezone.now().isoformat(),
+            }
+
+            #print(request.session.get("allowed_courses_cache"))
+
+        # 7️⃣ Return based on mode
+        if is_session:
+            returned_count = 2
+            return (course_ids, max_activation_date), returned_count
+
+        return queryset
+
+
+
+class TeacherProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="teachers")
+    bio = models.TextField(blank=True)
+    experience = models.PositiveIntegerField(default=0)
+    languages = models.ManyToManyField(Language, blank=True)
+    specialties = models.ManyToManyField(Subject, blank=True)
+
+    def __str__(self):
+        return f"Teacher: {self.user.get_full_name() or self.user.username} Email: {self.user.email}"
+
+
+
+class ParentProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="parent_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="parents",
+    blank=True, null=True)
+    organization_subscription = models.ForeignKey(
+        OrganizationSubscription,
+        on_delete=models.CASCADE,
+        related_name="parent_subs",
+        blank=True,
+        null=True,
+    )
+    user_subscription = models.ForeignKey("billing.UserAccountSubscription", on_delete=models.CASCADE, related_name="parent_subs",
+    blank=True, null=True)
+    address = models.TextField(blank=True)
+
+    # use TimeStampedModel.created_at (no new field needed)
+    last_billed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Parent: {self.user.get_full_name() or self.user.username}"
+
+    def _billing_period_days(self):
+        """Return billing period in days (int). default to 30 if parsing fails."""
+        plan = getattr(self.organization_subscription, "plan", None)
+        if not plan:
+            return 30
+        try:
+            return int(plan.billing_period)
+        except Exception:
+            return 30
+
+    def _invoice_number_for(self, issued_at):
+        """Generate a unique invoice number — change format if desired."""
+        ts = int(time.time())
+        token = secrets.token_hex(4)
+        sub_id = self.organization_subscription.id if self.organization_subscription else "none"
+        return f"PINV-{sub_id}-{self.id}-{ts}-{token}"
+
+    def generate_subscription_invoices(self, now=None):
+        now = now or timezone.now()
+
+        subscription = self.organization_subscription
+        if not subscription:
+            return []
+
+        if subscription.status != OrganizationSubscription.Status.ACTIVE:
+            return []
+
+        plan = subscription.plan
+        billing_days = self._billing_period_days()
+
+        if self.last_billed_at:
+            next_due = self.last_billed_at + timedelta(days=billing_days)
+        else:
+            next_due = getattr(self, "created_at", None) or now
+
+        if timezone.is_naive(next_due):
+            next_due = timezone.make_aware(next_due)
+
+        created_invoices = []
+        max_iterations = 24
+        iterations = 0
+        
+        """
+        sub_end_datetime = None
+        if subscription.end_date:
+            sub_end_datetime = timezone.make_aware(
+                datetime.datetime.combine(subscription.end_date, datetime.time.max)
+            )
+
+        """
+        # Prepare/get parent membership once (we'll attach it to all created invoices)
+        # Option: create membership automatically if not present.
+        membership, _ = OrganizationMembership.objects.get_or_create(
+            user=self.user,
+            organization=self.organization,
+            role=OrganizationMembership.Role.PARENT,
+            defaults={"is_active": True}
+        )
+        # Note: get_or_create honors the unique_together ("user","organization","role")
+        while iterations < max_iterations and next_due <= now:
+            #if sub_end_datetime and next_due > sub_end_datetime:
+                #break
+
+            issued_at = next_due
+            amount = Decimal(getattr(plan, "price", 0) or 0)
+
+            inv = SubscriptionInvoice(
+                organization_membership=membership,   # attach parent membership
+                subscription=subscription,
+                number=self._invoice_number_for(issued_at),
+                amount=amount,
+                currency=getattr(subscription, "currency", "NGN") if hasattr(subscription, "currency") else "NGN",
+                issued_at=issued_at,
+                due_at=issued_at + timedelta(days=billing_days),
+                status=SubscriptionInvoice.Status.ACTIVE,
+                meta={"generated_for": "parent_profile", "parent_profile_id": self.id},
+            )
+
+            with transaction.atomic():
+                inv.save()                    # validation will now accept parent role
+                created_invoices.append(inv)
+                self.last_billed_at = issued_at
+                self.save(update_fields=["last_billed_at"])
+
+            next_due = next_due + timedelta(days=billing_days)
+            iterations += 1
+
+        return created_invoices
+
+
+
+class AdminAccess(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        limit_choices_to=Q(is_staff=True) | Q(is_superuser=True),
+    )
+    organizations = models.ManyToManyField("orgs.Organization", blank=True)
+    selected_organization = models.ForeignKey(
+        "orgs.Organization",
+        related_name="adminaccess_all",
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+    )
+    active = models.BooleanField(default=True)
+    super_user = models.BooleanField(default=False)
+
+    def clean(self):
+        if self.user and not (self.user.is_staff or self.user.is_superuser):
+            raise ValidationError({
+                "user": "AdminAccess can only be granted to staff or superusers."
+            })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def user_has_admin_access(cls, user):
+        if not user or not user.is_authenticated:
+            return False
+        return cls.objects.filter(user=user, active=True).exists()
 
 
 
@@ -7375,6 +7908,606 @@ class TeacherCodeSubmissionDetailSerializer(serializers.ModelSerializer):
 
 
 
+class PrivateTutoring(TimeStampedModel):
+    title = models.CharField(max_length=250, default="My Private Tutoring")
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="private_tutoring")
+    course = models.ForeignKey("learning.Course", on_delete=models.PROTECT, related_name="private_tutoring")
+    rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
+    tutoring_duration_days = models.PositiveIntegerField(default=24) # NUMBER OF DAYS THE TUTORING WILL LAST
+    hours_per_day = models.FloatField(default=2.0)
+    notes = models.CharField(max_length=225)
+    active = models.BooleanField(default=True)
+
+
+
+class TutoringBooking(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONFIRMED = "confirmed", "Confirmed"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+    private_tutoring = models.ForeignKey(PrivateTutoring, on_delete=models.CASCADE, related_name="tutoring_bookings",
+    blank=True, null=True)
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
+    duration_hours = models.PositiveIntegerField(default=2)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    notes = models.TextField(blank=True)
+    completed_date = models.DateTimeField(blank=True, null=True)
+    # Daily lesson time range chosen by parent (e.g. 15:00 – 17:00)
+    session_start_time = models.TimeField(blank=True, null=True)
+    session_end_time = models.TimeField(blank=True, null=True)
+
+
+
+class SubmissionSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField(read_only=True)
+
+    def get_student_name(self, obj):
+        try:
+            user = obj.student.user
+            full = f"{user.first_name} {user.last_name}".strip()
+            return full or user.email
+        except Exception:
+            return str(obj.student_id)
+
+    class Meta:
+        model = Submission
+        fields = "__all__"
+
+
+
+class PrivateTutoringSerializer(serializers.ModelSerializer):
+    available_days = AvailableDaySerializer(many=True, required=False)
+    courseName = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PrivateTutoring
+        fields = '__all__'
+
+    def get_courseName(self, obj):
+        return obj.course.name if obj.course else ''
+
+    def create(self, validated_data):
+        days_data = validated_data.pop('available_days', [])
+        pt = PrivateTutoring.objects.create(**validated_data)
+        for day_data in days_data:
+            AvailableDay.objects.create(private_tutoring=pt, **day_data)
+        return pt
+
+    def update(self, instance, validated_data):
+        days_data = validated_data.pop('available_days', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if days_data is not None:
+            instance.available_days.all().delete()
+            for day_data in days_data:
+                AvailableDay.objects.create(private_tutoring=instance, **day_data)
+        return instance
+
+
+
+class Test(TimeStampedModel):
+    class Visibility(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        PUBLISHED = "published", "Published"
+        CLOSED = "closed", "Closed"
+
+    # ✅ NEW
+    class Mode(models.TextChoices):
+        ONLINE = "online", "Online"
+        OFFLINE = "offline", "Offline"
+
+    course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="tests")
+    title = models.CharField(max_length=255)
+    duration_minutes = models.PositiveIntegerField(default=30)
+    total_marks = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    visibility = models.CharField(max_length=16, choices=Visibility.choices, default=Visibility.DRAFT)
+
+    # ✅ NEW (teacher sets this)
+    mode = models.CharField(max_length=16, choices=Mode.choices, default=Mode.ONLINE, db_index=True)
+
+    instructions = models.TextField(blank=True)
+    start_at = models.DateTimeField(null=True, blank=True)
+    end_at = models.DateTimeField(null=True, blank=True)
+    settings = models.JSONField(default=dict, blank=True)
+    excluded_users = models.ManyToManyField("academics.StudentProfile",blank=True)
+    require_browser_code = models.BooleanField(default=True)
+    academic_session = models.ForeignKey(
+        "orgs.AcademicSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tests"
+    )
+
+    def __str__(self):
+        return self.title
+
+
+    def update_total_marks(self):
+        total = self.questions.aggregate(
+            total=Sum("points")
+        )["total"] or 0
+        self.total_marks = total
+        self.save(update_fields=["total_marks"])
+
+
+
+class TestAttempt(TimeStampedModel):
+    test = models.ForeignKey(Test, on_delete=models.CASCADE, related_name="attempts")
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="test_attempts")
+    started_at = models.DateTimeField(default=timezone.now)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    score = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    status = models.CharField(max_length=16, default="in_progress")  # in_progress, submitted, graded
+    client_submission_id = models.UUIDField(null=True, blank=True, db_index=True)
+    auto_submitted = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ("test", "student", "started_at")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student", "client_submission_id"],
+                condition=models.Q(client_submission_id__isnull=False),
+                name="uniq_student_client_submission_id",
+            ),
+        ]
+
+
+
+class Assignment(TimeStampedModel):
+    course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="assignments")
+    lesson = models.ForeignKey("learning.Lesson", on_delete=models.SET_NULL, null=True, blank=True, related_name="assignments")
+    academic_session = models.ForeignKey(
+        "orgs.AcademicSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assignments"
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    due_at = models.DateTimeField(null=True, blank=True)
+    attachments = models.JSONField(default=list, blank=True)
+
+
+
+class Submission(TimeStampedModel):
+    assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, related_name="submissions")
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="submissions")
+    text = models.TextField(blank=True)
+    file = models.FileField(upload_to="assignments/submissions/", blank=True, null=True)
+    attachments = models.JSONField(default=list, blank=True)
+    submitted_at = models.DateTimeField(default=timezone.now)
+    score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    feedback = models.TextField(blank=True)
+
+    class Meta:
+        unique_together = ("assignment", "student")
+
+
+
+class SubmissionComment(TimeStampedModel):
+    submission = models.ForeignKey(Submission, on_delete=models.CASCADE, related_name="comments")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="submission_comments")
+    text = models.TextField()
+
+
+
+class TestMiniSerializer(serializers.ModelSerializer):
+    # No need for 'source' here; DRF automatically maps course_id
+    course_id = serializers.IntegerField(read_only=True)
+    course_name = serializers.CharField(source="course.name", read_only=True)
+
+    class Meta:
+        model = Test
+        fields = [
+            "id",
+            "title",
+            "duration_minutes",
+            "total_marks",
+            "visibility",
+            "start_at",
+            "end_at",
+            "course_id",
+            "course_name",
+            "require_browser_code",
+        ]
+        read_only_fields = fields
+
+
+
+class TestAttemptSerializer(serializers.ModelSerializer):
+    # Compact info about the test (read-only)
+    test = TestMiniSerializer(read_only=True)
+
+    # Also expose test_id directly for convenience
+    test_id = serializers.IntegerField(source="test.id", read_only=True)
+
+    # Useful computed flags/fields
+    is_submitted = serializers.SerializerMethodField()
+    is_graded = serializers.SerializerMethodField()
+    is_open_now = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TestAttempt
+        fields = [
+            "id",
+            "test_id",
+            "test",
+            "student",        # will render the student id; mark write-only if you never want to expose it
+            "started_at",
+            "submitted_at",
+            "score",
+            "status",
+            "is_submitted",
+            "is_graded",
+            "is_open_now",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "test_id",
+            "test",
+            "student",
+            "started_at",
+            "submitted_at",
+            "score",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_is_submitted(self, obj):
+        return bool(obj.submitted_at) or obj.status in {"submitted", "graded"}
+
+    def get_is_graded(self, obj):
+        return obj.status == "graded"
+
+    def get_is_open_now(self, obj):
+        """
+        Mirrors the filter used in the endpoint:
+        (start_at is null or <= now) AND (end_at is null or >= now)
+        """
+        now = timezone.now()
+        t = obj.test
+        start_ok = (t.start_at is None) or (t.start_at <= now)
+        end_ok = (t.end_at is None) or (t.end_at >= now)
+        return start_ok and end_ok
+
+
+
+class AttendanceSession(TimeStampedModel):
+    course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="attendance_sessions")
+    academic_session = models.ForeignKey(
+        "orgs.AcademicSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="attendance_sessions"
+    )
+    date = models.DateField()
+    topic = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        unique_together = ("course", "date")
+        ordering = ["-date"]
+
+
+
+class CodeProject(TimeStampedModel):
+    """
+    A submitted project bundle from a student for a lesson.
+
+    One CodeProject = one 'Submit' action containing one or more files.
+    The teacher grades the project as a whole (score, feedback) and can
+    provide per-file corrections via ProjectFile.correction_code.
+    """
+    class Status(models.TextChoices):
+        SUBMITTED = "submitted", "Submitted"
+        GRADED = "graded", "Graded"
+        REVISED = "revised", "Revised"
+
+    title = models.CharField(max_length=255)
+    student = models.ForeignKey(
+        StudentProfile, on_delete=models.CASCADE, related_name="code_projects",
+    )
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="code_projects",
+    )
+
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.SUBMITTED,
+    )
+
+    # Grading (project-level)
+    score = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+    )
+    feedback = models.TextField(blank=True)
+    graded_by = models.ForeignKey(
+        TeacherProfile, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="graded_projects",
+    )
+    graded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["lesson", "student"]),
+            models.Index(fields=["student", "status"]),
+        ]
+
+    def __str__(self):
+        return f"[Project] {self.title} lesson={self.lesson_id} student={self.student_id}"
+
+
+
+class ProjectFile(TimeStampedModel):
+    """
+    A single file within a submitted project.
+
+    `path` preserves the student's folder structure relative to the
+    project root, e.g. "logins/login.html" or "jean.css".
+
+    Text files (HTML, CSS, JS, Python, …) store content in `code_text`.
+    Binary files (images, PDFs, …) use the `binary_file` FileField.
+    """
+    LANG_CHOICES = [
+        ("javascript", "javascript"),
+        ("python", "python"),
+        ("html", "html"),
+        ("css", "css"),
+        ("java", "java"),
+        ("cpp", "cpp"),
+        ("other", "other"),
+    ]
+
+    project = models.ForeignKey(
+        CodeProject, on_delete=models.CASCADE, related_name="files",
+    )
+    path = models.CharField(
+        max_length=512,
+        help_text="Relative path within the project, e.g. 'logins/login.html'",
+    )
+    language = models.CharField(max_length=64, choices=LANG_CHOICES, default="html")
+
+    # Text content (for code / markup files)
+    code_text = models.TextField(blank=True, default="")
+
+    # Binary content (for images, PDFs, etc.)
+    is_binary = models.BooleanField(default=False)
+    binary_file = models.FileField(
+        upload_to=projectfile_upload_to, max_length=512,
+        null=True, blank=True,
+    )
+    content_type = models.CharField(max_length=127, blank=True, default="")
+    size_bytes = models.BigIntegerField(default=0)
+
+    # Teacher correction for this specific file
+    correction_code = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["path"]
+        indexes = [
+            models.Index(fields=["project", "language"]),
+        ]
+
+    def __str__(self):
+        return f"[ProjectFile] {self.path} (project={self.project_id})"
+
+
+
+class CodeComment(TimeStampedModel):
+    """
+    Threaded discussion on a project. Both student and teacher can post.
+    """
+    project = models.ForeignKey(
+        CodeProject, on_delete=models.CASCADE, related_name="comments",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="code_comments",
+    )
+    author_role = models.CharField(
+        max_length=16,
+        choices=[("student", "Student"), ("teacher", "Teacher")],
+    )
+    message = models.TextField()
+
+    class Meta:
+        ordering = ["created_at"]
+
+
+
+class FolderSerializer(serializers.ModelSerializer):
+    path = serializers.CharField(read_only=True)
+    snippet_count = serializers.SerializerMethodField()
+    file_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Folder
+        fields = [
+            "id", "name", "parent", "path",
+            "snippet_count", "file_count",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "path", "snippet_count", "file_count", "created_at", "updated_at"]
+
+    def get_snippet_count(self, obj):
+        if hasattr(obj, "_prefetched_snippets_count"):
+            return obj._prefetched_snippets_count
+        return obj.snippets.count()
+
+    def get_file_count(self, obj):
+        if hasattr(obj, "_prefetched_files_count"):
+            return obj._prefetched_files_count
+        return obj.files.count()
+
+    def validate_name(self, value):
+        v = (value or "").strip()
+        if not v:
+            raise serializers.ValidationError("Folder name is required.")
+        if "/" in v or "\\" in v:
+            raise serializers.ValidationError("Folder name cannot contain '/' or '\\'.")
+        if len(v) > 128:
+            raise serializers.ValidationError("Folder name too long.")
+        return v
+
+
+
+class CodeProjectListSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    lesson_title = serializers.CharField(source="lesson.name", read_only=True)
+    course_name = serializers.SerializerMethodField()
+    class_name = serializers.SerializerMethodField()
+    file_count = serializers.SerializerMethodField()
+    file_languages = serializers.SerializerMethodField()
+    file_names = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CodeProject
+        fields = [
+            "id", "title", "created_at", "updated_at",
+            "status", "student_name",
+            "lesson_title", "course_name", "class_name", "score",
+            "file_count", "file_languages", "file_names",
+        ]
+
+    def get_file_count(self, obj):
+        if hasattr(obj, "_prefetched_objects_cache") and "files" in obj._prefetched_objects_cache:
+            return len(obj._prefetched_objects_cache["files"])
+        return obj.files.count()
+
+    def get_file_languages(self, obj):
+        if hasattr(obj, "_prefetched_objects_cache") and "files" in obj._prefetched_objects_cache:
+            langs = set(f.language for f in obj._prefetched_objects_cache["files"])
+        else:
+            langs = set(obj.files.values_list("language", flat=True).distinct())
+        return sorted(langs) if langs else []
+
+    def get_file_names(self, obj):
+        if hasattr(obj, "_prefetched_objects_cache") and "files" in obj._prefetched_objects_cache:
+            return [f.path for f in obj._prefetched_objects_cache["files"]]
+        return list(obj.files.values_list("path", flat=True))
+
+    def get_student_name(self, obj):
+        u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
+        if u.strip():
+            return u
+        return getattr(getattr(obj.student, "user", None), "email", "") or f"student-{obj.student_id}"
+
+    def get_course_name(self, obj):
+        try:
+            return obj.lesson.module.course.name
+        except Exception:
+            return ""
+
+    def get_class_name(self, obj):
+        try:
+            room = obj.lesson.module.course.classroom
+            if room:
+                return room.name
+        except Exception:
+            pass
+        try:
+            room = obj.student.classroom
+            if room:
+                return room.name
+        except Exception:
+            pass
+        return ""
+
+
+
+class CodeProjectDetailSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+    student_id = serializers.IntegerField(source="student.id", read_only=True)
+    lesson = serializers.SerializerMethodField()
+    course = serializers.SerializerMethodField()
+    classroom = serializers.SerializerMethodField()
+    comments = CodeCommentSerializer(many=True, read_only=True)
+    files = ProjectFileSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = CodeProject
+        fields = [
+            "id", "title", "created_at", "updated_at",
+            "status", "score", "feedback",
+            "graded_at", "graded_by_id",
+            "student_id", "student_name",
+            "lesson", "course", "classroom",
+            "comments", "files",
+        ]
+
+    def get_student_name(self, obj):
+        u = getattr(getattr(obj.student, "user", None), "get_full_name", lambda: "")() or ""
+        if u.strip():
+            return u
+        return getattr(getattr(obj.student, "user", None), "email", "") or f"student-{obj.student_id}"
+
+    def get_lesson(self, obj):
+        l = obj.lesson
+        return {"id": getattr(l, "id", None), "title": getattr(l, "name", "")} if l else {"id": None, "title": ""}
+
+    def get_course(self, obj):
+        try:
+            c = obj.lesson.module.course
+        except Exception:
+            c = None
+        return {"id": getattr(c, "id", None), "name": getattr(c, "name", "")} if c else {"id": None, "name": ""}
+
+    def get_classroom(self, obj):
+        try:
+            room = obj.lesson.module.course.classroom
+            if room:
+                return {"id": room.id, "name": room.name}
+        except Exception:
+            pass
+        try:
+            room = obj.student.classroom
+            if room:
+                return {"id": room.id, "name": room.name}
+        except Exception:
+            pass
+        return {"id": None, "name": ""}
+
+
+
+class StudentProjectSerializer(serializers.ModelSerializer):
+    files = ProjectFileSerializer(many=True, read_only=True)
+    comments = CodeCommentSerializer(many=True, read_only=True)
+    graded_by_name = serializers.SerializerMethodField()
+    lesson_title = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CodeProject
+        fields = [
+            "id", "title", "lesson", "status",
+            "score", "feedback",
+            "graded_at", "graded_by_id", "graded_by_name",
+            "lesson_title",
+            "created_at", "updated_at",
+            "files", "comments",
+        ]
+
+    def get_graded_by_name(self, obj):
+        if not obj.graded_by:
+            return None
+        u = getattr(obj.graded_by, "user", None)
+        if not u:
+            return None
+        return (getattr(u, "get_full_name", lambda: "")() or u.email or str(u.pk))
+
+    def get_lesson_title(self, obj):
+        return getattr(obj.lesson, "name", "") if obj.lesson else ""
+
+
+
 class TieringService:
     """
     Helper you can call from anywhere (views/serializers/model methods).
@@ -7427,33 +8560,334 @@ class TieringService:
 
 
 
-class PrivateTutoring(TimeStampedModel):
-    title = models.CharField(max_length=250, default="My Private Tutoring")
-    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="private_tutoring")
-    course = models.ForeignKey("learning.Course", on_delete=models.PROTECT, related_name="private_tutoring")
-    rate_per_hour = models.DecimalField(max_digits=10, decimal_places=2)
-    tutoring_duration_days = models.PositiveIntegerField(default=24) # NUMBER OF DAYS THE TUTORING WILL LAST
-    hours_per_day = models.FloatField(default=2.0)
-    notes = models.CharField(max_length=225)
-    active = models.BooleanField(default=True)
+class Streak(TimeStampedModel):
+    """
+    Tracks a student's consecutive-day activity streak.
+    One row per (student, season) pair.
+    """
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="streaks",
+    )
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="season_streaks",
+        db_index=True,
+    )
+    current_days = models.PositiveIntegerField(default=0)
+    longest_days = models.PositiveIntegerField(default=0)
+    last_activity = models.DateField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("student", "season")
+        indexes = [
+            models.Index(fields=["student", "season"]),
+        ]
+
+    @classmethod
+    def set_student_streak(cls, student, org, event_type, code):
+        """
+        Recompute the current streak from ActivityEvent records and save it.
+        """
+        if event_type != "daily_active" or code != "streak_champion":
+            return
+
+        ev_qs = ActivityEvent.objects.filter(
+            student=student,
+            organization=org,
+            event_type=event_type,
+        )
+
+        day_count, _ = build_streak(ev_qs)
+
+        # Resolve the current season
+        occurred_at = timezone.now()
+
+        # 1) Prefer active season if it contains the date
+        active = LeaderboardSeason.get_active(None)
+        if active and active.contains(occurred_at):
+            season = active
+        else:
+            # 2) Otherwise find by date range
+            season = (
+                LeaderboardSeason.objects
+                .filter(start_at__lte=occurred_at, end_at__gt=occurred_at)
+                .order_by("-start_at")
+                .first()
+            )
+
+        streak, is_created = cls.objects.update_or_create(
+            student=student,
+            season=season,
+            defaults={
+                "current_days": day_count,
+                "last_activity": timezone.localdate(),
+            }
+        )
+
+        if streak.longest_days < day_count:
+            streak.longest_days = day_count
+            streak.save(update_fields=["longest_days"])
 
 
 
-class TutoringBooking(TimeStampedModel):
+class Course(NamedModel):
+    USAGE_CHOICE = (
+        ('public','public'),
+        ('private','private'),
+    )
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="courses")
+    subject = models.ForeignKey("academics.Subject", on_delete=models.PROTECT)
+    classroom = models.ForeignKey("academics.Classroom", on_delete=models.PROTECT, blank=True, null=True)
+    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="courses")
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    general_activation = models.BooleanField(default=False)
+    general_activation_date = models.DateTimeField(blank=True, null=True)
+    course_type = models.CharField(
+        max_length=20,
+        choices=USAGE_CHOICE,
+        default='public',
+    )
+    freeze_code_submission = models.BooleanField(default=False)
+    parent_course = models.ForeignKey("Course", on_delete=models.CASCADE, blank=True, null=True)
+
+
+    def __str__(self):
+        return f"{self.subject.name} Teacher: {self.teacher.user.email}, Name: {self.name}"
+
+    class Meta:
+        unique_together = (("organization", "subject", "classroom", "teacher"),)
+
+
+
+class Enrollment(TimeStampedModel):
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        CONFIRMED = "confirmed", "Confirmed"
+        ACTIVE = "active", "Active"
         COMPLETED = "completed", "Completed"
-        CANCELLED = "cancelled", "Cancelled"
-    private_tutoring = models.ForeignKey(PrivateTutoring, on_delete=models.CASCADE, related_name="tutoring_bookings",
-    blank=True, null=True)
-    teacher = models.ForeignKey("academics.TeacherProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
-    student = models.ForeignKey("academics.StudentProfile", on_delete=models.PROTECT, related_name="tutoring_bookings")
-    duration_hours = models.PositiveIntegerField(default=2)
-    price = models.DecimalField(max_digits=10, decimal_places=2)
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
-    notes = models.TextField(blank=True)
-    completed_date = models.DateTimeField(blank=True, null=True)
-    # Daily lesson time range chosen by parent (e.g. 15:00 – 17:00)
-    session_start_time = models.TimeField(blank=True, null=True)
-    session_end_time = models.TimeField(blank=True, null=True)
+        DROPPED = "dropped", "Dropped"
+
+    leaderboard_season = models.ForeignKey(
+        "gamification.LeaderboardSeason",
+        on_delete=models.CASCADE,
+        related_name="season_enrollments",
+        blank=True, null=True
+    )
+    student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="enrollments")
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="enrollments")
+    academic_session = models.ForeignKey(
+        "orgs.AcademicSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="enrollments"
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+    progress_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    
+
+    class Meta:
+        unique_together = ("student", "course")
+
+
+
+class Organization(NamedModel):
+    class VideoConferencing(models.TextChoices):
+        KONNECT = "konnect", "Konnect"
+        LIVE = "live", "Live (Legacy)"
+
+    slug = models.SlugField(unique=True)
+    logo = models.ImageField(upload_to="org_logos/", blank=True, null=True)
+    address = models.TextField(blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    contact_email = models.EmailField(blank=True)
+    contact_phone = models.CharField(max_length=32, blank=True)
+    is_active = models.BooleanField(default=True)
+    year = models.CharField(default="2026")
+    video_conferencing = models.CharField(
+        max_length=16,
+        choices=VideoConferencing.choices,
+        default=VideoConferencing.KONNECT,
+        help_text="Video conferencing provider used by this organisation.",
+    )
+
+    class Meta:
+        indexes = [models.Index(fields=["slug"])]
+
+    @property
+    def active_subscription(self):
+        return self.subscriptions.filter(status="active").order_by("-end_date").first()
+
+
+
+class AcademicSession(NamedModel):
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="sessions")
+    start_date = models.DateField()
+    end_date = models.DateField()
+    is_current = models.BooleanField(default=False)
+
+    def save(self, *args, **kwargs):
+        if self.is_current:
+            # Unset is_current for all other sessions in the same organization
+            AcademicSession.objects.filter(
+                organization=self.organization, 
+                is_current=True
+            ).exclude(pk=self.pk).update(is_current=False)
+        super().save(*args, **kwargs)
+
+    class Meta:
+        unique_together = ("organization", "name")
+        ordering = ["-start_date"]
+
+
+
+class ParentWriteSerializer(serializers.Serializer):
+    """
+    Used for create/update.
+    Allows admin to update avatar on the related User.
+    """
+    # User fields
+    name = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False)  # required on create
+    phone = serializers.CharField(required=False, allow_blank=True)
+    # ParentProfile fields
+    address = serializers.CharField(required=False, allow_blank=True)
+    organization_subscription_id = serializers.IntegerField(required=False, allow_null=True)
+    # UI status chip (optional)
+    status = serializers.ChoiceField(choices=["active", "inactive", "suspended"], required=False)
+    # Avatar (admin only)
+    avatar = serializers.ImageField(required=False, allow_null=True)
+
+    def _is_creating(self) -> bool:
+        """
+        True only for actual POST creates (no instance bound).
+        This avoids misfires during GET/OPTIONS/schema, etc.
+        """
+        req = self.context.get("request")
+        if req and req.method.upper() == "POST" and self.instance is None:
+            return True
+        # keep supporting your existing flag, but don't rely on it
+        return bool(self.context.get("creating", False))
+
+    def validate(self, attrs):
+        # only enforce 'email' when creating
+        if self._is_creating() and not attrs.get("email"):
+            raise serializers.ValidationError({"email": "Email is required."})
+
+        # only enforce avatar rule if an avatar was provided
+        request = self.context.get("request")
+        if "avatar" in attrs and attrs["avatar"] is not None:
+            if not _is_admin(request):
+                raise serializers.ValidationError({"avatar": "Only admins can update avatar."})
+        return attrs
+
+    def create(self, validated_data):
+        request = self.context["request"]
+        org: Organization = self.context["org"]
+
+        email = validated_data["email"].lower().strip()
+        name = validated_data.get("name", "")
+        phone = validated_data.get("phone", "")
+        address = validated_data.get("address", "")
+        avatar: UploadedFile | None = validated_data.get("avatar")
+        status_value: StatusLiteral | None = validated_data.get("status")
+
+        org_sub_id = validated_data.get("organization_subscription_id")
+        org_sub = None
+        if org_sub_id:
+            org_sub = OrganizationSubscription.objects.filter(id=org_sub_id, organization=org).first()
+
+        with transaction.atomic():
+            # Create or attach user
+            user = User.objects.filter(email=email).first()
+            if not user:
+                user = User.objects.create_user(email=email, is_active=True)
+                created = True
+            else:
+                created = False
+            # Fill in names if given
+            if name:
+                # naive "split" to first_name/last_name if you use Django's standard fields
+                try:
+                    first, *rest = name.strip().split()
+                    user.first_name = first
+                    user.last_name = " ".join(rest)
+                except Exception:
+                    pass
+            if phone:
+                user.phone = phone
+            if avatar and _is_admin(request):
+                user.avatar = avatar
+            user.save()
+
+            # membership
+            membership = _get_or_create_parent_membership(user, org)
+
+            # status mapping (if UI provided)
+            if status_value:
+                _apply_status_to_user_membership(status_value, user, membership)
+                user.save(update_fields=["is_active"])
+                membership.save(update_fields=["is_active"])
+
+            parent = ParentProfile.objects.create(
+                user=user,
+                organization=org,
+                organization_subscription=org_sub,
+                address=address,
+            )
+        return parent
+
+    def update(self, instance: ParentProfile, validated_data):
+        request = self.context["request"]
+        org: Organization = self.context["org"]
+
+        name = validated_data.get("name", None)
+        phone = validated_data.get("phone", None)
+        address = validated_data.get("address", None)
+        org_sub_id = validated_data.get("organization_subscription_id", None)
+        avatar: UploadedFile | None = validated_data.get("avatar", None)
+        status_value: StatusLiteral | None = validated_data.get("status")
+
+        with transaction.atomic():
+            user = instance.user
+            if name is not None:
+                try:
+                    first, *rest = name.strip().split()
+                    user.first_name = first
+                    user.last_name = " ".join(rest)
+                except Exception:
+                    pass
+            if phone is not None:
+                user.phone = phone
+            if avatar is not None:
+                if not _is_admin(request):
+                    raise serializers.ValidationError({"avatar": "Only admins can update avatar."})
+                user.avatar = avatar
+            user.save()
+
+            membership = _get_or_create_parent_membership(user, org)
+            if status_value:
+                _apply_status_to_user_membership(status_value, user, membership)
+                user.save(update_fields=["is_active"])
+                membership.save(update_fields=["is_active"])
+
+            if org_sub_id is not None:
+                if org_sub_id:
+                    org_sub = OrganizationSubscription.objects.filter(id=org_sub_id, organization=org).first()
+                    instance.organization_subscription = org_sub
+                else:
+                    instance.organization_subscription = None
+
+            if address is not None:
+                instance.address = address
+
+            instance.save()
+
+        return instance

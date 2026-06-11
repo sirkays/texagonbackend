@@ -2,8 +2,9 @@
 # New project-based submission views replacing old CodeSubmission views.
 
 import io, re, zipfile, logging
+from datetime import date
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.shortcuts import get_object_or_404
 from django.http import HttpResponse
 from django.utils import timezone
@@ -13,9 +14,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
 from api.authentication import SessionTokenAuthentication
-from api.permissions import RequiresActiveStudentSubscription
+
 from core.utils import _get_student_for_user, _get_teacher_for_user, _resolve_org
-from learning.models import Lesson
+from gamification.services.engine import log_event, evaluate_student_gamification
+from learning.models import Enrollment, Lesson
 
 from .models import CodeProject, ProjectFile, CodeComment
 from .serializers import (
@@ -38,7 +40,7 @@ def _detect_language(path: str) -> str:
 
 # ── Student: submit project ──────────────────────────────────────────
 @api_view(["POST"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@permission_classes([IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
 def project_submit(request):
     student = _get_student_for_user(request.user)
@@ -73,12 +75,33 @@ def project_submit(request):
                 code_text=f.get("code_text", ""),
             )
 
+    # ---------- GAMIFICATION ----------
+    org = getattr(student, "organization", None)
+    if org is not None:
+        transaction.on_commit(lambda: log_event(
+            student=student,
+            org=org,
+            event_type="exercise_submitted",
+            value=1,
+            meta={"project_id": str(project.id)},
+            dedupe_key=f"exercise_submitted:org={org.id}:student={student.id}:project={project.id}",
+        ))
+        transaction.on_commit(lambda: log_event(
+            student=student,
+            org=org,
+            event_type="daily_active",
+            value=1,
+            meta={"source": "code_submission"},
+            dedupe_key=f"daily_active:org={org.id}:student={student.id}:date={date.today().isoformat()}",
+        ))
+        transaction.on_commit(lambda s=student, o=org: evaluate_student_gamification(s, o))
+
     return Response(StudentProjectSerializer(project).data, status=201)
 
 
 # ── Student: resubmit (revise) project ───────────────────────────────
 @api_view(["POST"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@permission_classes([IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
 def project_resubmit(request, pk: int):
     student = _get_student_for_user(request.user)
@@ -117,7 +140,7 @@ def project_resubmit(request, pk: int):
 
 # ── Student: list own projects ───────────────────────────────────────
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@permission_classes([IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
 def student_project_list(request):
     student = _get_student_for_user(request.user)
@@ -134,7 +157,7 @@ def student_project_list(request):
 
 # ── Student: single project detail ──────────────────────────────────
 @api_view(["GET"])
-@permission_classes([HasAPIKey & RequiresActiveStudentSubscription()])
+@permission_classes([IsAuthenticated])
 @authentication_classes([SessionTokenAuthentication])
 def student_project_detail(request, pk: int):
     student = _get_student_for_user(request.user)
@@ -146,6 +169,28 @@ def student_project_detail(request, pk: int):
     )
     return Response(StudentProjectSerializer(project).data)
 
+
+# ── Student: comments on own project ────────────────────────────────
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+@authentication_classes([SessionTokenAuthentication])
+def student_project_comments(request, pk: int):
+    student = _get_student_for_user(request.user)
+    if not student:
+        return Response({"detail": "Not allowed."}, status=403)
+    project = get_object_or_404(CodeProject, pk=pk, student=student)
+
+    if request.method == "GET":
+        comments = project.comments.select_related("author").order_by("created_at")
+        return Response(CodeCommentSerializer(comments, many=True).data)
+
+    message = (request.data.get("message") or "").strip()
+    if not message:
+        return Response({"detail": "Message is required."}, status=400)
+    c = CodeComment.objects.create(
+        project=project, author=request.user, author_role="student", message=message,
+    )
+    return Response(CodeCommentSerializer(c).data, status=201)
 
 # ── Teacher helpers ──────────────────────────────────────────────────
 class QuickPagination(pagination.PageNumberPagination):
@@ -160,12 +205,22 @@ def _teacher_project_qs(request):
     org, org_err = _resolve_org(request)
     if org_err:
         return None, org_err
+
+    # Only include submissions whose student holds an ACTIVE enrollment
+    # in the exact course the lesson belongs to.
+    active_enrollment = Enrollment.objects.filter(
+        student=OuterRef("student"),
+        course=OuterRef("lesson__module__course"),
+        status=Enrollment.Status.ACTIVE,
+    )
+
     qs = (
         CodeProject.objects
         .select_related("student__user", "lesson__module__course__teacher__user",
                         "lesson__module__course__classroom")
         .prefetch_related("files", "comments__author")
         .filter(lesson__module__course__teacher=teacher)
+        .filter(Exists(active_enrollment))
     )
     try:
         qs = qs.filter(lesson__module__course__organization=org)
@@ -307,6 +362,22 @@ def teacher_project_grade(request, pk: int):
             )
 
     project.refresh_from_db()
+
+    # ---------- GAMIFICATION: exercise mastered ----------
+    if score_val is not None and score_val >= 800:  # 80% of 1000-point scale
+        graded_student = project.student
+        graded_org = getattr(graded_student, "organization", None)
+        if graded_org is not None:
+            transaction.on_commit(lambda: log_event(
+                student=graded_student,
+                org=graded_org,
+                event_type="exercise_mastered",
+                value=1,
+                meta={"project_id": str(project.id), "score": score_val},
+                dedupe_key=f"exercise_mastered:org={graded_org.id}:student={graded_student.id}:project={project.id}",
+            ))
+            transaction.on_commit(lambda s=graded_student, o=graded_org: evaluate_student_gamification(s, o))
+
     return Response(CodeProjectDetailSerializer(project).data, status=200)
 
 

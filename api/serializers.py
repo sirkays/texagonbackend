@@ -146,6 +146,10 @@ class ModuleSerializer(serializers.ModelSerializer):
 
 
 class LessonSerializer(serializers.ModelSerializer):
+    course_id = serializers.IntegerField(source="module.course.id", read_only=True)
+    course_name = serializers.CharField(source="module.course.name", read_only=True)
+    module_name = serializers.CharField(source="module.name", read_only=True)
+
     class Meta:
         model = Lesson
         fields = "__all__"
@@ -195,9 +199,28 @@ class TestAttemptSerializer(serializers.ModelSerializer):
 
 
 class AssignmentSerializer(serializers.ModelSerializer):
+    course_type = serializers.CharField(source="course.course_type", read_only=True)
+    course_name = serializers.CharField(source="course.title", read_only=True)
+    submission_count = serializers.SerializerMethodField(read_only=True)
+    graded_count = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Assignment
         fields = "__all__"
+
+    def get_submission_count(self, obj):
+        return obj.submissions.count()
+
+    def get_graded_count(self, obj):
+        return obj.submissions.filter(score__isnull=False).count()
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        if instance.lesson:
+            rep['lesson_details'] = LessonSerializer(instance.lesson, context=self.context).data
+        else:
+            rep['lesson_details'] = None
+        return rep
 
 
 class SubmissionSerializer(serializers.ModelSerializer):
@@ -318,10 +341,14 @@ class AvailableDaySerializer(serializers.ModelSerializer):
 
 class PrivateTutoringSerializer(serializers.ModelSerializer):
     available_days = AvailableDaySerializer(many=True, required=False)
+    courseName = serializers.SerializerMethodField()
 
     class Meta:
         model = PrivateTutoring
         fields = '__all__'
+
+    def get_courseName(self, obj):
+        return obj.course.name if obj.course else ''
 
     def create(self, validated_data):
         days_data = validated_data.pop('available_days', [])
@@ -329,6 +356,17 @@ class PrivateTutoringSerializer(serializers.ModelSerializer):
         for day_data in days_data:
             AvailableDay.objects.create(private_tutoring=pt, **day_data)
         return pt
+
+    def update(self, instance, validated_data):
+        days_data = validated_data.pop('available_days', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if days_data is not None:
+            instance.available_days.all().delete()
+            for day_data in days_data:
+                AvailableDay.objects.create(private_tutoring=instance, **day_data)
+        return instance
 
 class TutoringBookingTeacherSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()

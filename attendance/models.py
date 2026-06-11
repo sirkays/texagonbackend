@@ -3,6 +3,13 @@ from core.models import TimeStampedModel
 
 class AttendanceSession(TimeStampedModel):
     course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="attendance_sessions")
+    academic_session = models.ForeignKey(
+        "orgs.AcademicSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="attendance_sessions"
+    )
     date = models.DateField()
     topic = models.CharField(max_length=255, blank=True)
 

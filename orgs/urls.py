@@ -13,6 +13,7 @@ from .views import (dashboard_summary,courses_list,courses_stats_header,course_f
     classroom_students, classroom_students_bulk_update,
     report_student_performance, report_revenue, report_course_completion,
     admin_bulk_enroll_students, admin_enroll_classroom_to_course,
+    org_settings, org_settings_update,
 
 
 )
@@ -74,6 +75,10 @@ urlpatterns = [
     path("api/admin/reports/student-performance/", report_student_performance, name="report-student-performance"),
     path("api/admin/reports/revenue/", report_revenue, name="report-revenue"),
     path("api/admin/reports/course-completion/", report_course_completion, name="report-course-completion"),
+
+    # Org settings
+    path("api/org/settings/", org_settings, name="org-settings"),
+    path("api/org/settings/update/", org_settings_update, name="org-settings-update"),
 ]
 # append, don't overwrite
 urlpatterns += router.urls

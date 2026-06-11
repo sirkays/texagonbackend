@@ -57,6 +57,13 @@ class Enrollment(TimeStampedModel):
     )
     student = models.ForeignKey("academics.StudentProfile", on_delete=models.CASCADE, related_name="enrollments")
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="enrollments")
+    academic_session = models.ForeignKey(
+        "orgs.AcademicSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="enrollments"
+    )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
     progress_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     completed_at = models.DateTimeField(blank=True, null=True)

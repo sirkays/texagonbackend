@@ -1,6 +1,6 @@
 # achievements/services/engine.py
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from gamification.models import (
     AchievementAcquired,
     BadgeAward,
@@ -22,6 +22,8 @@ def get_points_balance(student) -> int:
 def award_points(student, points: int, reason: str) -> None:
     if not points:
         return
+    # Lock existing rows to prevent concurrent balance drift
+    student.point_transactions.select_for_update().exists()
     before = get_points_balance(student)
     after = before + int(points)
     leaderboard_season = resolve_season(student.organization, timezone.now())
@@ -112,3 +114,59 @@ def log_event(*, student, org, event_type, value=1, meta=None, dedupe_key=None, 
         return ActivityEvent.objects.filter(
             student=student, organization=org, dedupe_key=dedupe_key
         ).first()
+
+
+def evaluate_student_gamification(student, org):
+    """
+    Check all active achievement definitions and badges for a student.
+    Returns a dict with 'achievements' and 'badges' lists of newly unlocked items.
+    Called explicitly from action endpoints so rewards can be included in responses.
+    """
+    from gamification.models import AchievementDefinition, Badge
+    from gamification.services.rules import compute_rule_value, get_target
+
+    newly_unlocked_achievements = []
+    newly_unlocked_badges = []
+
+    # Check all active achievement definitions (org-specific OR global)
+    definitions = AchievementDefinition.objects.filter(
+        Q(organization=org) | Q(organization__isnull=True),
+        is_active=True,
+    )
+    for defn in definitions:
+        rule = defn.rule or {}
+        if not rule:
+            continue
+        value = compute_rule_value(
+            org_id=org.id,
+            student_id=student.id,
+            rule=rule,
+        )
+        target = get_target(rule)
+        if target and value >= target:
+            unlocked = unlock_achievement(student, defn, value)
+            if unlocked:
+                newly_unlocked_achievements.append({
+                    "code": defn.code,
+                    "title": defn.title,
+                    "points": defn.points,
+                })
+
+    # Check all active badges
+    badges = Badge.objects.filter(
+        Q(organization=org) | Q(organization__isnull=True),
+        is_active=True,
+    )
+    for badge in badges:
+        unlocked = unlock_badge_if_eligible(student, badge)
+        if unlocked:
+            newly_unlocked_badges.append({
+                "name": badge.name,
+                "icon_name": badge.icon_name,
+                "points": badge.points,
+            })
+
+    return {
+        "achievements": newly_unlocked_achievements,
+        "badges": newly_unlocked_badges,
+    }

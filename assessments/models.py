@@ -33,6 +33,14 @@ class Test(TimeStampedModel):
     settings = models.JSONField(default=dict, blank=True)
     excluded_users = models.ManyToManyField("academics.StudentProfile",blank=True)
     require_browser_code = models.BooleanField(default=True)
+    show_score = models.BooleanField(default=True)
+    academic_session = models.ForeignKey(
+        "orgs.AcademicSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tests"
+    )
 
     def __str__(self):
         return self.title
@@ -98,6 +106,13 @@ class TestAttempt(TimeStampedModel):
 class Assignment(TimeStampedModel):
     course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="assignments")
     lesson = models.ForeignKey("learning.Lesson", on_delete=models.SET_NULL, null=True, blank=True, related_name="assignments")
+    academic_session = models.ForeignKey(
+        "orgs.AcademicSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assignments"
+    )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     due_at = models.DateTimeField(null=True, blank=True)
@@ -153,3 +168,20 @@ class TestAnswer(TimeStampedModel):
 
     def __str__(self):
         return f"Answer attempt={self.attempt_id} q={self.question_id}"
+
+
+class HistoricalTestAttempt(TimeStampedModel):
+    """
+    Stores an audit record of a test attempt before it is deleted by a teacher.
+    """
+    test_title = models.CharField(max_length=255)
+    student_name = models.CharField(max_length=255)
+    student_email = models.CharField(max_length=255, blank=True)
+    original_attempt_id = models.IntegerField()
+    score = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    started_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    
+    def __str__(self):
+        return f"HistoricalAttempt {self.original_attempt_id} for {self.student_name}"

@@ -1,0 +1,27 @@
+{
+  "categories": [
+    "Python Beginners",
+    "Python Startup",
+    "Webddevelopment Phase 1"
+  ],
+  "courses": [
+    {
+      "id": 8,
+      "name": "Python Beginners"
+    },
+    {
+      "id": 1,
+      "name": "Python Startup"
+    },
+    {
+      "id": 9,
+      "name": "Webddevelopment Phase 1"
+    }
+  ],
+  "selected_course_id": 8,
+  "selected_module_id": null,
+  "pdfs": [],
+  "videos": [],
+  "audio": [],
+  "journals": []
+}

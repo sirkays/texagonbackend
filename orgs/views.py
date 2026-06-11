@@ -110,6 +110,72 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 
+# ---------------------------------------------------------------------------
+# Org settings — video conferencing provider
+# ---------------------------------------------------------------------------
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def org_settings(request):
+    """
+    GET /api/org/settings/
+
+    Returns the current organisation settings visible to any authenticated user
+    (teacher, student, admin, parent).  Currently exposes:
+      - video_conferencing: "konnect" | "live"
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+        return Response({
+            "video_conferencing": org.video_conferencing,
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def org_settings_update(request):
+    """
+    PATCH /api/org/settings/update/
+
+    Admin-only endpoint to change org-level settings.
+    Body: { "video_conferencing": "konnect" | "live" }
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+        if not _is_admin(request):
+            return Response({"detail": "Forbidden. Admins only."}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data or {}
+        vc = data.get("video_conferencing")
+        valid_choices = [c[0] for c in org.__class__.VideoConferencing.choices]
+        if vc is not None:
+            if vc not in valid_choices:
+                return Response(
+                    {"detail": f"Invalid video_conferencing. Choose from: {valid_choices}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            org.video_conferencing = vc
+            org.save(update_fields=["video_conferencing"])
+
+        return Response({
+            "video_conferencing": org.video_conferencing,
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(["GET"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
@@ -1277,6 +1343,7 @@ def courses_list(request):
 
         qs = (Course.objects
               .filter(organization=org)
+              .exclude(course_type="private")
               .select_related("subject", "classroom", "teacher__user")
               .annotate(
                   students_count=Count("enrollments", distinct=True),
@@ -1324,8 +1391,8 @@ def courses_stats_header(request):
         if not _is_org_admin_or_teacher(request, org):
             return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
 
-        active_courses = Course.objects.filter(organization=org, is_active=True).count()
-        total_enrollments = Enrollment.objects.filter(course__organization=org).count()
+        active_courses = Course.objects.filter(organization=org, is_active=True).exclude(course_type="private").count()
+        total_enrollments = Enrollment.objects.filter(course__organization=org).exclude(course__course_type="private").count()
 
         return Response({
             "active_courses": active_courses,
@@ -1352,6 +1419,7 @@ def course_detail(request, course_id: int):
 
         c = (Course.objects
              .filter(id=course_id, organization=org)
+             .exclude(course_type="private")
              .select_related("subject", "classroom", "teacher__user")
              .annotate(
                  students_count=Count("enrollments", distinct=True),
@@ -1541,7 +1609,7 @@ def course_form_options(request):
             return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
 
         subjects = list(Subject.objects.filter(organization=org).values("id", "name"))
-        classrooms = list(Classroom.objects.filter(organization=org).values("id", "name"))
+        classrooms = list(Classroom.objects.filter(organization=org).exclude(class_type="private").values("id", "name"))
         teachers = [{
             "id": t.id,
             "name": (t.user.get_full_name() or t.user.email),

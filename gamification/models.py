@@ -295,7 +295,7 @@ class Streak(TimeStampedModel):
         occurred_at = timezone.now()
 
         # 1) Prefer active season if it contains the date
-        active = LeaderboardSeason.get_active(None)
+        active = LeaderboardSeason.get_active(org)
         if active and active.contains(occurred_at):
             season = active
         else:
@@ -319,4 +319,18 @@ class Streak(TimeStampedModel):
         if streak.longest_days < day_count:
             streak.longest_days = day_count
             streak.save(update_fields=["longest_days"])
+
+        # Late import to avoid circular dependency
+        from gamification.services.engine import log_event
+        from datetime import date
+
+        org_id = org.id if hasattr(org, "id") else org
+        log_event(
+            student=student,
+            org=org,
+            event_type="streak_current",
+            value=streak.current_days,
+            meta={"longest": streak.longest_days},
+            dedupe_key=f"streak_current:org={org_id}:student={student.id}:date={date.today().isoformat()}",
+        )
 

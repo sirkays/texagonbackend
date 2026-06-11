@@ -50,6 +50,9 @@ def RequiresActiveStudentSubscription(*, allow_page=False):
         def _is_subscription_active(self, *, student_profile, org_id, user_id) -> bool:
             now = timezone.now()
 
+            if getattr(student_profile.organization, "allow_unsubscribed_users", False):
+                return True
+
             return UserAccountSubscription.has_subscription(student_profile.user, student_profile.organization)
 
         def has_permission(self, request, view):
