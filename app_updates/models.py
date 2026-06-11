@@ -16,7 +16,7 @@ class AppVersion(TimeStampedModel):
     version = models.CharField(max_length=20)
     build_number = models.IntegerField()
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
-    download_url = models.URLField(max_length=500)
+    download_url = models.URLField(max_length=2048)
     file_size = models.BigIntegerField(null=True, blank=True)
     release_notes = models.TextField(blank=True)
     is_force_update = models.BooleanField(default=False)
