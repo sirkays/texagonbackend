@@ -13,6 +13,7 @@ from .views import (dashboard_summary,courses_list,courses_stats_header,course_f
     classroom_students, classroom_students_bulk_update,
     report_student_performance, report_revenue, report_course_completion,
     admin_bulk_enroll_students, admin_enroll_classroom_to_course,
+    admin_bulk_de_enroll_students, admin_de_enroll_classroom, admin_de_enroll_single,
     org_settings, org_settings_update,
 
 
@@ -38,6 +39,9 @@ urlpatterns = [
     path("api/admin/courses/<int:course_id>/delete/", course_delete, name="course-delete"),
     path("api/admin/courses/<int:course_id>/bulk-enroll/", admin_bulk_enroll_students, name="course-bulk-enroll"),
     path("api/admin/courses/<int:course_id>/enroll-classroom/", admin_enroll_classroom_to_course, name="course-enroll-classroom"),
+    path("api/admin/courses/<int:course_id>/bulk-de-enroll/", admin_bulk_de_enroll_students, name="course-bulk-de-enroll"),
+    path("api/admin/courses/<int:course_id>/de-enroll-classroom/", admin_de_enroll_classroom, name="course-de-enroll-classroom"),
+    path("api/admin/students/<int:student_id>/enrollments/<int:enrollment_id>/delete/", admin_de_enroll_single, name="enrollment-de-enroll-single"),
 
     path("api/admin/module/list/", modules_list, name="module-admin-list"),
     path("api/admin/module/lessons/<int:module_id>/", module_lessons, name="module-admin-lesson"),

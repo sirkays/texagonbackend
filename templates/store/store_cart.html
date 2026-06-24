@@ -1,0 +1,255 @@
+{% extends 'store/base.html' %}
+{% load static humanize %}
+
+{% block title %}Your Cart - Techxagon Store{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="flex items-center justify-between mb-8 mt-2">
+    <h1 class="text-2xl font-black text-gray-900 tracking-tight">Shopping Cart <span class="text-gray-400 font-medium text-lg">({{ items|length }} item{{ items|length|pluralize }})</span></h1>
+    <a href="{% url 'store_frontend:home' %}" class="text-sm font-semibold text-primary hover:underline flex items-center gap-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+        Continue Shopping
+    </a>
+</div>
+
+<div class="flex flex-col lg:flex-row gap-8 items-start">
+    <!-- Left: Cart Items -->
+    <div class="flex-grow w-full space-y-4">
+
+        <!-- Seller Group -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <!-- Seller Header -->
+            <div class="flex items-center gap-3 px-6 py-4 border-b border-gray-100 bg-gray-50">
+                <input type="checkbox" checked class="w-4 h-4 accent-primary rounded">
+                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                <span class="font-bold text-gray-800 text-sm">Techxagon Official Store</span>
+                <span class="ml-auto text-xs text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">Verified Seller</span>
+            </div>
+
+            {% if items %}
+                {% for item in items %}
+                <!-- Cart Item -->
+                <div class="flex items-start gap-5 p-6 {% if not forloop.last %}border-b border-gray-50{% endif %}">
+                    <input type="checkbox" checked class="w-4 h-4 accent-primary rounded mt-1 flex-shrink-0">
+                    <div class="w-24 h-24 bg-gray-50 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100">
+                        {% if item.product.images.first %}
+                        <img src="{{ item.product.images.first.product_image.url }}" alt="{{ item.product.title }}" class="w-full h-full object-contain p-1">
+                        {% else %}
+                        <div class="w-full h-full flex items-center justify-center text-gray-400"><svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></div>
+                        {% endif %}
+                    </div>
+                    <div class="flex-grow min-w-0">
+                        <a href="{% url 'store_frontend:detail' slug=item.product.slug %}" class="text-sm font-semibold text-gray-900 hover:text-primary transition-colors line-clamp-2 block mb-1">
+                            {{ item.product.title }}
+                        </a>
+                        <div class="flex flex-wrap gap-2 mb-3">
+                            <span class="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full capitalize">{{ item.product.product_type }}</span>
+                            {% if item.product.bnpl_enabled %}
+                            <span class="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-full font-semibold flex items-center gap-1">
+                                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                FlexPay eligible
+                            </span>
+                            {% else %}
+                            <span class="text-xs bg-gray-100 text-gray-500 border border-gray-200 px-2.5 py-1 rounded-full flex items-center gap-1">
+                                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                No BNPL
+                            </span>
+                            {% endif %}
+                        </div>
+                        <div class="flex items-center justify-between flex-wrap gap-3">
+                            <div>
+                                <span class="text-lg font-black text-gray-900">NGN{{ item.product.price|intcomma }}</span>
+                                <span class="text-xs text-green-600 font-semibold ml-2 flex items-center gap-1 inline-flex">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                                    In Stock
+                                </span>
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <!-- Qty Update Form -->
+                                <form action="{% url 'store_frontend:update_cart' item_id=item.id %}" method="POST" class="flex items-center border border-gray-200 rounded-lg overflow-hidden">
+                                    {% csrf_token %}
+                                    <button type="submit" name="action" value="decrease" class="w-8 h-8 flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors text-base font-medium">-</button>
+                                    <input type="text" value="{{ item.quantity }}" readonly class="w-10 text-center text-sm font-bold focus:outline-none bg-transparent border-x border-gray-200">
+                                    <button type="submit" name="action" value="increase" class="w-8 h-8 flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors text-base font-medium">+</button>
+                                </form>
+                                <!-- Remove Form -->
+                                <form action="{% url 'store_frontend:remove_from_cart' item_id=item.id %}" method="POST">
+                                    {% csrf_token %}
+                                    <button type="submit" class="text-gray-400 hover:text-red-500 transition-colors">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="p-10 text-center text-gray-500">
+                    <svg class="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    <p class="text-lg font-bold text-gray-900 mb-2">Your cart is empty</p>
+                    <p class="mb-6">Looks like you haven't added anything to your cart yet.</p>
+                    <a href="{% url 'store_frontend:home' %}" class="inline-block px-6 py-3 bg-primary text-white font-bold rounded-xl shadow-md">Browse Products</a>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Coupon Code -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <h3 class="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 10V5a2 2 0 012-2z"></path></svg>
+                Have a coupon?
+            </h3>
+
+            {# Flash messages for coupon actions #}
+            {% for message in messages %}
+            <div class="mb-3 flex items-start gap-2 px-4 py-3 rounded-xl text-sm font-medium
+                {% if message.tags == 'error' %}bg-red-50 border border-red-200 text-red-700
+                {% elif message.tags == 'warning' %}bg-amber-50 border border-amber-200 text-amber-700
+                {% else %}bg-green-50 border border-green-200 text-green-700{% endif %}">
+                <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                {{ message }}
+            </div>
+            {% endfor %}
+
+            {% if applied_coupon %}
+            <!-- Coupon Applied State -->
+            <div class="flex items-center justify-between gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                        <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                    <div>
+                        <p class="text-sm font-bold text-green-800 tracking-wide">{{ applied_coupon.code }}</p>
+                        <p class="text-xs text-green-600">
+                            {% if applied_coupon.discount_type == 'percent' %}
+                                {{ applied_coupon.value }}% discount applied
+                            {% else %}
+                                NGN{{ applied_coupon.value|floatformat:0 }} off applied
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                <form method="POST" action="{% url 'store_frontend:remove_coupon' %}">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs text-red-500 hover:text-red-700 font-bold flex items-center gap-1 transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        Remove
+                    </button>
+                </form>
+            </div>
+            {% else %}
+            <!-- Coupon Entry Form -->
+            <form method="POST" action="{% url 'store_frontend:apply_coupon' %}" class="flex gap-3">
+                {% csrf_token %}
+                <input type="text" name="coupon_code" placeholder="Enter coupon code"
+                       class="flex-grow px-4 py-2.5 border border-gray-200 rounded-xl text-sm uppercase tracking-wider focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                       autocomplete="off" spellcheck="false">
+                <button type="submit" class="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-white text-sm font-bold rounded-xl transition-colors whitespace-nowrap">Apply</button>
+            </form>
+            {% endif %}
+        </div>
+
+        {% if items and not all_bnpl_eligible %}
+        <!-- BNPL Not Available Warning -->
+        <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+            <svg class="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <div>
+                <p class="text-sm font-bold text-amber-800">Buy Now Pay Later not available</p>
+                <p class="text-xs text-amber-700 mt-0.5">One or more items in your cart are not eligible for FlexPay. Remove non-eligible items to use BNPL at checkout.</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Right: Order Summary -->
+    <div class="w-full lg:w-[360px] flex-shrink-0 space-y-4 lg:sticky lg:top-28">
+        <!-- Summary Card -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <h2 class="text-lg font-black text-gray-900 mb-5 pb-4 border-b border-gray-100">Order Summary</h2>
+
+            <div class="space-y-3 mb-5 text-sm">
+                <div class="flex justify-between text-gray-600">
+                    <span>Items ({{ items|length }})</span>
+                    <span class="font-semibold {% if discount_total %}line-through text-gray-400{% else %}text-gray-900{% endif %}">NGN{{ subtotal|intcomma }}</span>
+                </div>
+                {% if discount_total %}
+                <div class="flex justify-between text-green-700 font-semibold">
+                    <span class="flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 10V5a2 2 0 012-2z"></path></svg>
+                        Discount ({{ applied_coupon.code }})
+                    </span>
+                    <span>-NGN{{ discount_total|intcomma }}</span>
+                </div>
+                {% endif %}
+                <div class="flex justify-between text-gray-600">
+                    <span>Shipping</span>
+                    <span class="font-semibold {% if shipping_total == 0 %}text-green-600{% else %}text-gray-900{% endif %}">
+                        {% if shipping_total == 0 %}FREE{% else %}NGN{{ shipping_total|intcomma }}{% endif %}
+                    </span>
+                </div>
+                <div class="flex justify-between text-gray-600">
+                    <span>Tax ({{ tax_rate_percent }}% VAT)</span>
+                    <span class="font-semibold text-gray-900">NGN{{ tax_total|intcomma }}</span>
+                </div>
+            </div>
+
+            <div class="border-t border-gray-100 pt-4 mb-6">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-base font-bold text-gray-900">Total</span>
+                    <span class="text-2xl font-black text-gray-900">NGN{{ grand_total|intcomma }}</span>
+                </div>
+                <p class="text-xs text-gray-400 text-right mb-4">
+                    {% if applied_coupon %}Discount applied · {% endif %}Tax included, standard shipping
+                </p>
+                
+                <!-- BNPL Widget -->
+                {% if all_bnpl_eligible and bnpl_installment %}
+                <div class="flex items-center gap-2 bg-blue-50/50 border border-blue-100 rounded-lg p-2.5">
+                    <div class="bg-[#001b38] text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">Pay Later</div>
+                    <span class="text-[11px] text-gray-700 leading-tight">Pay in 4 interest-free payments of <strong class="text-gray-900">NGN{{ bnpl_installment|intcomma }}</strong></span>
+                </div>
+                {% elif items %}
+                <div class="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-2.5">
+                    <div class="bg-gray-400 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">Pay Later</div>
+                    <span class="text-[11px] text-gray-500 leading-tight">BNPL not available for current cart items</span>
+                </div>
+                {% endif %}
+            </div>
+
+            <a href="{% url 'store_frontend:checkout' %}" class="block w-full bg-primary hover:bg-primary-hover text-white font-black py-4 rounded-xl text-center text-base transition-all shadow-lg shadow-primary/30 mb-3 {% if not items %}opacity-50 pointer-events-none{% endif %}">
+                Proceed to Checkout →
+            </a>
+            <p class="text-xs text-center text-gray-400">You won't be charged yet</p>
+        </div>
+
+        <!-- Trust Badges -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
+            <div class="flex items-center gap-3 text-sm text-gray-700">
+                <svg class="w-5 h-5 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                <span><strong>Secure Checkout</strong> — SSL Encrypted</span>
+            </div>
+            <div class="flex items-center gap-3 text-sm text-gray-700">
+                <svg class="w-5 h-5 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                <span><strong>Free Returns</strong> within 30 days</span>
+            </div>
+            <div class="flex items-center gap-3 text-sm text-gray-700">
+                <svg class="w-5 h-5 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+                <span><strong>Multiple Payment</strong> methods accepted</span>
+            </div>
+        </div>
+
+        <!-- Accepted Payments -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <p class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Accepted Payments</p>
+            <div class="flex items-center gap-3 flex-wrap">
+                <div class="h-8 bg-[#1a1f71] text-white text-xs font-black px-3 rounded flex items-center">VISA</div>
+                <div class="h-8 bg-[#eb001b] text-white text-xs font-black px-3 rounded flex items-center">Mastercard</div>
+                <div class="h-8 bg-[#009cde] text-white text-xs font-black px-3 rounded flex items-center">PayPal</div>
+                <div class="h-8 bg-gray-900 text-white text-xs font-black px-3 rounded flex items-center">Paystack</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}

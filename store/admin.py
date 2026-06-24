@@ -8,16 +8,18 @@ from django.utils import timezone
 
 from .models import (
     # Catalog
-    Category, Product, ProductImage, Review, Coupon,
-    # Cart / Orders / Payments / Entitlements
+    Category, Product, ProductImage, Review, Coupon, StoreConfiguration,
+    # Cart / Orders / Payments
     Cart, CartItem, Address,
-    Order, OrderItem, Payment, Entitlement,
+    Order, OrderItem, Payment,
     # BNPL
     BNPLPlanTemplate, BNPLAgreement, BNPLInstallment,
     # Shipping / Tracking
     ShippingCarrier, ShippingMethod, Shipment, ShipmentItem, TrackingEvent,
     # Returns (RMA)
     ReturnAuthorization, ReturnItem,
+    # Tickets / Support
+    Ticket, TicketMessage,
 )
 
 # -------------------------
@@ -84,10 +86,14 @@ class ReturnItemInline(admin.TabularInline):
 # Catalog
 # -------------------------
 
+@admin.register(StoreConfiguration)
+class StoreConfigurationAdmin(admin.ModelAdmin):
+    list_display = ("__str__", "tax_rate_percent", "flat_shipping_rate", "updated_at")
+
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
     autocomplete_fields = ['parent']
-    list_display = ("name", "slug", "parent")
+    list_display = ("name", "slug", "parent", "created_at")
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
     list_filter = ("parent",)
@@ -96,8 +102,8 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ("title", "product_type", "category", "price", "rating", "rating_count", "is_digital", "stock", "is_active", "created_at")
-    list_filter = ("product_type", "category", "is_active", "is_digital")
+    list_display = ("title", "product_type", "category", "price", "rating", "rating_count", "stock", "is_active", "created_at")
+    list_filter = ("product_type", "category", "is_active")
     search_fields = ("title", "slug", "description", "sku")
     list_select_related = ("category",)
     inlines = [ProductImageInline, ReviewInline]
@@ -107,7 +113,7 @@ class ProductAdmin(admin.ModelAdmin):
         ("Basics", {"fields": ("title", "slug", "product_type", "category", "description", "is_active")}),
         ("Pricing", {"fields": ("price", "pay_in_4_amount")}),
         ("Ratings", {"fields": ("rating", "rating_count")}),
-        ("Fulfillment", {"fields": ("is_digital", "sku", "stock")}),
+        ("Fulfillment", {"fields": ("sku", "stock")}),
         ("BNPL", {"fields": tuple(
             f for f in ("bnpl_enabled", "default_bnpl_plan") if hasattr(Product, f)
         ) or ()}),
@@ -180,8 +186,37 @@ class OrderAdmin(admin.ModelAdmin):
 
     @admin.action(description="Mark as fulfilled")
     def mark_fulfilled(self, request, queryset):
-        count = queryset.update(status=Order.Status.FULFILLED)
-        self.message_user(request, f"Marked {count} orders as fulfilled.", level=messages.SUCCESS)
+        from notifications.services import dispatch
+        from notifications.events import ORDER_FULFILLED
+        from django.conf import settings
+        
+        count = 0
+        send_email = getattr(settings, "ACCOUNT_EMAIL_NOTIFICATION", True)
+        
+        for order in queryset:
+            if order.status != Order.Status.FULFILLED:
+                order.status = Order.Status.FULFILLED
+                order.save(update_fields=['status'])
+                count += 1
+                
+                if order.user:
+                    first_item = order.items.first()
+                    item_name = first_item.title_snapshot or first_item.product.title if first_item else "items"
+                    other_count = order.items.count() - 1
+                    if other_count > 0:
+                        item_name = f"{item_name} and {other_count} other item(s)"
+                    
+                    dispatch(
+                        users=[order.user],
+                        message=ORDER_FULFILLED,
+                        ctx={"app_name": "Techxagon Store"},
+                        data={
+                            "order_id": f"#{str(order.id)[:8].upper()}",
+                            "item_name": item_name,
+                        },
+                        send_email=send_email,
+                    )
+        self.message_user(request, f"Marked {count} orders as fulfilled and notified users.", level=messages.SUCCESS)
 
     actions = ["mark_fulfilled"]
 
@@ -207,15 +242,6 @@ class PaymentAdmin(admin.ModelAdmin):
     list_filter = ("provider", "status", "currency")
     search_fields = ("id", "provider_ref", "order__id", "order__user__email")
     autocomplete_fields = ("order",)
-    readonly_fields = ("created_at", "updated_at")
-
-
-@admin.register(Entitlement)
-class EntitlementAdmin(admin.ModelAdmin):
-    list_display = ("user", "product", "created_at")
-    search_fields = ("user__email", "product__title")
-    list_select_related = ("user", "product")
-    autocomplete_fields = ("user", "product")
     readonly_fields = ("created_at", "updated_at")
 
 
@@ -338,6 +364,48 @@ class ReturnAuthorizationAdmin(admin.ModelAdmin):
         self.message_user(request, f"Refunded {count} RMAs.", level=messages.SUCCESS)
 
     actions = ["mark_approved", "mark_refunded"]
+
+
+class TicketMessageInline(admin.TabularInline):
+    model = TicketMessage
+    extra = 1
+    fields = ("sender", "message", "is_admin", "created_at")
+    readonly_fields = ("sender", "is_admin", "created_at", "updated_at")
+
+
+@admin.register(Ticket)
+class TicketAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "ticket_type", "order", "payment", "subject", "status", "priority", "created_at")
+    list_filter = ("status", "priority", "ticket_type", "created_at")
+    search_fields = ("id", "subject", "description", "user__email", "order__id", "payment__provider_ref")
+    readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ("user", "order", "payment")
+    inlines = [TicketMessageInline]
+    fieldsets = (
+        (None, {
+            "fields": ("user", "ticket_type", "order", "payment", "subject", "description")
+        }),
+        ("Status & Priority", {
+            "fields": ("status", "priority")
+        }),
+        ("Admin Notes / Resolution", {
+            "fields": ("admin_notes",)
+        }),
+        ("Timestamps", {
+            "fields": ("created_at", "updated_at"),
+            "classes": ("collapse",)
+        }),
+    )
+
+    def save_formset(self, request, form, formset, change):
+        instances = formset.save(commit=False)
+        for instance in instances:
+            if isinstance(instance, TicketMessage):
+                if not instance.pk:  # newly added message in inline
+                    instance.sender = request.user
+                    instance.is_admin = True
+            instance.save()
+        formset.save_m2m()
 
 
 @admin.register(ReturnItem)

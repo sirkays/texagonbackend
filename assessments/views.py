@@ -1,4 +1,5 @@
 # ===== Standard Library Imports =====
+import json
 import logging
 import math
 import traceback
@@ -43,7 +44,9 @@ from rest_framework.decorators import (
     api_view,
     authentication_classes,
     permission_classes,
+    parser_classes,
 )
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
@@ -379,12 +382,27 @@ def start_test(request, test_id: int):
         for qid in choices_map:
             choices_map[qid].sort(key=lambda c: (_choice_order(c), c.id))
 
+        # ── Deterministic per-student question shuffling ─────────────────────
+        # Seed with attempt.id so each student gets a unique order, but the
+        # same student always sees the same order when resuming the same attempt.
+        import random as _random
+        _rng = _random.Random(attempt.id)
+        _rng.shuffle(qs)
+        # ─────────────────────────────────────────────────────────────────────
+
         questions_out = []
         for q in qs:
             q_choices = choices_map.get(q.id, [])
             choice_objs = [{"id": c.id, "text": getattr(c, "text", str(c))} for c in q_choices]
             choice_texts = [co["text"] for co in choice_objs]
             qtype_norm = _map_qtype(q, len(q_choices), choice_texts)
+
+            image_url = None
+            if getattr(q, 'image', None):
+                try:
+                    image_url = q.image.url
+                except ValueError:
+                    pass
 
             questions_out.append({
                 "id": q.id,
@@ -393,6 +411,7 @@ def start_test(request, test_id: int):
                 "points": int(getattr(q, "points", 0) or 0),
                 "choices": choice_objs,
                 "options": choice_texts,
+                "image": image_url,
             })
 
         started_at = attempt.started_at or now
@@ -1421,6 +1440,14 @@ def _serialize_question(question: Question, include_correct_answers: bool = True
     # Get question text
     question_text = getattr(question, 'body', '') or getattr(question, 'text', '') or str(question)
     
+    # Get question image url safely
+    image_url = None
+    if getattr(question, 'image', None):
+        try:
+            image_url = question.image.url
+        except ValueError:
+            pass
+            
     result = {
         'id': str(question.id),
         'type': frontend_type,
@@ -1428,7 +1455,8 @@ def _serialize_question(question: Question, include_correct_answers: bool = True
         'points': int(getattr(question, 'points', 1) or 1),
         'options': [getattr(choice, 'text', str(choice)) for choice in choices],
         'explanation': getattr(question, 'explanation', '') or (question.meta or {}).get('explanation', ''),
-        'difficulty': (question.meta or {}).get('difficulty', 'Medium')
+        'difficulty': (question.meta or {}).get('difficulty', 'Medium'),
+        'image': image_url,
     }
     
     if include_correct_answers and choices:
@@ -2072,6 +2100,7 @@ def duplicate_test(request, test_id: int):
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 @transaction.atomic
 def add_question(request, test_id: int):
     try:
@@ -2092,13 +2121,16 @@ def add_question(request, test_id: int):
 
         data = request.data or {}
 
-
         question_text = data.get("question", "").strip()
         if not question_text:
             return Response({"detail": "Question text is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         question_type = data.get("type", "single-choice")
-        points = max(1, int(data.get("points", 1)))
+        
+        try:
+            points = max(1, int(data.get("points", 1)))
+        except (ValueError, TypeError):
+            points = 1
 
         type_mapping = {
             "single-choice": "scq",
@@ -2113,12 +2145,15 @@ def add_question(request, test_id: int):
         max_order = test.questions.aggregate(m=Max("order"))["m"] or 0
         order = max_order + 1
 
+        image_file = request.FILES.get("image")
+
         question = Question.objects.create(
             test=test,
             order=order,
             qtype=qtype,
             body=question_text,
             points=points,
+            image=image_file,
             meta={
                 "explanation": data.get("explanation", ""),
                 "difficulty": data.get("difficulty", "Medium"),
@@ -2128,16 +2163,26 @@ def add_question(request, test_id: int):
         question.test.update_total_marks()
 
         options = data.get("options", [])
+        if isinstance(options, str):
+            try:
+                options = json.loads(options)
+            except json.JSONDecodeError:
+                options = []
+
         correct_answer = data.get("correctAnswer")
 
         if options and question_type in ["single-choice", "true-false"]:
             for i, option_text in enumerate(options):
                 is_correct = False
                 if question_type == "true-false":
-                    is_correct = (option_text.lower() == "true" and correct_answer is True) or \
-                                 (option_text.lower() == "false" and correct_answer is False)
-                elif question_type == "single-choice" and isinstance(correct_answer, int):
-                    is_correct = (i == correct_answer)
+                    is_correct = (option_text.lower() == "true" and (correct_answer is True or str(correct_answer).lower() == "true")) or \
+                                 (option_text.lower() == "false" and (correct_answer is False or str(correct_answer).lower() == "false"))
+                elif question_type == "single-choice" and correct_answer is not None:
+                    try:
+                        correct_idx = int(correct_answer)
+                        is_correct = (i == correct_idx)
+                    except (ValueError, TypeError):
+                        is_correct = False
 
                 Choice.objects.create(
                     question=question,
@@ -2166,6 +2211,7 @@ def add_question(request, test_id: int):
 @api_view(["PUT", "PATCH"])
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 @transaction.atomic
 def update_question(request, test_id: int, question_id: int):
     """Update a question and its choices."""
@@ -2189,7 +2235,21 @@ def update_question(request, test_id: int, question_id: int):
         if 'question' in data:
             question.body = data['question'].strip()
         if 'points' in data:
-            question.points = max(1, int(data['points']))
+            try:
+                question.points = max(1, int(data['points']))
+            except (ValueError, TypeError):
+                pass
+        
+        # Handle image field updates
+        if 'image' in request.FILES:
+            # Delete old image file first if we are replacing it
+            if question.image:
+                question.image.delete(save=False)
+            question.image = request.FILES['image']
+        elif str(data.get('clear_image', '')).lower() in ('1', 'true', 'yes'):
+            if question.image:
+                question.image.delete(save=False)
+            question.image = None
         
         # Update meta
         meta = question.meta or {}
@@ -2206,16 +2266,26 @@ def update_question(request, test_id: int, question_id: int):
             question.choices.all().delete()
             
             options = data.get('options', [])
+            if isinstance(options, str):
+                try:
+                    options = json.loads(options)
+                except json.JSONDecodeError:
+                    options = []
+
             correct_answer = data.get('correctAnswer')
             question_type = data.get('type', 'single-choice')
             
             for i, option_text in enumerate(options):
                 is_correct = False
                 if question_type == 'true-false':
-                    is_correct = (option_text.lower() == 'true' and correct_answer is True) or \
-                                (option_text.lower() == 'false' and correct_answer is False)
-                elif question_type == 'single-choice' and isinstance(correct_answer, int):
-                    is_correct = (i == correct_answer)
+                    is_correct = (option_text.lower() == 'true' and (correct_answer is True or str(correct_answer).lower() == 'true')) or \
+                                (option_text.lower() == 'false' and (correct_answer is False or str(correct_answer).lower() == 'false'))
+                elif question_type == 'single-choice' and correct_answer is not None:
+                    try:
+                        correct_idx = int(correct_answer)
+                        is_correct = (i == correct_idx)
+                    except (ValueError, TypeError):
+                        is_correct = False
                 
                 Choice.objects.create(
                     question=question,

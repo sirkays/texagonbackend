@@ -45,8 +45,6 @@ urlpatterns = [
     # returns
     path("orders/<uuid:order_id>/rma/", views.rma_create),
 
-    # digital entitlements
-    path("me/entitlements/", views.entitlements_list),
 
     # Customer-facing
     path("orders/<uuid:order_id>/shipments/", views.order_shipments_list, name="order-shipments-list"),

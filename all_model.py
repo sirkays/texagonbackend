@@ -197,6 +197,7 @@ class StudentProfile(TimeStampedModel):
     # Keeping unique=True is highly recommended if you enforce uniqueness
     admission_no = models.CharField(max_length=64, blank=True, null=True) 
     dob = models.DateField(null=True, blank=True)
+    gender = models.CharField(max_length=20, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         # Only generate if admission_no is empty AND an organization is attached
@@ -257,8 +258,8 @@ class StudentProfile(TimeStampedModel):
         cached_date = cached_data.get("general_activation_date")
         date_cached_str = cached_data.get("date_cached")
 
-        # If either is missing, treat as invalid
-        if not (cached_date and date_cached_str):
+        # If date_cached_str is missing, treat as invalid
+        if not date_cached_str:
             return False
 
         # Parse date_cached (prefer ISO-8601)
@@ -318,7 +319,7 @@ class StudentProfile(TimeStampedModel):
             if isinstance(cached_date, str):
                 cached_date = parse_datetime(cached_date)
 
-            if cached_date and cached_date > now:
+            if cached_date is None or cached_date > now:
                 if is_session:
                     returned_count = 2
                     return (course_ids, cached_date), returned_count
@@ -327,16 +328,15 @@ class StudentProfile(TimeStampedModel):
         # 4️⃣ Compute fresh queryset
         leaderboard_season = resolve_season(self.organization, now)
 
+        from django.db.models import Q, Max
         queryset = self.enrollments.filter(
             leaderboard_season=leaderboard_season,
-            course__course_type="public",
             completed_at__isnull=True,
             status="active",
-            course__general_activation_date__isnull=False,
+            course__general_activation=True,
+        ).filter(
+            Q(course__general_activation_date__isnull=True) | Q(course__general_activation_date__gt=now)
         )
-
-        if is_general_activation:
-            queryset = queryset.filter(course__general_activation=True)
 
         # 5️⃣ Extract course IDs and latest activation date
         course_ids = list(queryset.values_list("course_id", flat=True))
@@ -346,14 +346,14 @@ class StudentProfile(TimeStampedModel):
         )["course__general_activation_date__max"]
 
         # 6️⃣ Cache safely (serialize datetime)
-        if max_activation_date:
+        if course_ids:
             request.session[session_key] = {
                 "course_ids": course_ids,
-                "general_activation_date": max_activation_date.isoformat(),
-                "date_cached":timezone.now().isoformat(),
+                "general_activation_date": max_activation_date.isoformat() if max_activation_date else None,
+                "date_cached": timezone.now().isoformat(),
             }
-
-            #print(request.session.get("allowed_courses_cache"))
+        else:
+            request.session.pop(session_key, None)
 
         # 7️⃣ Return based on mode
         if is_session:
@@ -1145,6 +1145,181 @@ class EmailChangeRequest(models.Model):
 
     def is_valid(self) -> bool:
         return (not self.used) and (self.expires_at >= timezone.now())
+
+
+
+class StudentProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="students", blank=True, null=True)
+    current_classroom = models.ForeignKey(Classroom, on_delete=models.SET_NULL, null=True, blank=True)
+    
+    # Keeping unique=True is highly recommended if you enforce uniqueness
+    admission_no = models.CharField(max_length=64, blank=True, null=True) 
+    dob = models.DateField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        # Only generate if admission_no is empty AND an organization is attached
+        if not self.admission_no and self.organization:
+            
+            org_year = self.organization.year
+            # Custom alphabet: Numbers + Uppercase letters (removed lookalikes like 0, O, I, 1 for clarity if desired, but here is a standard alphanumeric mix)
+            alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' 
+            
+            while True:
+                # Generate a 6-character random string
+                unique_str = generate(alphabet, 6)
+                
+                # Format: e.g., 2026/A4K9X2
+                new_admission_no = f"{org_year}/{unique_str}"
+                
+                # Check for collisions; break the loop if unique
+                if not StudentProfile.objects.filter(admission_no=new_admission_no).exists():
+                    self.admission_no = new_admission_no
+                    break
+
+        # Call the parent class's save method
+        super().save(*args, **kwargs)
+
+
+    def __str__(self):
+        return f"Student: {self.user.get_full_name() or self.user.username}"
+
+
+
+    def check_session_data(self, request, _retry=False):
+        from billing.models import UserAccountSubscription
+
+        # ── Fast path: active subscription in DB ──────────────────────────
+        if UserAccountSubscription.has_subscription(self.user, self.organization):
+            return True
+
+        # ── Session-cache path (only valid for cookie-session requests) ───
+        # For token-authenticated API requests the Django session is always
+        # empty, so skip the cache entirely and rely solely on the DB check.
+        session_key = "allowed_courses_cache"
+        session = getattr(request, "session", None)
+
+        # If the session backend hasn't been initialised (token auth),
+        # treat the student as not-allowed (subscription check already failed above).
+        if session is None or not hasattr(session, "get"):
+            return False
+
+        # Load cache (populate if missing)
+        cached_data = session.get(session_key)
+        if cached_data is None:
+            self.get_course_allowed(request)
+            cached_data = session.get(session_key)
+
+        if not cached_data:
+            return False
+
+        cached_date = cached_data.get("general_activation_date")
+        date_cached_str = cached_data.get("date_cached")
+
+        # If either is missing, treat as invalid
+        if not (cached_date and date_cached_str):
+            return False
+
+        # Parse date_cached (prefer ISO-8601)
+        try:
+            from django.utils.dateparse import parse_datetime
+            date_cached_dt = parse_datetime(date_cached_str)
+
+            if date_cached_dt is None:
+                raise ValueError("Could not parse date_cached")
+            if timezone.is_naive(date_cached_dt):
+                date_cached_dt = timezone.make_aware(date_cached_dt, timezone.get_current_timezone())
+
+        except Exception:
+            session.pop(session_key, None)
+            return False
+
+        # Expire after 1 hour
+        if timezone.now() - date_cached_dt > timedelta(hours=1):
+            session.pop(session_key, None)
+            if _retry:
+                return False
+            return self.check_session_data(request, _retry=True)
+
+        return True
+
+
+
+    def get_course_allowed(self, request, **kwargs):
+        from core.utils import resolve_season
+        from billing.models import UserAccountSubscription
+
+        is_session = kwargs.get("is_session", False)
+        is_general_activation = kwargs.get("is_general_activation", False)
+
+        now = timezone.now()
+        session_key = "allowed_courses_cache"
+
+        # 1️⃣ Check session cache
+        cached_data = request.session.get(session_key)
+
+        course_ids = []
+        cached_date = None
+        returned_count = 0
+
+        # 2️⃣ User has active subscription or unrestricted access
+        if (
+            UserAccountSubscription.has_subscription(self.user, self.organization)
+        ):
+            returned_count = 1
+            return True, returned_count
+
+        # 3️⃣ Use cached data if still valid
+        if cached_data:
+            cached_date = cached_data.get("general_activation_date")
+            course_ids = cached_data.get("course_ids", [])
+
+            if isinstance(cached_date, str):
+                cached_date = parse_datetime(cached_date)
+
+            if cached_date and cached_date > now:
+                if is_session:
+                    returned_count = 2
+                    return (course_ids, cached_date), returned_count
+                return self.enrollments.filter(course_id__in=course_ids)
+
+        # 4️⃣ Compute fresh queryset
+        leaderboard_season = resolve_season(self.organization, now)
+
+        queryset = self.enrollments.filter(
+            leaderboard_season=leaderboard_season,
+            course__course_type="public",
+            completed_at__isnull=True,
+            status="active",
+            course__general_activation_date__isnull=False,
+        )
+
+        if is_general_activation:
+            queryset = queryset.filter(course__general_activation=True)
+
+        # 5️⃣ Extract course IDs and latest activation date
+        course_ids = list(queryset.values_list("course_id", flat=True))
+
+        max_activation_date = queryset.aggregate(
+            Max("course__general_activation_date")
+        )["course__general_activation_date__max"]
+
+        # 6️⃣ Cache safely (serialize datetime)
+        if max_activation_date:
+            request.session[session_key] = {
+                "course_ids": course_ids,
+                "general_activation_date": max_activation_date.isoformat(),
+                "date_cached":timezone.now().isoformat(),
+            }
+
+            #print(request.session.get("allowed_courses_cache"))
+
+        # 7️⃣ Return based on mode
+        if is_session:
+            returned_count = 2
+            return (course_ids, max_activation_date), returned_count
+
+        return queryset
 
 
 
@@ -8508,58 +8683,6 @@ class StudentProjectSerializer(serializers.ModelSerializer):
 
 
 
-class TieringService:
-    """
-    Helper you can call from anywhere (views/serializers/model methods).
-    """
-    @staticmethod
-    def level_for_xp(xp: int) -> dict:
-        xp = max(int(xp or 0), 0)
-
-        # Current tier = highest threshold <= xp
-        current = (
-            Tier.objects
-            .filter(threshold_xp__lte=xp)
-            .order_by("-threshold_xp")
-            .first()
-        )
-
-        # If DB empty, fallback
-        if not current:
-            return {
-                "level_name": "Newbie",
-                "next_threshold": None,
-                "xp_to_next": 0,
-                "progress_to_next_pct": 100,
-            }
-
-        # Next tier = smallest threshold > xp
-        nxt = (
-            Tier.objects
-            .filter(threshold_xp__gt=current.threshold_xp)
-            .order_by("threshold_xp")
-            .first()
-        )
-
-        next_threshold = nxt.threshold_xp if nxt else None
-        xp_to_next = max(next_threshold - xp, 0) if next_threshold is not None else 0
-
-        floor = current.threshold_xp
-        if next_threshold is None:
-            pct = 100
-        else:
-            span = max(next_threshold - floor, 1)
-            pct = int(((xp - floor) / span) * 100)
-
-        return {
-            "level_name": current.name,
-            "next_threshold": next_threshold,
-            "xp_to_next": xp_to_next,
-            "progress_to_next_pct": pct,
-        }
-
-
-
 class Streak(TimeStampedModel):
     """
     Tracks a student's consecutive-day activity streak.
@@ -8891,3 +9014,600 @@ class ParentWriteSerializer(serializers.Serializer):
             instance.save()
 
         return instance
+
+
+
+class LessonSerializer(serializers.ModelSerializer):
+    course_id = serializers.IntegerField(source="module.course.id", read_only=True)
+    course_name = serializers.CharField(source="module.course.name", read_only=True)
+    module_name = serializers.CharField(source="module.name", read_only=True)
+
+    class Meta:
+        model = Lesson
+        fields = "__all__"
+
+
+
+class AssignmentSerializer(serializers.ModelSerializer):
+    course_type = serializers.CharField(source="course.course_type", read_only=True)
+    course_name = serializers.CharField(source="course.title", read_only=True)
+    submission_count = serializers.SerializerMethodField(read_only=True)
+    graded_count = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Assignment
+        fields = "__all__"
+
+    def get_submission_count(self, obj):
+        return obj.submissions.count()
+
+    def get_graded_count(self, obj):
+        return obj.submissions.filter(score__isnull=False).count()
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        if instance.lesson:
+            rep['lesson_details'] = LessonSerializer(instance.lesson, context=self.context).data
+        else:
+            rep['lesson_details'] = None
+        return rep
+
+
+
+class AppVersion(TimeStampedModel):
+    """Tracks application versions and updates for each platform."""
+
+    PLATFORM_CHOICES = [
+        ('windows', 'Windows'),
+        ('android', 'Android'),
+        ('ios', 'iOS'),
+        ('macos', 'macOS'),
+    ]
+
+    version = models.CharField(max_length=20)
+    build_number = models.IntegerField()
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
+    download_url = models.URLField(max_length=2048)
+    file_size = models.BigIntegerField(null=True, blank=True)
+    release_notes = models.TextField(blank=True)
+    is_force_update = models.BooleanField(default=False)
+    min_supported_version = models.CharField(max_length=20, blank=True, default='')
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = ['version', 'platform']
+
+    def __str__(self):
+        return f'{self.platform} v{self.version} (build {self.build_number})'
+
+
+
+class Test(TimeStampedModel):
+    class Visibility(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        PUBLISHED = "published", "Published"
+        CLOSED = "closed", "Closed"
+
+    # ✅ NEW
+    class Mode(models.TextChoices):
+        ONLINE = "online", "Online"
+        OFFLINE = "offline", "Offline"
+
+    course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="tests")
+    title = models.CharField(max_length=255)
+    duration_minutes = models.PositiveIntegerField(default=30)
+    total_marks = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    visibility = models.CharField(max_length=16, choices=Visibility.choices, default=Visibility.DRAFT)
+
+    # ✅ NEW (teacher sets this)
+    mode = models.CharField(max_length=16, choices=Mode.choices, default=Mode.ONLINE, db_index=True)
+
+    instructions = models.TextField(blank=True)
+    start_at = models.DateTimeField(null=True, blank=True)
+    end_at = models.DateTimeField(null=True, blank=True)
+    settings = models.JSONField(default=dict, blank=True)
+    excluded_users = models.ManyToManyField("academics.StudentProfile",blank=True)
+    require_browser_code = models.BooleanField(default=True)
+    show_score = models.BooleanField(default=True)
+    academic_session = models.ForeignKey(
+        "orgs.AcademicSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tests"
+    )
+
+    def __str__(self):
+        return self.title
+
+
+    def update_total_marks(self):
+        total = self.questions.aggregate(
+            total=Sum("points")
+        )["total"] or 0
+        self.total_marks = total
+        self.save(update_fields=["total_marks"])
+
+
+
+class Question(TimeStampedModel):
+    class Type(models.TextChoices):
+        SCQ = "scq", "Single Choice"
+        MCQ = "mcq", "Multiple Choice"
+        TRUE_FALSE = "tf", "True/False"
+        SHORT = "short", "Short Answer"
+        ESSAY = "essay", "Essay"
+
+    test = models.ForeignKey(Test, on_delete=models.CASCADE, related_name="questions")
+    order = models.PositiveIntegerField(default=1)
+    qtype = models.CharField(max_length=8, choices=Type.choices)
+    body = models.TextField()
+    points = models.DecimalField(max_digits=6, decimal_places=2, default=1)
+    meta = models.JSONField(default=dict, blank=True)
+    image = models.ImageField(upload_to="questions/", null=True, blank=True)
+
+    class Meta:
+        ordering = ["order"]
+        unique_together = ("test", "order")
+
+
+
+class HistoricalTestAttempt(TimeStampedModel):
+    """
+    Stores an audit record of a test attempt before it is deleted by a teacher.
+    """
+    test_title = models.CharField(max_length=255)
+    student_name = models.CharField(max_length=255)
+    student_email = models.CharField(max_length=255, blank=True)
+    original_attempt_id = models.IntegerField()
+    score = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    started_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    
+    def __str__(self):
+        return f"HistoricalAttempt {self.original_attempt_id} for {self.student_name}"
+
+
+
+class TestMiniSerializer(serializers.ModelSerializer):
+    # No need for 'source' here; DRF automatically maps course_id
+    course_id = serializers.IntegerField(read_only=True)
+    course_name = serializers.CharField(source="course.name", read_only=True)
+
+    class Meta:
+        model = Test
+        fields = [
+            "id",
+            "title",
+            "duration_minutes",
+            "total_marks",
+            "visibility",
+            "start_at",
+            "end_at",
+            "course_id",
+            "course_name",
+            "require_browser_code",
+            "show_score",
+        ]
+        read_only_fields = fields
+
+
+
+class TieringService:
+    """
+    Helper you can call from anywhere (views/serializers/model methods).
+    """
+    @staticmethod
+    def level_for_xp(xp: int) -> dict:
+        xp = max(int(xp or 0), 0)
+
+        # Current tier = highest threshold <= xp
+        current = (
+            Tier.objects
+            .filter(threshold_xp__lte=xp)
+            .order_by("-threshold_xp")
+            .first()
+        )
+
+        # If DB empty, fallback
+        if not current:
+            return {
+                "level_name": "Newbie",
+                "next_threshold": None,
+                "xp_to_next": 0,
+                "progress_to_next_pct": 100,
+            }
+
+        # Next tier = smallest threshold > xp
+        nxt = (
+            Tier.objects
+            .filter(threshold_xp__gt=current.threshold_xp)
+            .order_by("threshold_xp")
+            .first()
+        )
+
+        next_threshold = nxt.threshold_xp if nxt else None
+        xp_to_next = max(next_threshold - xp, 0) if next_threshold is not None else 0
+
+        floor = current.threshold_xp
+        if next_threshold is None:
+            pct = 100
+        else:
+            span = max(next_threshold - floor, 1)
+            pct = int(((xp - floor) / span) * 100)
+
+        return {
+            "level_name": current.name,
+            "next_threshold": next_threshold,
+            "xp_to_next": xp_to_next,
+            "progress_to_next_pct": pct,
+        }
+
+
+
+class Streak(TimeStampedModel):
+    """
+    Tracks a student's consecutive-day activity streak.
+    One row per (student, season) pair.
+    """
+    student = models.ForeignKey(
+        "academics.StudentProfile",
+        on_delete=models.CASCADE,
+        related_name="streaks",
+    )
+    season = models.ForeignKey(
+        LeaderboardSeason,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="season_streaks",
+        db_index=True,
+    )
+    current_days = models.PositiveIntegerField(default=0)
+    longest_days = models.PositiveIntegerField(default=0)
+    last_activity = models.DateField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("student", "season")
+        indexes = [
+            models.Index(fields=["student", "season"]),
+        ]
+
+    @classmethod
+    def set_student_streak(cls, student, org, event_type, code):
+        """
+        Recompute the current streak from ActivityEvent records and save it.
+        """
+        if event_type != "daily_active" or code != "streak_champion":
+            return
+
+        ev_qs = ActivityEvent.objects.filter(
+            student=student,
+            organization=org,
+            event_type=event_type,
+        )
+
+        day_count, _ = build_streak(ev_qs)
+
+        # Resolve the current season
+        occurred_at = timezone.now()
+
+        # 1) Prefer active season if it contains the date
+        active = LeaderboardSeason.get_active(org)
+        if active and active.contains(occurred_at):
+            season = active
+        else:
+            # 2) Otherwise find by date range
+            season = (
+                LeaderboardSeason.objects
+                .filter(start_at__lte=occurred_at, end_at__gt=occurred_at)
+                .order_by("-start_at")
+                .first()
+            )
+
+        streak, is_created = cls.objects.update_or_create(
+            student=student,
+            season=season,
+            defaults={
+                "current_days": day_count,
+                "last_activity": timezone.localdate(),
+            }
+        )
+
+        if streak.longest_days < day_count:
+            streak.longest_days = day_count
+            streak.save(update_fields=["longest_days"])
+
+        # Late import to avoid circular dependency
+        from gamification.services.engine import log_event
+        from datetime import date
+
+        org_id = org.id if hasattr(org, "id") else org
+        log_event(
+            student=student,
+            org=org,
+            event_type="streak_current",
+            value=streak.current_days,
+            meta={"longest": streak.longest_days},
+            dedupe_key=f"streak_current:org={org_id}:student={student.id}:date={date.today().isoformat()}",
+        )
+
+
+
+class Organization(NamedModel):
+    class VideoConferencing(models.TextChoices):
+        KONNECT = "konnect", "Konnect"
+        LIVE = "live", "Live (Legacy)"
+
+    slug = models.SlugField(unique=True)
+    logo = models.ImageField(upload_to="org_logos/", blank=True, null=True)
+    address = models.TextField(blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    contact_email = models.EmailField(blank=True)
+    contact_phone = models.CharField(max_length=32, blank=True)
+    is_active = models.BooleanField(default=True)
+    year = models.CharField(default="2026")
+    allow_unsubscribed_users = models.BooleanField(default=False)
+    video_conferencing = models.CharField(
+        max_length=16,
+        choices=VideoConferencing.choices,
+        default=VideoConferencing.KONNECT,
+        help_text="Video conferencing provider used by this organisation.",
+    )
+
+    class Meta:
+        indexes = [models.Index(fields=["slug"])]
+
+    @property
+    def active_subscription(self):
+        return self.subscriptions.filter(status="active").order_by("-end_date").first()
+
+
+
+class StoreConfiguration(TimeStampedModel):
+    """
+    Singleton model for global store settings like tax rate and flat shipping cost.
+    """
+    tax_rate_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("7.50"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="VAT/Tax rate as a percentage (e.g., 7.50 for 7.5%)"
+    )
+    flat_shipping_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Flat rate shipping cost applied to orders"
+    )
+
+    class Meta:
+        verbose_name = "Store Configuration"
+        verbose_name_plural = "Store Configuration"
+
+    def __str__(self):
+        return "Global Store Configuration"
+
+    def save(self, *args, **kwargs):
+        # Ensure only one instance exists
+        if StoreConfiguration.objects.exists() and not self.pk:
+            return StoreConfiguration.objects.first()
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls):
+        obj, created = cls.objects.get_or_create()
+        return obj
+
+
+
+class Product(TimeStampedModel):
+    class ProductType(models.TextChoices):
+        LAPTOP = "laptop", _("Laptop")
+        GADGET = "gadget", _("Gadget")
+        IOT_DEVICE = "iot_device", _("IoT Device")
+        ACCESSORY = "accessory", _("Accessory")
+        HARDWARE = "hardware", _("Hardware")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=200, db_index=True)
+    slug = models.SlugField(max_length=220, unique=True, default="slug001")
+    product_type = models.CharField(max_length=20, choices=ProductType.choices, db_index=True, default=ProductType.LAPTOP)
+
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products", blank=True, null=True)
+    description = models.TextField(blank=True)
+    
+    # Detailed specs
+    brand = models.CharField(max_length=100, blank=True)
+    warranty = models.CharField(max_length=100, blank=True, help_text="e.g. 1 Year Limited Warranty")
+    features = models.TextField(blank=True, help_text="HTML or bullet points for key features")
+    specifications = models.JSONField(default=dict, blank=True, help_text="Key-value pairs for tech specs")
+    # Pricing
+    price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))])
+    # Denormalized “pay in 4” display (optional). If null, compute on the fly.
+    pay_in_4_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    bnpl_enabled = models.BooleanField(default=True)
+    default_bnpl_plan = models.ForeignKey(
+        "BNPLPlanTemplate", null=True, blank=True, on_delete=models.SET_NULL, related_name="default_for_products"
+    )
+
+    # Ratings shown on the tiles (e.g., 4.8 (2847))
+    rating = models.DecimalField(
+        max_digits=3, decimal_places=1, default=Decimal("0.0"),
+        validators=[MinValueValidator(Decimal("0.0")), MaxValueValidator(Decimal("5.0"))],
+        help_text="Average rating 0.0–5.0"
+    )
+    rating_count = models.PositiveIntegerField(default=0)
+
+    # Physical item details
+    sku = models.CharField(max_length=64, blank=True, help_text="Required/used for physical items.")
+    stock = models.PositiveIntegerField(default=0, help_text="Inventory for physical items only.")
+
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["title"]
+        indexes = [
+            models.Index(fields=["product_type", "is_active"]),
+            models.Index(fields=["price"]),
+        ]
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        if self.pay_in_4_amount is None and self.price is not None:
+            # round to 2dp for display parity
+            self.pay_in_4_amount = (self.price / Decimal("4")).quantize(Decimal("0.01"))
+        super().save(*args, **kwargs)
+
+
+
+class Ticket(TimeStampedModel):
+    class Status(models.TextChoices):
+        OPEN = "open", _("Open")
+        IN_PROGRESS = "in_progress", _("In Progress")
+        RESOLVED = "resolved", _("Resolved")
+        CLOSED = "closed", _("Closed")
+
+    class TicketType(models.TextChoices):
+        ORDER = "order", _("Order Issue")
+        PAYMENT = "payment", _("Payment Issue")
+        GENERAL = "general", _("General Issue")
+
+    class Priority(models.TextChoices):
+        LOW = "low", _("Low")
+        MEDIUM = "medium", _("Medium")
+        HIGH = "high", _("High")
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="tickets")
+    ticket_type = models.CharField(max_length=12, choices=TicketType.choices, default=TicketType.GENERAL)
+    order = models.ForeignKey(Order, null=True, blank=True, on_delete=models.SET_NULL, related_name="tickets")
+    payment = models.ForeignKey(Payment, null=True, blank=True, on_delete=models.SET_NULL, related_name="tickets")
+    subject = models.CharField(max_length=255)
+    description = models.TextField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    priority = models.CharField(max_length=8, choices=Priority.choices, default=Priority.MEDIUM)
+    admin_notes = models.TextField(blank=True, help_text="Notes/replies from support administrators")
+
+    def __str__(self):
+        return f"Ticket #{self.id} — {self.subject} ({self.get_status_display()})"
+
+
+
+class TicketMessage(TimeStampedModel):
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    message = models.TextField()
+    is_admin = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"Message by {self.sender} on Ticket #{self.ticket.id}"
+
+    def save(self, *args, **kwargs):
+        is_new = self._state.adding
+        super().save(*args, **kwargs)
+        if is_new and self.is_admin:
+            # Send notification to the user
+            try:
+                from notifications.services import dispatch
+                from notifications.models import Notification
+                from notifications.messages import MessageSpec
+                from django.conf import settings
+                
+                send_email = getattr(settings, "ACCOUNT_EMAIL_NOTIFICATION", True)
+                spec = MessageSpec(
+                    kind=Notification.Kind.SYSTEM,
+                    title_template="Support ticket reply: #TCK-{{ data.ticket_id }}",
+                    body_template="Support staff replied to your ticket '{{ data.subject }}': {{ data.snippet }}",
+                )
+                snippet = self.message[:80] + "..." if len(self.message) > 80 else self.message
+                dispatch(
+                    users=[self.ticket.user],
+                    message=spec,
+                    data={
+                        "ticket_id": self.ticket.id,
+                        "subject": self.ticket.subject,
+                        "snippet": snippet
+                    },
+                    send_email=send_email
+                )
+            except Exception:
+                pass
+
+
+
+class BNPLPlanTemplate(TimeStampedModel):
+    """
+    Merchant-configured 'Pay in X' template for a BNPL provider.
+    Used to:
+      1) show messaging on PDP/PLP,
+      2) generate schedules for orders that opt into BNPL.
+    """
+    class Provider(models.TextChoices):
+        FLUTTERWAVE = "flutterwave", _("Flutterwave")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    provider = models.CharField(max_length=20, choices=Provider.choices, db_index=True)
+    name = models.CharField(max_length=120, default="Pay in 4")
+    num_installments = models.PositiveSmallIntegerField(default=4, validators=[MinValueValidator(2)])
+    # e.g., 14 days between installments (many providers are biweekly)
+    interval_days = models.PositiveSmallIntegerField(default=14)
+    # Optional downpayment as first installment (common is 25% at checkout for 4-in-4)
+    take_downpayment_now = models.BooleanField(default=True)
+
+    # Eligibility & limits
+    currency = models.CharField(max_length=10, default="NGN")
+    min_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    max_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+
+    # Fees (snapshot into agreement at checkout)
+    customer_fee_flat = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    customer_fee_rate = models.DecimalField(  # percent in decimal form, e.g. 0.00–0.20
+        max_digits=5, decimal_places=4, default=Decimal("0.0000"),
+        help_text="Applied to order total for customer (rare; many providers charge merchant instead)."
+    )
+    merchant_fee_rate = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0.0000"))
+
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["provider", "name"]
+        unique_together = [("provider", "name"), ("provider", "num_installments", "interval_days")]
+
+    def __str__(self):
+        return f"{self.get_provider_display()} — {self.name}"
+
+
+
+class UserStoreProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="store_profile")
+    email_verified = models.BooleanField(default=False)
+    phone = models.CharField(max_length=32, blank=True)
+    address = models.TextField(blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    zip_code = models.CharField(max_length=20, blank=True)
+
+    def __str__(self):
+        return f"{self.user.email} - Store Profile"
+
+
+
+class SavedItem(TimeStampedModel):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="saved_items")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="saved_by_users")
+
+    class Meta:
+        unique_together = [("user", "product")]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.email} saved {self.product.title}"

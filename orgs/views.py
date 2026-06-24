@@ -3701,3 +3701,378 @@ def admin_enroll_classroom_to_course(request, course_id: int):
         return Response({"detail": "Unexpected error.", "error": str(e)},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+# ---------------------------------------------------------------
+# De-Enrollment helpers
+# ---------------------------------------------------------------
+
+def _has_submissions_for_course(student, course):
+    """
+    Returns a dict describing whether a student has any submissions for
+    the given course.  Used to block de-enrollment.
+
+    Checks:
+      - CBT: TestAttempt with submitted_at set (not just in_progress)
+      - Assignment: any Submission for an assignment in this course
+      - Code IDE: any CodeProject for a lesson in this course's modules
+    """
+    from assessments.models import TestAttempt, Submission
+    from codeide.models import CodeProject
+
+    reasons = []
+
+    has_cbt = TestAttempt.objects.filter(
+        student=student,
+        test__course=course,
+        submitted_at__isnull=False,
+    ).exists()
+    if has_cbt:
+        reasons.append("has CBT submission")
+
+    has_assignment = Submission.objects.filter(
+        student=student,
+        assignment__course=course,
+    ).exists()
+    if has_assignment:
+        reasons.append("has assignment submission")
+
+    has_code = CodeProject.objects.filter(
+        student=student,
+        lesson__module__course=course,
+    ).exists()
+    if has_code:
+        reasons.append("has code IDE submission")
+
+    return reasons
+
+
+# ---------------------------------------------------------------
+# Bulk De-Enrollment — selected students
+# ---------------------------------------------------------------
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_bulk_de_enroll_students(request, course_id: int):
+    """
+    POST /orgs/api/admin/courses/<course_id>/bulk-de-enroll/
+
+    De-enroll multiple students from a course.
+
+    Body:
+      { "student_ids": [<int>, ...] }
+
+    A student is blocked from de-enrollment if they have submitted:
+      - a CBT test attempt
+      - an assignment submission
+      - a code IDE project
+
+    Returns:
+      {
+        "de_enrolled": <count>,
+        "blocked": <count>,
+        "not_found": <count>,
+        "not_enrolled": <count>,
+        "details": [
+          {"student_id": <int>, "name": <str>, "status": "de_enrolled"|"blocked"|"not_found"|"not_enrolled", "reasons": [<str>]}
+        ]
+      }
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        course = (
+            Course.objects
+            .select_related("subject", "classroom", "teacher__user")
+            .filter(id=course_id, organization=org)
+            .first()
+        )
+        if not course:
+            return Response({"detail": "Course not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        student_ids = data.get("student_ids", [])
+
+        if not isinstance(student_ids, list) or not student_ids:
+            return Response({"detail": "'student_ids' must be a non-empty list of integers."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            student_ids = [int(i) for i in student_ids]
+        except (TypeError, ValueError):
+            return Response({"detail": "All student IDs must be integers."}, status=status.HTTP_400_BAD_REQUEST)
+
+        students_qs = StudentProfile.objects.filter(id__in=student_ids, organization=org).select_related("user")
+        found_ids = set(students_qs.values_list("id", flat=True))
+        not_found_ids = [i for i in student_ids if i not in found_ids]
+
+        # Fetch existing enrollments
+        enrollment_map = {
+            e.student_id: e
+            for e in Enrollment.objects.filter(student_id__in=found_ids, course=course)
+        }
+
+        de_enrolled_count = 0
+        blocked_count = 0
+        not_enrolled_count = 0
+        details = []
+
+        with transaction.atomic():
+            for student in students_qs:
+                enrollment = enrollment_map.get(student.id)
+                if not enrollment:
+                    not_enrolled_count += 1
+                    details.append({
+                        "student_id": student.id,
+                        "name": student.user.get_full_name() or student.user.email,
+                        "status": "not_enrolled",
+                        "reasons": [],
+                    })
+                    continue
+
+                reasons = _has_submissions_for_course(student, course)
+                if reasons:
+                    blocked_count += 1
+                    details.append({
+                        "student_id": student.id,
+                        "name": student.user.get_full_name() or student.user.email,
+                        "status": "blocked",
+                        "reasons": reasons,
+                    })
+                    continue
+
+                enrollment.delete()
+                de_enrolled_count += 1
+                details.append({
+                    "student_id": student.id,
+                    "name": student.user.get_full_name() or student.user.email,
+                    "status": "de_enrolled",
+                    "reasons": [],
+                })
+
+        for sid in not_found_ids:
+            details.append({"student_id": sid, "name": None, "status": "not_found", "reasons": []})
+
+        return Response(
+            {
+                "course_id": course.id,
+                "course_name": course.name,
+                "de_enrolled": de_enrolled_count,
+                "blocked": blocked_count,
+                "not_enrolled": not_enrolled_count,
+                "not_found": len(not_found_ids),
+                "details": details,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------------------------------------------------------------
+# De-Enrollment — entire classroom
+# ---------------------------------------------------------------
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_de_enroll_classroom(request, course_id: int):
+    """
+    POST /orgs/api/admin/courses/<course_id>/de-enroll-classroom/
+
+    De-enroll every student in a classroom from a course.
+
+    Body:
+      { "classroom_id": <int> }
+
+    Returns same shape as admin_bulk_de_enroll_students.
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        course = (
+            Course.objects
+            .select_related("subject", "classroom", "teacher__user")
+            .filter(id=course_id, organization=org)
+            .first()
+        )
+        if not course:
+            return Response({"detail": "Course not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        classroom_id = data.get("classroom_id")
+        if not classroom_id:
+            return Response({"detail": "'classroom_id' is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            classroom_id = int(classroom_id)
+        except (TypeError, ValueError):
+            return Response({"detail": "'classroom_id' must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
+
+        classroom = Classroom.objects.filter(id=classroom_id, organization=org).first()
+        if not classroom:
+            return Response({"detail": "Classroom not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        students_qs = StudentProfile.objects.filter(
+            organization=org,
+            current_classroom=classroom,
+        ).select_related("user")
+
+        if not students_qs.exists():
+            return Response(
+                {
+                    "course_id": course.id,
+                    "course_name": course.name,
+                    "classroom": classroom.name,
+                    "de_enrolled": 0,
+                    "blocked": 0,
+                    "not_enrolled": 0,
+                    "not_found": 0,
+                    "details": [],
+                    "message": "No students found in this classroom.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        student_ids = set(students_qs.values_list("id", flat=True))
+        enrollment_map = {
+            e.student_id: e
+            for e in Enrollment.objects.filter(student_id__in=student_ids, course=course)
+        }
+
+        de_enrolled_count = 0
+        blocked_count = 0
+        not_enrolled_count = 0
+        details = []
+
+        with transaction.atomic():
+            for student in students_qs:
+                enrollment = enrollment_map.get(student.id)
+                if not enrollment:
+                    not_enrolled_count += 1
+                    details.append({
+                        "student_id": student.id,
+                        "name": student.user.get_full_name() or student.user.email,
+                        "status": "not_enrolled",
+                        "reasons": [],
+                    })
+                    continue
+
+                reasons = _has_submissions_for_course(student, course)
+                if reasons:
+                    blocked_count += 1
+                    details.append({
+                        "student_id": student.id,
+                        "name": student.user.get_full_name() or student.user.email,
+                        "status": "blocked",
+                        "reasons": reasons,
+                    })
+                    continue
+
+                enrollment.delete()
+                de_enrolled_count += 1
+                details.append({
+                    "student_id": student.id,
+                    "name": student.user.get_full_name() or student.user.email,
+                    "status": "de_enrolled",
+                    "reasons": [],
+                })
+
+        return Response(
+            {
+                "course_id": course.id,
+                "course_name": course.name,
+                "classroom": classroom.name,
+                "de_enrolled": de_enrolled_count,
+                "blocked": blocked_count,
+                "not_enrolled": not_enrolled_count,
+                "not_found": 0,
+                "details": details,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------------------------------------------------------------
+# De-Enrollment — single enrollment record
+# ---------------------------------------------------------------
+
+@api_view(["DELETE"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_de_enroll_single(request, student_id: int, enrollment_id: int):
+    """
+    DELETE /orgs/api/admin/students/<student_id>/enrollments/<enrollment_id>/delete/
+
+    De-enroll a single student from a specific enrollment.
+    Blocked if the student has any CBT, assignment, or code submissions for that course.
+    """
+    try:
+        org, err = _resolve_org(request)
+        if err:
+            return err
+
+        if not _is_org_admin_or_teacher(request, org):
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        student = StudentProfile.objects.select_related("user").filter(
+            id=student_id, organization=org
+        ).first()
+        if not student:
+            return Response({"detail": "Student not found in this organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        enrollment = Enrollment.objects.select_related("course__subject", "course__classroom", "course__teacher__user").filter(
+            id=enrollment_id, student=student
+        ).first()
+        if not enrollment:
+            return Response({"detail": "Enrollment not found for this student."}, status=status.HTTP_404_NOT_FOUND)
+
+        course = enrollment.course
+
+        reasons = _has_submissions_for_course(student, course)
+        if reasons:
+            return Response(
+                {
+                    "detail": "Cannot de-enroll: student has submissions for this course.",
+                    "reasons": reasons,
+                    "course_id": course.id,
+                    "course_name": course.name,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        enrollment.delete()
+
+        return Response(
+            {
+                "detail": "Student successfully de-enrolled.",
+                "course_id": course.id,
+                "course_name": course.name,
+                "student_id": student.id,
+                "student_name": student.user.get_full_name() or student.user.email,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        return Response({"detail": "Unexpected error.", "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1,0 +1,978 @@
+{% extends 'store/base.html' %}
+{% load static humanize %}
+
+{% block title %}My Profile - Techxagon Store{% endblock %}
+
+{% block content %}
+<div class="flex flex-col md:flex-row gap-8 py-6">
+    
+    <!-- Sidebar -->
+    <div class="w-full md:w-64 flex-shrink-0">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4 flex flex-col items-center text-center">
+            <div class="w-20 h-20 rounded-full bg-primary/10 text-primary flex items-center justify-center text-2xl font-black mb-3">
+                {% if request.user.first_name or request.user.last_name %}
+                    {{ request.user.first_name|slice:":1"|upper }}{{ request.user.last_name|slice:":1"|upper }}
+                {% else %}
+                    {{ request.user.email|slice:":2"|upper }}
+                {% endif %}
+            </div>
+            <h2 class="text-base font-black text-gray-900">
+                {% if request.user.first_name or request.user.last_name %}
+                    {{ request.user.first_name }} {{ request.user.last_name }}
+                {% else %}
+                    {{ request.user.email|slice:":15" }}
+                {% endif %}
+            </h2>
+            <p class="text-xs text-gray-500 mb-4">{{ request.user.email }}</p>
+            <span class="bg-gray-900 text-white text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">Techxagon Member</span>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <nav class="flex flex-col p-2 gap-1">
+                <a href="?tab=orders" class="flex items-center gap-3 px-4 py-3 rounded-xl {% if active_tab == 'orders' %}bg-primary/5 text-primary font-bold{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900 font-semibold{% endif %} text-sm transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+                    My Orders
+                </a>
+                <a href="?tab=saved" class="flex items-center gap-3 px-4 py-3 rounded-xl {% if active_tab == 'saved' %}bg-primary/5 text-primary font-bold{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900 font-semibold{% endif %} text-sm transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                    Saved Items
+                </a>
+                <a href="?tab=addresses" class="flex items-center gap-3 px-4 py-3 rounded-xl {% if active_tab == 'addresses' %}bg-primary/5 text-primary font-bold{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900 font-semibold{% endif %} text-sm transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    Addresses
+                </a>
+                <a href="?tab=settings" class="flex items-center gap-3 px-4 py-3 rounded-xl {% if active_tab == 'settings' %}bg-primary/5 text-primary font-bold{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900 font-semibold{% endif %} text-sm transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    Settings
+                </a>
+                <a href="?tab=payments" class="flex items-center gap-3 px-4 py-3 rounded-xl {% if active_tab == 'payments' %}bg-primary/5 text-primary font-bold{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900 font-semibold{% endif %} text-sm transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+                    Payments
+                </a>
+                <a href="?tab=tickets" class="flex items-center gap-3 px-4 py-3 rounded-xl {% if active_tab == 'tickets' %}bg-primary/5 text-primary font-bold{% else %}text-gray-600 hover:bg-gray-50 hover:text-gray-900 font-semibold{% endif %} text-sm transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+                    Support Tickets
+                </a>
+                <div class="h-px bg-gray-100 my-2 mx-4"></div>
+                <a href="{% url 'store_frontend:logout' %}" class="flex items-center gap-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 font-bold text-sm transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                    Sign Out
+                </a>
+            </nav>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex-grow w-full space-y-6">
+        
+        <!-- Alerts/Messages display -->
+        {% if messages %}
+            <div class="space-y-2">
+                {% for message in messages %}
+                    <div class="px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-between {% if message.tags == 'error' or message.tags == 'danger' %}bg-red-50 text-red-600 border border-red-100{% elif message.tags == 'success' %}bg-green-50 text-green-600 border border-green-100{% else %}bg-blue-50 text-blue-600 border border-blue-100{% endif %}">
+                        <span>{{ message }}</span>
+                        <button type="button" onclick="this.parentElement.remove()" class="text-current hover:opacity-70 transition-opacity cursor-pointer bg-transparent border-0">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% if active_tab == 'orders' %}
+        <div class="flex items-center justify-between">
+            <h1 class="text-2xl font-black text-gray-900 tracking-tight">My Orders</h1>
+            <div class="flex gap-2">
+                <select onchange="location = this.value;" class="px-4 py-2 border border-gray-200 rounded-lg text-sm font-semibold focus:outline-none focus:border-primary bg-white text-gray-700">
+                    <option value="?tab=orders&status=all" {% if status_filter == 'all' %}selected{% endif %}>All Orders</option>
+                    <option value="?tab=orders&status=pending" {% if status_filter == 'pending' %}selected{% endif %}>Processing</option>
+                    <option value="?tab=orders&status=paid" {% if status_filter == 'paid' %}selected{% endif %}>Paid / In Transit</option>
+                    <option value="?tab=orders&status=fulfilled" {% if status_filter == 'fulfilled' %}selected{% endif %}>Delivered</option>
+                </select>
+            </div>
+        </div>
+
+        {% for order in orders %}
+        <!-- Order Card -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <!-- Order Header -->
+            <div class="flex flex-wrap items-center justify-between gap-4 px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                <div class="flex gap-6 text-sm">
+                    <div>
+                        <p class="text-gray-500 font-medium mb-0.5">Order Placed</p>
+                        <p class="font-bold text-gray-900">{{ order.created_at|date:"F d, Y" }}</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-500 font-medium mb-0.5">Total</p>
+                        <p class="font-bold text-gray-900">NGN{{ order.grand_total|intcomma }}</p>
+                        {% if order.discount_total %}
+                        <span class="inline-flex items-center gap-1 text-[10px] font-bold text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded-full mt-0.5">
+                            <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 10V5a2 2 0 012-2z"></path></svg>
+                            Coupon saved NGN{{ order.discount_total|intcomma }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    <div class="hidden sm:block">
+                        <p class="text-gray-500 font-medium mb-0.5">Ship To</p>
+                        <p class="font-bold text-primary hover:underline cursor-pointer">
+                            {% if order.shipping_address %}
+                                {{ order.shipping_address.full_name }}
+                            {% else %}
+                                {{ request.user.first_name|default:request.user.email }}
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+                <div class="text-right flex-shrink-0 flex items-center gap-3">
+                    <p class="text-gray-500 font-medium text-xs mb-0.5">Order ID #{{ order.id|stringformat:"s"|slice:":8"|upper }}</p>
+                    <a href="?tab=tickets&new=true&order_id={{ order.id }}" class="px-3 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 text-xs font-bold rounded-lg transition-colors inline-block cursor-pointer">Report Issue</a>
+                </div>
+            </div>
+
+            <!-- Order Tracking Status -->
+            <div class="px-6 py-5 border-b border-gray-100">
+                <div class="flex items-center gap-3 mb-4">
+                    {% if order.status == 'pending' %}
+                    <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <div>
+                        <h3 class="font-black text-gray-900 text-base">Pending Processing</h3>
+                        <p class="text-xs text-blue-600 font-bold">Your package is being prepared</p>
+                    </div>
+                    {% elif order.status == 'paid' %}
+                    <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                    </div>
+                    <div>
+                        <h3 class="font-black text-gray-900 text-base">In Transit</h3>
+                        <p class="text-xs text-blue-600 font-bold">Shipped — Package is in transit</p>
+                    </div>
+                    {% elif order.status == 'fulfilled' %}
+                    <div class="w-8 h-8 rounded-full bg-green-100 text-green-600 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                    <div>
+                        <h3 class="font-black text-gray-900 text-base">Delivered</h3>
+                        <p class="text-xs text-green-600 font-bold">Your package was successfully delivered.</p>
+                    </div>
+                    {% else %}
+                    <div class="w-8 h-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </div>
+                    <div>
+                        <h3 class="font-black text-gray-900 text-base">{{ order.get_status_display }}</h3>
+                        <p class="text-xs text-gray-500">Status updated: {{ order.updated_at|date:"F d, Y" }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <!-- Progress Bar -->
+                <div class="relative w-full max-w-2xl mt-6 mb-2">
+                    <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-gray-100">
+                        <div style="width: {% if order.status == 'pending' %}25%{% elif order.status == 'paid' %}60%{% elif order.status == 'fulfilled' %}100%{% else %}0%{% endif %}" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center {% if order.status == 'fulfilled' %}bg-green-500{% else %}bg-blue-500{% endif %}"></div>
+                    </div>
+                    <div class="flex justify-between text-[10px] font-bold text-gray-400 uppercase tracking-wider absolute w-full top-3">
+                        <span class="{% if order.status == 'pending' or order.status == 'paid' or order.status == 'fulfilled' %}text-blue-600{% endif %}">Ordered</span>
+                        <span class="{% if order.status == 'paid' or order.status == 'fulfilled' %}text-blue-600{% endif %}">Shipped</span>
+                        <span class="{% if order.status == 'fulfilled' %}text-green-600{% endif %}">Delivered</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Items -->
+            <div class="p-6 divide-y divide-gray-100">
+                {% for item in order.items.all %}
+                <div class="flex items-start gap-4 py-4 first:pt-0 last:pb-0">
+                    <div class="w-20 h-20 bg-gray-50 rounded-xl overflow-hidden border border-gray-100 flex-shrink-0">
+                        {% if item.product.images.first %}
+                            <img src="{{ item.product.images.first.product_image.url }}" alt="{{ item.product.title }}" class="w-full h-full object-contain p-2">
+                        {% else %}
+                            <div class="w-full h-full bg-gray-200 flex items-center justify-center text-xs text-gray-400">No Image</div>
+                        {% endif %}
+                    </div>
+                    <div class="flex-grow min-w-0">
+                        <a href="{% url 'store_frontend:detail' slug=item.product.slug %}" class="text-sm font-bold text-gray-900 hover:text-primary transition-colors block mb-1">
+                            {{ item.title_snapshot|default:item.product.title }}
+                        </a>
+                        <p class="text-xs text-gray-500 mb-2">Quantity: {{ item.quantity }} &middot; Price: NGN{{ item.unit_price|intcomma }}</p>
+                        
+                        <div class="flex gap-3">
+                            <form action="" method="POST" class="inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="buy_again">
+                                <input type="hidden" name="product_id" value="{{ item.product.id }}">
+                                <button type="submit" class="px-4 py-1.5 bg-gray-900 hover:bg-gray-800 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer border-0">Buy it again</button>
+                            </form>
+                            <a href="{% url 'store_frontend:detail' slug=item.product.slug %}" class="px-4 py-1.5 border border-gray-200 hover:border-gray-300 text-gray-700 text-xs font-bold rounded-lg transition-colors inline-block text-center">Product Details</a>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Order Totals Breakdown -->
+            <div class="px-6 pb-5 border-t border-gray-100 pt-4">
+                <div class="space-y-2 text-sm max-w-xs ml-auto">
+                    {% if order.discount_total %}
+                    <!-- Coupon badge -->
+                    <div class="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-2">
+                        <svg class="w-3.5 h-3.5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 10V5a2 2 0 012-2z"></path></svg>
+                        <span class="text-xs font-bold text-green-800">Coupon discount applied</span>
+                        <span class="ml-auto text-xs font-black text-green-700">-NGN{{ order.discount_total|intcomma }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="flex justify-between text-gray-500">
+                        <span>Subtotal</span>
+                        <span class="{% if order.discount_total %}line-through text-gray-400{% else %}font-semibold text-gray-800{% endif %}">NGN{{ order.subtotal|intcomma }}</span>
+                    </div>
+                    {% if order.discount_total %}
+                    <div class="flex justify-between text-green-700 font-semibold">
+                        <span>Discount</span>
+                        <span>-NGN{{ order.discount_total|intcomma }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="flex justify-between text-gray-500">
+                        <span>Shipping</span>
+                        <span class="{% if order.shipping_total == 0 %}text-green-600 font-semibold{% else %}font-semibold text-gray-800{% endif %}">
+                            {% if order.shipping_total == 0 %}FREE{% else %}NGN{{ order.shipping_total|intcomma }}{% endif %}
+                        </span>
+                    </div>
+                    <div class="flex justify-between text-gray-500">
+                        <span>VAT</span>
+                        <span class="font-semibold text-gray-800">NGN{{ order.tax_total|intcomma }}</span>
+                    </div>
+                    <div class="flex justify-between text-gray-900 font-black border-t border-gray-100 pt-2 text-base">
+                        <span>Total</span>
+                        <span>NGN{{ order.grand_total|intcomma }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
+            <svg class="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+            <h3 class="text-lg font-black text-gray-900 mb-1">No orders yet</h3>
+            <p class="text-gray-500 text-sm mb-6">Explore our latest items and place your first order!</p>
+            <a href="{% url 'store_frontend:home' %}" class="px-6 py-2.5 bg-primary hover:bg-primary-hover text-white text-sm font-bold rounded-xl transition-all shadow-md shadow-primary/25">Start Shopping</a>
+        </div>
+        {% endfor %}
+
+        {% elif active_tab == 'saved' %}
+        <div class="flex items-center justify-between mb-4">
+            <h1 class="text-2xl font-black text-gray-900 tracking-tight">Saved Items</h1>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {% for item in saved_items %}
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col group relative">
+                <!-- Image -->
+                <div class="aspect-square bg-gray-50/50 p-6 flex items-center justify-center border-b border-gray-50 relative">
+                    {% if item.product.images.first %}
+                        <img src="{{ item.product.images.first.product_image.url }}" alt="{{ item.product.title }}" class="object-contain max-h-40 group-hover:scale-105 transition-transform duration-300">
+                    {% else %}
+                        <div class="text-gray-300">No Image</div>
+                    {% endif %}
+                    
+                    <!-- Remove Button overlay -->
+                    <form action="{% url 'store_frontend:toggle_save' product_id=item.product.id %}" method="POST" class="absolute top-3 right-3 z-10">
+                        {% csrf_token %}
+                        <button type="submit" class="p-2 bg-white/80 hover:bg-white text-red-500 rounded-full shadow-sm hover:shadow transition-all border border-gray-100 cursor-pointer border-0">
+                            <svg class="w-4 h-4 fill-current" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </form>
+                </div>
+                <!-- Details -->
+                <div class="p-4 flex-grow flex flex-col justify-between">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-sm line-clamp-2 mb-2 group-hover:text-primary transition-colors">
+                            <a href="{% url 'store_frontend:detail' slug=item.product.slug %}">{{ item.product.title }}</a>
+                        </h3>
+                        <p class="text-base font-black text-gray-900 mb-4">NGN{{ item.product.price|intcomma }}</p>
+                    </div>
+                    <form action="{% url 'store_frontend:add_to_cart' %}" method="POST">
+                        {% csrf_token %}
+                        <input type="hidden" name="product_id" value="{{ item.product.id }}">
+                        <input type="hidden" name="quantity" value="1">
+                        <button type="submit" class="w-full bg-gray-900 hover:bg-gray-800 text-white py-2 px-4 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer border-0">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+                            Add to Cart
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% empty %}
+            <div class="col-span-full bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
+                <svg class="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                <h3 class="text-lg font-black text-gray-900 mb-1">Your wishlist is empty</h3>
+                <p class="text-gray-500 text-sm mb-6">Keep track of items you want to buy later by saving them.</p>
+                <a href="{% url 'store_frontend:home' %}" class="px-6 py-2.5 bg-primary hover:bg-primary-hover text-white text-sm font-bold rounded-xl transition-all shadow-md shadow-primary/25">Browse Products</a>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% elif active_tab == 'addresses' %}
+        <div class="flex items-center justify-between mb-4">
+            <h1 class="text-2xl font-black text-gray-900 tracking-tight">Saved Addresses</h1>
+            {% if edit_address %}
+                <a href="?tab=addresses" class="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-semibold rounded-lg transition-colors">Add New Address</a>
+            {% endif %}
+        </div>
+
+        <!-- Addresses list -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
+            {% for addr in addresses %}
+            <div class="bg-gradient-to-br from-white to-gray-50/50 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.02)] border {% if addr.is_default %}border-primary/30 ring-1 ring-primary/10{% else %}border-gray-100{% endif %} p-6 flex flex-col justify-between relative overflow-hidden transition-all hover:shadow-[0_15px_35px_rgba(0,0,0,0.05)] hover:border-gray-200">
+                {% if addr.is_default %}
+                <div class="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-primary to-primary-hover"></div>
+                {% endif %}
+                
+                <div>
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                            </div>
+                            <h3 class="font-black text-gray-950 text-base leading-tight tracking-tight">{{ addr.full_name }}</h3>
+                        </div>
+                        {% if addr.is_default %}
+                            <span class="bg-primary/10 text-primary text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">Default</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="space-y-1.5 pl-10">
+                        <p class="text-sm text-gray-600 font-semibold leading-relaxed">{{ addr.line1 }}</p>
+                        {% if addr.line2 %}
+                            <p class="text-sm text-gray-500 font-medium leading-relaxed">{{ addr.line2 }}</p>
+                        {% endif %}
+                        <p class="text-sm text-gray-500 font-medium leading-relaxed">{{ addr.city }}, {{ addr.state }}</p>
+                        <p class="text-xs text-gray-400 font-bold uppercase tracking-wider">{{ addr.postal_code }} &middot; {{ addr.country }}</p>
+                        
+                        {% if addr.phone %}
+                        <div class="flex items-center gap-1.5 text-xs text-gray-500 mt-3 font-semibold pt-1">
+                            <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.94.725l.548 2.2a1 1 0 01-.321.988l-1.305.98a10.582 10.582 0 004.872 4.872l.98-1.305a1 1 0 01.988-.321l2.2.548a1 1 0 01.725.94V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>
+                            <span>{{ addr.phone }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="flex items-center gap-4 mt-6 pl-10 pt-4 border-t border-gray-100/80">
+                    <a href="?tab=addresses&edit={{ addr.id }}" class="text-xs font-bold text-gray-700 hover:text-primary transition-colors flex items-center gap-1.5 group">
+                        <svg class="w-3.5 h-3.5 text-gray-400 group-hover:text-primary transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-2.036a5 5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                        Edit
+                    </a>
+                    
+                    <form action="" method="POST" onsubmit="return confirm('Are you sure you want to delete this address?');" class="inline">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete_address">
+                        <input type="hidden" name="address_id" value="{{ addr.id }}">
+                        <button type="submit" class="text-xs font-bold text-gray-400 hover:text-red-500 transition-colors flex items-center gap-1.5 cursor-pointer border-0 bg-transparent p-0">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            Delete
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% empty %}
+            <div class="col-span-full bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center text-gray-500">
+                You haven't saved any addresses yet. Add one below.
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Add/Edit address form -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <h2 class="text-lg font-black text-gray-900 mb-6">
+                {% if edit_address %}Edit Address{% else %}Add New Address{% endif %}
+            </h2>
+            <form action="" method="POST" class="space-y-4">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="{% if edit_address %}edit_address{% else %}add_address{% endif %}">
+                {% if edit_address %}
+                    <input type="hidden" name="address_id" value="{{ edit_address.id }}">
+                {% endif %}
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Full Name *</label>
+                        <input type="text" name="full_name" required value="{% if edit_address %}{{ edit_address.full_name }}{% else %}{{ request.user.get_full_name }}{% endif %}" placeholder="John Doe" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Phone Number</label>
+                        <input type="tel" name="phone" value="{{ edit_address.phone|default:'' }}" placeholder="+234 800 000 0000" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Address Line 1 *</label>
+                    <input type="text" name="line1" required value="{{ edit_address.line1|default:'' }}" placeholder="123 Innovation Drive" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Address Line 2 (Optional)</label>
+                    <input type="text" name="line2" value="{{ edit_address.line2|default:'' }}" placeholder="Apt 4B" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div class="col-span-2 sm:col-span-1">
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">City *</label>
+                        <input type="text" name="city" required value="{{ edit_address.city|default:'' }}" placeholder="Lagos" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                    </div>
+                    <div class="col-span-2 sm:col-span-1">
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">State / Region</label>
+                        <input type="text" name="state" value="{{ edit_address.state|default:'' }}" placeholder="Lagos State" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                    </div>
+                    <div class="col-span-1">
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">ZIP Code</label>
+                        <input type="text" name="postal_code" value="{{ edit_address.postal_code|default:'' }}" placeholder="100001" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                    </div>
+                    <div class="col-span-1">
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Country *</label>
+                        <select name="country" required class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white text-gray-700">
+                            <option value="Nigeria" {% if edit_address.country == 'NG' or not edit_address %}selected{% endif %}>Nigeria</option>
+                            <option value="Ghana" {% if edit_address.country == 'GH' %}selected{% endif %}>Ghana</option>
+                            <option value="Kenya" {% if edit_address.country == 'KE' %}selected{% endif %}>Kenya</option>
+                            <option value="South Africa" {% if edit_address.country == 'ZA' %}selected{% endif %}>South Africa</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2 pt-2">
+                    <input type="checkbox" id="is_default" name="is_default" {% if edit_address.is_default %}checked{% endif %} class="w-4 h-4 accent-primary rounded">
+                    <label for="is_default" class="text-xs font-bold text-gray-700 cursor-pointer select-none">Set as default address</label>
+                </div>
+
+                <div class="flex gap-3 pt-4 border-t border-gray-100">
+                    <button type="submit" class="px-6 py-2.5 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl text-sm transition-all shadow-md cursor-pointer border-0">
+                        {% if edit_address %}Save Changes{% else %}Add Address{% endif %}
+                    </button>
+                    {% if edit_address %}
+                        <a href="?tab=addresses" class="px-6 py-2.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold rounded-xl text-sm transition-all text-center">Cancel</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+
+        {% elif active_tab == 'settings' %}
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <h1 class="text-2xl font-black text-gray-900 tracking-tight mb-6">Account Settings</h1>
+            
+            <form action="" method="POST" class="space-y-6">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="update_settings">
+
+                <div>
+                    <h3 class="text-sm font-bold text-gray-700 mb-4 pb-2 border-b border-gray-100 uppercase tracking-wider">Personal Information</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">First Name</label>
+                            <input type="text" name="first_name" value="{{ request.user.first_name|default:'' }}" placeholder="John" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Last Name</label>
+                            <input type="text" name="last_name" value="{{ request.user.last_name|default:'' }}" placeholder="Doe" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Email Address</label>
+                            <input type="email" disabled value="{{ request.user.email }}" class="w-full px-4 py-3 border border-gray-100 bg-gray-50 rounded-xl text-sm text-gray-500 cursor-not-allowed focus:outline-none">
+                            <p class="text-[10px] text-gray-400 mt-1 font-semibold">Your email address cannot be changed</p>
+                        </div>
+                    </div>
+                </div>
+
+
+                <div class="pt-4 border-t border-gray-100 flex justify-end">
+                    <button type="submit" class="px-6 py-2.5 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl text-sm transition-all shadow-md cursor-pointer border-0">
+                        Update Settings
+                    </button>
+                </div>
+            </form>
+        </div>
+        {% elif active_tab == 'payments' %}
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <h1 class="text-2xl font-black text-gray-900 tracking-tight mb-6">Payment Transactions</h1>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-gray-100 text-xs font-bold text-gray-400 uppercase tracking-wider">
+                            <th class="pb-3 font-bold text-gray-500">Transaction Ref</th>
+                            <th class="pb-3 font-bold text-gray-500">Date</th>
+                            <th class="pb-3 font-bold text-gray-500">Order ID</th>
+                            <th class="pb-3 font-bold text-gray-500">Amount</th>
+                            <th class="pb-3 font-bold text-gray-500">Status</th>
+                            <th class="pb-3 font-bold text-right text-gray-500">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100 text-sm">
+                        {% for payment in payments %}
+                        <tr>
+                            <td class="py-4 font-semibold text-gray-950 font-mono text-xs">
+                                {{ payment.provider_ref|default:"N/A" }}
+                            </td>
+                            <td class="py-4 text-gray-500">
+                                {{ payment.created_at|date:"M d, Y H:i" }}
+                            </td>
+                            <td class="py-4 text-gray-500 font-mono text-xs">
+                                #{{ payment.order.id|stringformat:"s"|slice:":8"|upper }}
+                            </td>
+                            <td class="py-4 font-bold text-gray-900">
+                                NGN{{ payment.amount|intcomma }}
+                            </td>
+                            <td class="py-4">
+                                <span class="px-2.5 py-1 text-[10px] font-black rounded-full uppercase tracking-wider
+                                    {% if payment.status == 'captured' or payment.status == 'authorized' %}
+                                        bg-green-50 text-green-700 border border-green-150
+                                    {% elif payment.status == 'failed' %}
+                                        bg-red-50 text-red-700 border border-red-150
+                                    {% else %}
+                                        bg-amber-50 text-amber-700 border border-amber-150
+                                    {% endif %}">
+                                    {{ payment.get_status_display }}
+                                </span>
+                            </td>
+                            <td class="py-4 text-right">
+                                <a href="?tab=tickets&new=true&payment_id={{ payment.id }}" class="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 text-xs font-bold rounded-lg transition-colors inline-block cursor-pointer">
+                                    Report Payment
+                                </a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="6" class="py-8 text-center text-gray-500">
+                                No payment transactions found.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% elif active_tab == 'tickets' %}
+        <div class="space-y-6">
+            <!-- Header bar -->
+            <div class="flex items-center justify-between">
+                <h1 class="text-2xl font-black text-gray-900 tracking-tight">Support Tickets</h1>
+                {% if show_new_form or active_ticket %}
+                    <a href="?tab=tickets" class="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-semibold rounded-lg transition-colors">View Ticket History</a>
+                {% else %}
+                    <a href="?tab=tickets&new=true" class="px-4 py-2 bg-primary hover:bg-primary-hover text-white text-sm font-bold rounded-xl transition-all shadow-md shadow-primary/25 cursor-pointer">File New Ticket</a>
+                {% endif %}
+            </div>
+
+            {% if show_new_form %}
+            <!-- File a Ticket Form -->
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                <h2 class="text-lg font-black text-gray-900 mb-6">Submit a Support Ticket</h2>
+                <form action="" method="POST" class="space-y-4">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="create_ticket">
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Ticket Type *</label>
+                            <select name="ticket_type" id="id_ticket_type" required onchange="toggleFormFields(this.value)" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white text-gray-700">
+                                <option value="general" {% if not selected_order_id and not selected_payment_id %}selected{% endif %}>General Support</option>
+                                <option value="order" {% if selected_order_id %}selected{% endif %}>Order Issue</option>
+                                <option value="payment" {% if selected_payment_id %}selected{% endif %}>Payment Transaction Issue</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Priority *</label>
+                            <select name="priority" required class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white text-gray-700">
+                                <option value="low">Low</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Order link row -->
+                    <div id="order_field_wrapper" class="{% if not selected_order_id %}hidden{% endif %}">
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Related Order *</label>
+                        <select name="order_id" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white text-gray-700">
+                            <option value="">Select Order</option>
+                            {% for ord in user_orders %}
+                                <option value="{{ ord.id }}" {% if selected_order_id == ord.id|stringformat:"s" %}selected{% endif %}>
+                                    Order #{{ ord.id|stringformat:"s"|slice:":8"|upper }} (Total: NGN{{ ord.grand_total|intcomma }}, Placed: {{ ord.created_at|date:"Y-m-d" }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Payment link row -->
+                    <div id="payment_field_wrapper" class="{% if not selected_payment_id %}hidden{% endif %}">
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Related Payment Transaction *</label>
+                        <select name="payment_id" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white text-gray-700">
+                            <option value="">Select Payment</option>
+                            {% for pay in user_payments %}
+                                <option value="{{ pay.id }}" {% if selected_payment_id == pay.id|stringformat:"s" %}selected{% endif %}>
+                                    Ref: {{ pay.provider_ref|default:pay.id|stringformat:"s"|slice:":15" }}... (Amount: NGN{{ pay.amount|intcomma }}, Provider: {{ pay.get_provider_display }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Subject *</label>
+                        <input type="text" name="subject" required placeholder="Brief title of the issue" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Description of the Issue *</label>
+                        <textarea name="description" rows="5" required placeholder="Please provide as much detail as possible to help us resolve the issue." class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all resize-none"></textarea>
+                    </div>
+
+                    <div class="flex gap-3 pt-4 border-t border-gray-100">
+                        <button type="submit" class="px-6 py-2.5 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl text-sm transition-all shadow-md cursor-pointer border-0">
+                            Submit Ticket
+                        </button>
+                        <a href="?tab=tickets" class="px-6 py-2.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold rounded-xl text-sm transition-all text-center">Cancel</a>
+                    </div>
+                </form>
+            </div>
+            
+            <script>
+            function toggleFormFields(ticketType) {
+                const orderWrapper = document.getElementById('order_field_wrapper');
+                const paymentWrapper = document.getElementById('payment_field_wrapper');
+                
+                if (ticketType === 'order') {
+                    orderWrapper.classList.remove('hidden');
+                    paymentWrapper.classList.add('hidden');
+                } else if (ticketType === 'payment') {
+                    paymentWrapper.classList.remove('hidden');
+                    orderWrapper.classList.add('hidden');
+                } else {
+                    orderWrapper.classList.add('hidden');
+                    paymentWrapper.classList.add('hidden');
+                }
+            }
+            // Auto run on load to align with prefilled values
+            document.addEventListener('DOMContentLoaded', function() {
+                const selectVal = document.getElementById('id_ticket_type').value;
+                toggleFormFields(selectVal);
+            });
+            </script>
+            
+            {% elif active_ticket %}
+            <!-- Ticket Detail / Conversation View -->
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
+                <!-- Title & Meta section -->
+                <div class="flex flex-wrap justify-between items-start gap-4 pb-4 border-b border-gray-100">
+                    <div>
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <span class="bg-gray-100 text-gray-800 text-[10px] font-bold px-2 py-0.5 rounded uppercase font-mono border border-gray-200">#TCK-{{ active_ticket.id }}</span>
+                            <span class="text-xs font-bold text-gray-400 capitalize">&middot; {{ active_ticket.get_ticket_type_display }}</span>
+                        </div>
+                        <h2 class="text-xl font-black text-gray-900 leading-tight tracking-tight">{{ active_ticket.subject }}</h2>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-0.5 text-[10px] font-black rounded uppercase border
+                            {% if active_ticket.priority == 'high' %}
+                                bg-red-50 text-red-600 border-red-100
+                            {% elif active_ticket.priority == 'medium' %}
+                                bg-amber-50 text-amber-600 border-amber-100
+                            {% else %}
+                                bg-gray-50 text-gray-600 border-gray-100
+                            {% endif %}">
+                            {{ active_ticket.get_priority_display }} Priority
+                        </span>
+                        <span class="px-2.5 py-1 text-[10px] font-black rounded-full uppercase tracking-wider
+                            {% if active_ticket.status == 'open' %}
+                                bg-blue-50 text-blue-700 border border-blue-150
+                            {% elif active_ticket.status == 'in_progress' %}
+                                bg-amber-50 text-amber-700 border border-amber-150
+                            {% elif active_ticket.status == 'resolved' %}
+                                bg-green-50 text-green-700 border border-green-150
+                            {% else %}
+                                bg-gray-50 text-gray-600 border border-gray-150
+                            {% endif %}">
+                            {{ active_ticket.get_status_display }}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Links to order/payment if exist -->
+                {% if active_ticket.order or active_ticket.payment %}
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-bold text-gray-400 pl-1">
+                    {% if active_ticket.order %}
+                    <div class="flex items-center gap-2 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+                        <div>
+                            <span class="block text-[10px] text-gray-400 uppercase">Related Order</span>
+                            <a href="?tab=orders" class="text-primary hover:underline text-xs">#{{ active_ticket.order.id|stringformat:"s"|slice:":8"|upper }}</a>
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if active_ticket.payment %}
+                    <div class="flex items-center gap-2 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+                        <div>
+                            <span class="block text-[10px] text-gray-400 uppercase">Related Transaction</span>
+                            <span class="text-gray-700 text-xs font-mono">{{ active_ticket.payment.provider_ref|default:active_ticket.payment.id|slice:":15" }}...</span>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <!-- Message History Thread -->
+                <div class="space-y-4 pt-4">
+                    <h3 class="text-xs font-black text-gray-400 uppercase tracking-wider pl-1">Conversation history</h3>
+
+                    <!-- Original Issue Message -->
+                    <div class="bg-gray-50/50 border border-gray-100 rounded-2xl p-5 space-y-2">
+                        <div class="flex justify-between items-center text-xs text-gray-500 pb-2 border-b border-gray-100/50">
+                            <span class="font-bold text-gray-700">{{ active_ticket.user.first_name|default:active_ticket.user.email }} (You)</span>
+                            <span class="font-semibold">{{ active_ticket.created_at|date:"F d, Y @ H:i" }}</span>
+                        </div>
+                        <p class="text-sm text-gray-750 leading-relaxed pt-1">
+                            {{ active_ticket.description|linebreaksbr }}
+                        </p>
+                    </div>
+
+                    <!-- Thread Replies -->
+                    {% for msg in ticket_messages %}
+                    <div class="{% if msg.is_admin %}bg-green-50/40 border-green-150{% else %}bg-gray-50/50 border-gray-100{% endif %} border rounded-2xl p-5 space-y-2">
+                        <div class="flex justify-between items-center text-xs pb-2 border-b {% if msg.is_admin %}border-green-100/50{% else %}border-gray-100/50{% endif %}">
+                            <div class="flex items-center gap-1.5 font-bold">
+                                {% if msg.is_admin %}
+                                    <span class="text-green-800">Support Representative</span>
+                                    <span class="bg-green-100 text-green-700 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider">Staff</span>
+                                {% else %}
+                                    <span class="text-gray-700">{{ active_ticket.user.first_name|default:active_ticket.user.email }}</span>
+                                {% endif %}
+                            </div>
+                            <span class="text-gray-400 font-semibold">{{ msg.created_at|date:"F d, Y @ H:i" }}</span>
+                        </div>
+                        <p class="text-sm {% if msg.is_admin %}text-green-900{% else %}text-gray-750{% endif %} leading-relaxed pt-1">
+                            {{ msg.message|linebreaksbr }}
+                        </p>
+                    </div>
+                    {% endfor %}
+
+                    <!-- Fallback default admin notes if messages are empty and admin_notes exists -->
+                    {% if not ticket_messages and active_ticket.admin_notes %}
+                    <div class="bg-green-50/40 border border-green-150 rounded-2xl p-5 space-y-2">
+                        <div class="flex justify-between items-center text-xs pb-2 border-b border-green-100/50">
+                            <div class="flex items-center gap-1.5 font-bold text-green-800">
+                                <span>Support Representative</span>
+                                <span class="bg-green-100 text-green-700 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider">Staff</span>
+                            </div>
+                            <span class="text-gray-400 font-semibold">{{ active_ticket.updated_at|date:"F d, Y @ H:i" }}</span>
+                        </div>
+                        <p class="text-sm text-green-900 leading-relaxed pt-1">
+                            {{ active_ticket.admin_notes|linebreaksbr }}
+                        </p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Send Reply Form -->
+                <div class="pt-6 border-t border-gray-100">
+                    <h4 class="text-sm font-extrabold text-gray-900 mb-3">Send a Reply</h4>
+                    <form action="" method="POST" class="space-y-4">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="reply_ticket">
+                        <input type="hidden" name="ticket_id" value="{{ active_ticket.id }}">
+
+                        <textarea name="message" rows="4" required placeholder="Type your message to the support staff..." class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all resize-none"></textarea>
+
+                        <div class="flex items-center justify-between">
+                            <button type="submit" class="px-6 py-2.5 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-xl text-sm transition-all shadow-md cursor-pointer border-0">
+                                Send Reply
+                            </button>
+                            {% if active_ticket.status == 'resolved' or active_ticket.status == 'closed' %}
+                                <p class="text-xs font-semibold text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">
+                                    Note: Sending a reply will automatically reopen this ticket.
+                                </p>
+                            {% endif %}
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            {% else %}
+            
+            <!-- Tickets History list -->
+            <div class="space-y-4">
+                {% for ticket in tickets %}
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4 hover:border-gray-200 transition-all">
+                    <div class="flex flex-wrap justify-between items-start gap-4">
+                        <div>
+                            <div class="flex items-center gap-2 mb-1.5">
+                                <span class="bg-gray-100 text-gray-850 text-[10px] font-bold px-2 py-0.5 rounded uppercase font-mono border border-gray-200">#TCK-{{ ticket.id }}</span>
+                                <span class="text-xs font-bold text-gray-400 capitalize">&middot; {{ ticket.get_ticket_type_display }}</span>
+                            </div>
+                            <h3 class="text-base font-extrabold text-gray-950 leading-tight tracking-tight">
+                                <a href="?tab=tickets&ticket_id={{ ticket.id }}" class="hover:text-primary transition-colors">{{ ticket.subject }}</a>
+                            </h3>
+                        </div>
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            <!-- Priority badge -->
+                            <span class="px-2 py-0.5 text-[9px] font-black rounded uppercase border
+                                {% if ticket.priority == 'high' %}
+                                    bg-red-50 text-red-600 border-red-100
+                                {% elif ticket.priority == 'medium' %}
+                                    bg-amber-50 text-amber-600 border-amber-100
+                                {% else %}
+                                    bg-gray-50 text-gray-600 border-gray-100
+                                {% endif %}">
+                                {{ ticket.get_priority_display }} Priority
+                            </span>
+                            
+                            <!-- Status badge -->
+                            <span class="px-2.5 py-1 text-[10px] font-black rounded-full uppercase tracking-wider
+                                {% if ticket.status == 'open' %}
+                                    bg-blue-50 text-blue-700 border border-blue-150
+                                {% elif ticket.status == 'in_progress' %}
+                                    bg-amber-50 text-amber-700 border border-amber-150
+                                {% elif ticket.status == 'resolved' %}
+                                    bg-green-50 text-green-700 border border-green-150
+                                {% else %}
+                                    bg-gray-50 text-gray-600 border border-gray-150
+                                {% endif %}">
+                                {{ ticket.get_status_display }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <p class="text-sm text-gray-600 leading-relaxed bg-gray-50/50 p-4 rounded-xl border border-gray-50">
+                        {{ ticket.description|truncatewords:60 }}
+                    </p>
+
+                    <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-gray-50">
+                        <div class="flex gap-4">
+                            {% if ticket.order %}
+                            <p class="text-xs font-bold text-gray-400 flex items-center gap-1.5 pl-1 mb-0">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+                                Order: <a href="?tab=orders" class="text-primary hover:underline">#{{ ticket.order.id|stringformat:"s"|slice:":8"|upper }}</a>
+                            </p>
+                            {% endif %}
+
+                            {% if ticket.payment %}
+                            <p class="text-xs font-bold text-gray-400 flex items-center gap-1.5 pl-1 mb-0">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+                                Payment Ref: <span class="text-gray-600 font-mono">{{ ticket.payment.provider_ref|default:ticket.payment.id|slice:":12" }}...</span>
+                            </p>
+                            {% endif %}
+                        </div>
+
+                        <a href="?tab=tickets&ticket_id={{ ticket.id }}" class="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover hover:underline transition-colors cursor-pointer">
+                            View Discussion
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"></path></svg>
+                        </a>
+                    </div>
+                </div>
+                {% empty %}
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center text-gray-500">
+                    <svg class="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+                    <h3 class="text-lg font-black text-gray-900 mb-1">No support tickets</h3>
+                    <p class="text-gray-500 text-sm mb-6">Need help with an order or payment? Submit a support request and our team will assist you.</p>
+                    <a href="?tab=tickets&new=true" class="px-6 py-2.5 bg-primary hover:bg-primary-hover text-white text-sm font-bold rounded-xl transition-all shadow-md shadow-primary/25 cursor-pointer">Submit a Ticket</a>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+
+<!-- Floating WhatsApp Support Widget -->
+<div class="fixed bottom-6 right-6 z-50">
+    <!-- WhatsApp Floating Action Button -->
+    <button id="whatsapp-chat-trigger" class="w-14 h-14 bg-[#25D366] hover:bg-[#128C7E] text-white rounded-full flex items-center justify-center shadow-lg transition-transform duration-300 hover:scale-110 focus:outline-none cursor-pointer relative group border-0">
+        <!-- Pulse ring for visual accent -->
+        <span class="absolute inline-flex h-full w-full rounded-full bg-[#25D366] opacity-40 animate-ping group-hover:hidden"></span>
+        <svg class="w-8 h-8 relative z-10" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.746.953 3.71 1.458 5.704 1.459h.005c6.56 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+        </svg>
+    </button>
+
+    <!-- WhatsApp Chat Window -->
+    <div id="whatsapp-chat-window" class="absolute bottom-18 right-0 w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden transform scale-95 opacity-0 pointer-events-none transition-all duration-300 origin-bottom-right z-50">
+        <!-- Header -->
+        <div class="bg-[#075E54] p-4 text-white flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-[#128C7E] flex items-center justify-center text-white font-bold relative">
+                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-[#075E54]"></span>
+                    TS
+                </div>
+                <div>
+                    <h4 class="font-extrabold text-sm mb-0">Techxagon Support</h4>
+                    <p class="text-[10px] text-green-300 font-semibold mb-0">Online &bull; Replies in minutes</p>
+                </div>
+            </div>
+            <button id="whatsapp-chat-close" class="text-white/80 hover:text-white focus:outline-none cursor-pointer bg-transparent border-0">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+
+        <!-- Chat Body -->
+        <div class="p-5 bg-[#ECE5DD] space-y-4 min-h-[120px] relative">
+            <!-- Background pattern decoration -->
+            <div class="absolute inset-0 opacity-[0.04] bg-[radial-gradient(#000_1px,transparent_1px)] [background-size:16px_16px]"></div>
+            
+            <div class="bg-white rounded-2xl p-4 shadow-sm relative z-10 border border-gray-150/40">
+                <p class="text-xs text-gray-400 font-bold mb-1">Techxagon Agent</p>
+                <p class="text-sm text-gray-800 leading-relaxed mb-0">
+                    Hi there! 👋 How can we help you today? Chat with us on WhatsApp for instant support.
+                </p>
+            </div>
+        </div>
+
+        <!-- Footer / Action Button -->
+        <div class="p-4 bg-white border-t border-gray-100 flex flex-col gap-2">
+            <a href="https://wa.me/2348030000000?text=Hi%20Techxagon%20Support,%20I%20have%20a%20question%2520regarding%2520the%2520store." target="_blank" rel="noopener noreferrer" class="w-full py-2.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all text-center cursor-pointer border-0 text-decoration-none">
+                <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                    <path d="M12.044 2C6.505 2 2.011 6.494 2.011 12.033c0 2.14.664 4.126 1.796 5.753l-1.91 6.985 7.151-1.875A11.968 11.968 0 0 0 12.044 22.06c5.54 0 10.033-4.494 10.033-10.033C22.077 6.494 17.584 2 12.044 2zm0 1.834c4.526 0 8.199 3.673 8.199 8.199 0 4.526-3.673 8.199-8.199 8.199a8.167 8.167 0 0 1-4.175-1.168l-3.003.787.8-2.923a8.172 8.172 0 0 1-1.168-4.174c0-4.526 3.673-8.199 8.199-8.199zm4.276 5.717c-.125-.282-1.397-.689-1.613-.765-.216-.077-.374-.117-.532.117-.158.234-.614.764-.752.92-.138.157-.276.175-.512.056-.237-.118-.999-.368-1.904-1.176-.704-.627-1.178-1.402-1.316-1.637-.138-.236-.015-.364.103-.482.106-.106.237-.277.355-.415.118-.138.157-.236.236-.393.079-.157.039-.295-.02-.413-.058-.118-.532-1.282-.729-1.756-.195-.468-.392-.405-.532-.413-.138-.008-.295-.008-.453-.008-.158 0-.413.059-.63.295-.217.236-.827.808-.827 1.97 0 1.161.847 2.283.965 2.441.118.157 1.667 2.545 4.037 3.57.563.242 1.003.388 1.348.497.567.18 1.082.155 1.488.094.453-.069 1.397-.571 1.593-1.122.196-.551.196-1.023.138-1.121-.059-.098-.216-.157-.453-.276z"/>
+                </svg>
+                Start WhatsApp Chat
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const trigger = document.getElementById('whatsapp-chat-trigger');
+    const windowEl = document.getElementById('whatsapp-chat-window');
+    const closeBtn = document.getElementById('whatsapp-chat-close');
+
+    function toggleChat() {
+        if (windowEl.classList.contains('opacity-0')) {
+            // Show
+            windowEl.classList.remove('opacity-0', 'scale-95', 'pointer-events-none');
+            windowEl.classList.add('opacity-100', 'scale-100');
+        } else {
+            // Hide
+            windowEl.classList.remove('opacity-100', 'scale-100');
+            windowEl.classList.add('opacity-0', 'scale-95', 'pointer-events-none');
+        }
+    }
+
+    trigger.addEventListener('click', function(e) {
+        e.stopPropagation();
+        toggleChat();
+    });
+
+    closeBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        toggleChat();
+    });
+
+    // Close when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!windowEl.contains(e.target) && !trigger.contains(e.target)) {
+            windowEl.classList.remove('opacity-100', 'scale-100');
+            windowEl.classList.add('opacity-0', 'scale-95', 'pointer-events-none');
+        }
+    });
+});
+</script>
+{% endblock content %}

@@ -46,7 +46,6 @@ from store.models import (
     Order,
     OrderItem,
     Payment,
-    Entitlement,
     BNPLPlanTemplate,
     BNPLAgreement,
     BNPLInstallment,
@@ -856,8 +855,9 @@ def bnpl_start(request, order_id: str):
             order.save(update_fields=["status"])
             # grant digital entitlements
             for oi in order.items.select_related("product"):
-                if oi.product.is_digital:
-                    Entitlement.objects.get_or_create(user=order.user, product=oi.product)
+                # if oi.product.is_digital:
+                #     Entitlement.objects.get_or_create(user=order.user, product=oi.product)
+                pass
 
     return Response({"agreement_id": str(ag.id), "status": ag.status})
 
@@ -1224,17 +1224,7 @@ def rma_create(request, order_id: str):
         )
     return Response({"rma_id": str(rma.id), "rma_number": rma.rma_number}, status=201)
 
-@api_view(["GET"])
-@permission_classes([HasAPIKey])
-@authentication_classes([SessionTokenAuthentication])
-def entitlements_list(request):
-    user = _get_user_from_request(request)
-    if not user:
-        return Response({"detail": "Auth required."}, status=401)
-    ents = Entitlement.objects.filter(user=user).select_related("product")
-    data = [{"product_id": str(e.product_id), "title": e.product.title} for e in ents]
-    return Response({"results": data})
-
+# View removed
 
 
 # ---------- helpers ----------

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+{% load static %}
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>{% block title %}Techxagon Store{% endblock %}</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style type="text/tailwindcss">
+        @theme {
+            --color-primary: #e62e04;
+            --color-primary-hover: #d12702;
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans antialiased min-h-screen flex flex-col">
+
+    <!-- Modern Bottom Right Toast Notification -->
+    <div id="cart-toast" class="fixed bottom-8 right-8 z-[9999] flex flex-col gap-3 bg-white/95 backdrop-blur-xl border border-white shadow-[0_20px_50px_-12px_rgba(0,0,0,0.2)] rounded-3xl p-5 translate-y-[150%] opacity-0 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] w-80 ring-1 ring-black/5 pointer-events-none">
+        <div class="flex items-start justify-between">
+            <div class="flex items-center gap-4">
+                <div class="flex items-center justify-center w-12 h-12 rounded-full bg-green-100 text-green-600 flex-shrink-0 shadow-inner">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                </div>
+                <div>
+                    <h4 class="text-base font-extrabold text-gray-900 leading-tight">Added to Cart</h4>
+                    <p id="cart-toast-msg" class="text-sm font-semibold text-gray-500 truncate max-w-[170px] mt-0.5">Success!</p>
+                </div>
+            </div>
+            <button onclick="hideToast()" class="text-gray-400 hover:text-gray-900 transition-colors focus:outline-none cursor-pointer bg-gray-50 hover:bg-gray-100 rounded-full p-1 pointer-events-auto">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="flex gap-3 mt-2 pointer-events-auto">
+            <a href="{% url 'store_frontend:cart' %}" class="flex-1 text-center py-2.5 px-3 text-sm font-bold text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-xl transition-colors border border-gray-200">View Cart</a>
+            <a href="{% url 'store_frontend:checkout' %}" class="flex-1 text-center py-2.5 px-3 text-sm font-bold text-white bg-gray-900 hover:bg-black rounded-xl transition-colors shadow-sm">Checkout</a>
+        </div>
+    </div>
+
+    <!-- Top Navigation -->
+    <header class="bg-white/80 backdrop-blur-md sticky top-0 z-50 border-b border-gray-100 shadow-sm">
+        <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-20 gap-8">
+                <!-- Left: Logo & Main Nav -->
+                <div class="flex items-center gap-10">
+                    <a href="{% url 'store_frontend:home' %}" class="flex items-center flex-shrink-0">
+                        <img src="{% static 'assets/logo_text.png' %}" alt="Techxagon Academy" class="h-9 w-auto" />
+                    </a>
+                    
+                    <!-- Divider -->
+                    <span class="hidden md:block w-px h-7 bg-gray-200 rounded-full"></span>
+
+                    <nav class="hidden md:flex items-center gap-1 text-sm font-semibold text-gray-600">
+                        <a href="{% url 'store_frontend:home' %}?category=laptops"
+                           class="nav-pill group flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-200 hover:bg-orange-50 hover:text-primary relative {% if request.GET.category == 'laptops' %}bg-orange-50 text-primary{% endif %}">
+                            <!-- Laptop Icon -->
+                            <svg class="w-4 h-4 opacity-60 group-hover:opacity-100 transition-opacity {% if request.GET.category == 'laptops' %}opacity-100{% endif %}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                            </svg>
+                            Laptops
+                            <span class="absolute bottom-0 left-1/2 -translate-x-1/2 w-0 group-hover:w-4/5 h-0.5 bg-primary rounded-full transition-all duration-300 {% if request.GET.category == 'laptops' %}w-4/5{% endif %}"></span>
+                        </a>
+
+                        <a href="{% url 'store_frontend:home' %}?category=robotics"
+                           class="nav-pill group flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-200 hover:bg-orange-50 hover:text-primary relative {% if request.GET.category == 'robotics' %}bg-orange-50 text-primary{% endif %}">
+                            <!-- Robot/Gear Icon -->
+                            <svg class="w-4 h-4 opacity-60 group-hover:opacity-100 transition-opacity {% if request.GET.category == 'robotics' %}opacity-100{% endif %}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            </svg>
+                            Robotics
+                            <span class="absolute bottom-0 left-1/2 -translate-x-1/2 w-0 group-hover:w-4/5 h-0.5 bg-primary rounded-full transition-all duration-300 {% if request.GET.category == 'robotics' %}w-4/5{% endif %}"></span>
+                        </a>
+
+                        <a href="{% url 'store_frontend:home' %}?category=iot"
+                           class="nav-pill group flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-200 hover:bg-orange-50 hover:text-primary relative {% if request.GET.category == 'iot' %}bg-orange-50 text-primary{% endif %}">
+                            <!-- WiFi/IoT Icon -->
+                            <svg class="w-4 h-4 opacity-60 group-hover:opacity-100 transition-opacity {% if request.GET.category == 'iot' %}opacity-100{% endif %}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/>
+                            </svg>
+                            IoT Devices
+                            <span class="absolute bottom-0 left-1/2 -translate-x-1/2 w-0 group-hover:w-4/5 h-0.5 bg-primary rounded-full transition-all duration-300 {% if request.GET.category == 'iot' %}w-4/5{% endif %}"></span>
+                        </a>
+                    </nav>
+                </div>
+
+                <!-- Right: Search & Actions -->
+                <div class="flex items-center gap-6 flex-1 justify-end">
+                    <!-- Search Bar (AliExpress Style) -->
+                    <div class="hidden lg:block max-w-md w-full">
+                        <form action="{% url 'store_frontend:search' %}" method="GET" class="relative group">
+                            <input type="text" name="q" value="{{ request.GET.q|default:'' }}"
+                                   class="block w-full pl-5 pr-20 py-2.5 border-2 border-primary rounded-full text-sm bg-white placeholder-gray-500 focus:outline-none focus:border-primary-hover transition-colors shadow-sm" 
+                                   placeholder="Search for laptops, robotics, IOT...">
+                            <button type="submit" class="absolute inset-y-0 right-0 flex items-center px-6 bg-gray-900 text-white rounded-r-full hover:bg-gray-800 transition-colors">
+                                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex items-center gap-5">
+                        <button class="lg:hidden text-gray-600 hover:text-primary transition-colors">
+                            <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                        </button>
+                        
+                        {% if request.user.is_authenticated %}
+                        <a href="{% url 'store_frontend:profile' %}" class="hidden sm:inline-flex items-center justify-center gap-2 text-sm font-bold text-gray-700 hover:text-primary transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                            Profile
+                        </a>
+                        <a href="{% url 'store_frontend:notifications' %}" class="relative flex items-center justify-center p-2 text-gray-700 hover:text-primary transition-colors rounded-full hover:bg-gray-100">
+                            <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                            </svg>
+                            <span id="notifications-badge" class="absolute top-1.5 right-1.5 {% if unread_notifications_count > 0 %}block{% else %}hidden{% endif %} h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-white"></span>
+                        </a>
+                        <a href="{% url 'store_frontend:logout' %}" class="hidden sm:inline-flex items-center justify-center gap-2 text-sm font-bold text-gray-700 hover:text-red-500 transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                            Logout
+                        </a>
+                        {% else %}
+                        <a href="{% url 'store_frontend:auth' %}" class="hidden sm:inline-flex items-center justify-center px-6 py-2.5 text-sm font-bold text-primary transition-all duration-300 border-2 border-primary rounded-full hover:bg-primary hover:text-white shadow-sm hover:shadow-md">
+                            Sign In
+                        </a>
+                        {% endif %}
+
+                        <a href="{% url 'store_frontend:cart' %}" class="flex items-center gap-2 group hover:text-primary transition-colors pl-2">
+                            <div class="relative">
+                                <svg class="h-8 w-8 text-gray-700 group-hover:text-primary transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                                </svg>
+                                <span id="cart-count-badge" class="absolute -top-1 -right-1 bg-primary text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center border-2 border-white shadow-sm">{{ cart_item_count|default:0 }}</span>
+                            </div>
+                            <span class="font-bold leading-tight hidden sm:block text-gray-700 group-hover:text-primary transition-colors">Cart</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow w-full max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {% block content %}
+        {% endblock content %}
+    </main>
+
+    <!-- Simple Footer -->
+    <footer class="bg-white border-t border-gray-200 py-12 mt-10 text-center text-sm text-gray-500">
+        <p>&copy; {% now "Y" %} Techxagon Academy. All rights reserved.</p>
+    </footer>
+
+    {% block extra_body %}{% endblock %}
+
+    <!-- Global AJAX Add-to-Cart handler -->
+    <script>
+    (function () {
+        const CART_URL = "{% url 'store_frontend:add_to_cart' %}";
+        const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
+
+        let toastTimeout;
+
+        window.hideToast = function() {
+            const toast = document.getElementById('cart-toast');
+            toast.classList.add('translate-y-[150%]', 'opacity-0', 'pointer-events-none');
+            // Remove inline styles in case they were set
+            toast.style.transform = '';
+            toast.style.opacity = '';
+            toast.style.pointerEvents = '';
+        };
+
+        function showToast(msg) {
+            const toast = document.getElementById('cart-toast');
+            document.getElementById('cart-toast-msg').textContent = msg;
+            toast.classList.remove('translate-y-[150%]', 'opacity-0', 'pointer-events-none');
+            // Ensure inline styles are cleared
+            toast.style.transform = '';
+            toast.style.opacity = '';
+            toast.style.pointerEvents = '';
+            
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => { window.hideToast() }, 5000);
+        }
+
+        function updateBadge(count) {
+            const badge = document.getElementById('cart-count-badge');
+            if (badge) {
+                badge.textContent = count;
+                // Tiny pop animation
+                badge.style.transform = 'scale(1.4)';
+                setTimeout(() => { badge.style.transform = 'scale(1)'; }, 200);
+            }
+        }
+
+        // Intercept all add-to-cart form submissions
+        document.addEventListener('submit', function (e) {
+            const form = e.target;
+            if (!form.action || !form.action.includes('/cart/add/')) return;
+            e.preventDefault();
+
+            const data = new FormData(form);
+            fetch(CART_URL, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': CSRF_TOKEN,
+                },
+                body: data,
+            })
+            .then(r => r.json())
+            .then(json => {
+                if (json.success) {
+                    showToast(json.message);
+                    updateBadge(json.cart_count);
+                } else {
+                    showToast('Could not add to cart. Try again.');
+                }
+            })
+            .catch(() => showToast('Network error. Try again.'));
+        });
+    })();
+    </script>
+</body>
+</html>

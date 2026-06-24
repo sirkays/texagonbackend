@@ -1,0 +1,699 @@
+{% extends 'store/base.html' %}
+{% load static humanize %}
+
+{% block title %}Checkout - Techxagon Store{% endblock %}
+
+{% block content %}
+<!-- Progress Steps -->
+<div class="flex justify-center mb-10 mt-4">
+    <div class="inline-flex items-center bg-white/70 backdrop-blur-md border border-gray-100/80 px-8 py-3 rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.03)] gap-3 md:gap-4">
+        <!-- Step 1: Cart (Completed) -->
+        <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/20 border-2 border-white">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+            </div>
+            <span class="font-bold text-emerald-600 text-xs md:text-sm tracking-wide hidden sm:inline">Cart</span>
+        </div>
+        
+        <!-- Line 1 (Cart -> Checkout) -->
+        <div class="w-12 md:w-20 h-[3px] bg-gradient-to-r from-emerald-500 to-primary rounded-full"></div>
+        
+        <!-- Step 2: Checkout (Active) -->
+        <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center text-xs font-black shadow-lg shadow-primary/25 border-2 border-white ring-2 ring-primary/30">
+                2
+            </div>
+            <span class="font-extrabold text-gray-900 text-xs md:text-sm tracking-wide">Checkout</span>
+        </div>
+        
+        <!-- Line 2 (Checkout -> Confirmation) -->
+        <div class="w-12 md:w-20 h-[3px] bg-gray-200 rounded-full"></div>
+        
+        <!-- Step 3: Confirmation (Future) -->
+        <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-full bg-gray-50 border border-gray-200/80 text-gray-400 flex items-center justify-center text-xs font-bold">
+                3
+            </div>
+            <span class="font-bold text-gray-400 text-xs md:text-sm tracking-wide hidden sm:inline">Confirmation</span>
+        </div>
+    </div>
+</div>
+
+<!-- Django Messages -->
+{% if messages %}
+<div class="mb-6 space-y-2">
+    {% for message in messages %}
+    <div class="flex items-start gap-3 px-5 py-3.5 rounded-xl border
+        {% if message.tags == 'error' %}bg-red-50 border-red-200 text-red-800
+        {% elif message.tags == 'warning' %}bg-amber-50 border-amber-200 text-amber-800
+        {% else %}bg-green-50 border-green-200 text-green-800{% endif %}">
+        <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        <span class="text-sm font-medium">{{ message }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Main Checkout Form (for full payment) -->
+<form id="checkout-form" method="POST" action="{% url 'store_frontend:initiate_payment' %}">
+{% csrf_token %}
+
+<div class="flex flex-col lg:flex-row gap-8 items-start">
+    <!-- Left: Checkout Form -->
+    <div class="flex-grow w-full space-y-6">
+
+        <!-- Contact Information -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <div class="flex items-center gap-3 mb-5">
+                <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center text-sm font-black flex-shrink-0">1</div>
+                <h2 class="text-base font-black text-gray-900 tracking-tight">Contact Information</h2>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">First Name *</label>
+                    <input type="text" name="first_name" required placeholder="John"
+                           value="{{ request.user.first_name }}"
+                           class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Last Name *</label>
+                    <input type="text" name="last_name" required placeholder="Doe"
+                           value="{{ request.user.last_name }}"
+                           class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Email Address *</label>
+                    <input type="email" name="email" required placeholder="john@example.com"
+                           value="{{ request.user.email }}"
+                           class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Phone Number *</label>
+                    <input type="tel" name="phone" required placeholder="+234 800 000 0000"
+                           value="{{ profile.phone|default:'' }}"
+                           class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                </div>
+            </div>
+        </div>
+
+        <!-- Shipping Address -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <div class="flex items-center gap-3 mb-5">
+                <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center text-sm font-black flex-shrink-0">2</div>
+                <h2 class="text-base font-black text-gray-900 tracking-tight">Shipping Address</h2>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Street Address *</label>
+                    <input type="text" name="line1" required placeholder="123 Innovation Drive"
+                           value="{{ default_address.line1|default:profile.address|default:'' }}"
+                           class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Apartment, Suite, etc. (optional)</label>
+                    <input type="text" name="line2" placeholder="Apt 4B"
+                           value="{{ default_address.line2|default:'' }}"
+                           class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">City *</label>
+                    <input type="text" name="city" required placeholder="Lagos"
+                           value="{{ default_address.city|default:profile.city|default:'' }}"
+                           class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">State *</label>
+                    <select name="state" required class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white text-gray-700">
+                        <option value="">Select State</option>
+                        {% with user_state=default_address.state|default:profile.state %}
+                        <option {% if user_state == "Lagos" %}selected{% endif %}>Lagos</option>
+                        <option {% if user_state == "Abuja FCT" %}selected{% endif %}>Abuja FCT</option>
+                        <option {% if user_state == "Rivers" %}selected{% endif %}>Rivers</option>
+                        <option {% if user_state == "Kano" %}selected{% endif %}>Kano</option>
+                        <option {% if user_state == "Oyo" %}selected{% endif %}>Oyo</option>
+                        <option {% if user_state == "Delta" %}selected{% endif %}>Delta</option>
+                        <option {% if user_state == "Anambra" %}selected{% endif %}>Anambra</option>
+                        <option {% if user_state == "Enugu" %}selected{% endif %}>Enugu</option>
+                        <option {% if user_state == "Kaduna" %}selected{% endif %}>Kaduna</option>
+                        <option {% if user_state == "Ogun" %}selected{% endif %}>Ogun</option>
+                        <option {% if user_state == "Ondo" %}selected{% endif %}>Ondo</option>
+                        <option {% if user_state == "Osun" %}selected{% endif %}>Osun</option>
+                        <option {% if user_state == "Kwara" %}selected{% endif %}>Kwara</option>
+                        <option {% if user_state == "Benue" %}selected{% endif %}>Benue</option>
+                        <option {% if user_state == "Cross River" %}selected{% endif %}>Cross River</option>
+                        <option {% if user_state == "Akwa Ibom" %}selected{% endif %}>Akwa Ibom</option>
+                        <option {% if user_state == "Imo" %}selected{% endif %}>Imo</option>
+                        <option {% if user_state == "Abia" %}selected{% endif %}>Abia</option>
+                        <option {% if user_state == "Edo" %}selected{% endif %}>Edo</option>
+                        <option {% if user_state == "Bayelsa" %}selected{% endif %}>Bayelsa</option>
+                        <option {% if user_state == "Kogi" %}selected{% endif %}>Kogi</option>
+                        <option {% if user_state == "Nasarawa" %}selected{% endif %}>Nasarawa</option>
+                        <option {% if user_state == "Niger" %}selected{% endif %}>Niger</option>
+                        <option {% if user_state == "Plateau" %}selected{% endif %}>Plateau</option>
+                        <option {% if user_state == "Sokoto" %}selected{% endif %}>Sokoto</option>
+                        <option {% if user_state == "Taraba" %}selected{% endif %}>Taraba</option>
+                        <option {% if user_state == "Zamfara" %}selected{% endif %}>Zamfara</option>
+                        <option {% if user_state == "Gombe" %}selected{% endif %}>Gombe</option>
+                        <option {% if user_state == "Adamawa" %}selected{% endif %}>Adamawa</option>
+                        <option {% if user_state == "Bauchi" %}selected{% endif %}>Bauchi</option>
+                        <option {% if user_state == "Borno" %}selected{% endif %}>Borno</option>
+                        <option {% if user_state == "Jigawa" %}selected{% endif %}>Jigawa</option>
+                        <option {% if user_state == "Kebbi" %}selected{% endif %}>Kebbi</option>
+                        <option {% if user_state == "Yobe" %}selected{% endif %}>Yobe</option>
+                        {% endwith %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">ZIP / Postal Code</label>
+                    <input type="text" name="postal_code" placeholder="100001"
+                           value="{{ default_address.postal_code|default:profile.zip_code|default:'' }}"
+                           class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Country</label>
+                    <select name="country" class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all bg-white text-gray-700">
+                        <option selected>Nigeria</option>
+                        <option>Ghana</option>
+                        <option>Kenya</option>
+                        <option>South Africa</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Shipping Method -->
+            <div class="mt-6 pt-6 border-t border-gray-100">
+                <h3 class="text-xs font-bold text-gray-700 mb-3 uppercase tracking-wider">Shipping Method</h3>
+                <div class="space-y-3" id="shipping-options">
+                    <label id="label-standard" class="flex items-center gap-4 p-4 border-2 border-primary bg-primary/5 rounded-xl cursor-pointer transition-all" onclick="selectShipping(this, 0)">
+                        <input type="radio" name="shipping_method" value="standard" checked class="accent-primary w-4 h-4">
+                        <div class="flex-grow">
+                            <div class="font-bold text-sm text-gray-900">Standard Delivery</div>
+                            <div class="text-xs text-gray-500">Arrives in 5–10 business days</div>
+                        </div>
+                        <span class="text-sm font-black {% if shipping_total == 0 %}text-green-600{% else %}text-gray-900{% endif %}">
+                            {% if shipping_total == 0 %}FREE{% else %}NGN{{ shipping_total|intcomma }}{% endif %}
+                        </span>
+                    </label>
+                    <label id="label-express" class="flex items-center gap-4 p-4 border border-gray-200 rounded-xl cursor-pointer hover:border-primary/40 transition-all" onclick="selectShipping(this, 5000)">
+                        <input type="radio" name="shipping_method" value="express" class="accent-primary w-4 h-4">
+                        <div class="flex-grow">
+                            <div class="font-bold text-sm text-gray-900">Express Delivery</div>
+                            <div class="text-xs text-gray-500">Arrives in 2–3 business days</div>
+                        </div>
+                        <span class="text-sm font-black text-gray-900">NGN5,000</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Payment Method -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <div class="flex items-center gap-3 mb-5">
+                <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center text-sm font-black flex-shrink-0">3</div>
+                <h2 class="text-base font-black text-gray-900 tracking-tight">Payment Method</h2>
+            </div>
+
+            <!-- Payment Tabs -->
+            <div class="flex gap-2 mb-5 flex-wrap">
+                <button type="button" id="tab-card" onclick="showTab('card')" class="px-4 py-2 rounded-full text-xs font-bold bg-gray-900 text-white transition-colors">Credit / Debit Card</button>
+                {% if all_bnpl_eligible and bnpl_plan %}
+                <button type="button" id="tab-bnpl" onclick="showTab('bnpl')" class="px-4 py-2 rounded-full text-xs font-bold border border-blue-200 text-[#001b38] bg-blue-50/50 hover:border-blue-300 hover:bg-blue-100 transition-colors flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Buy Now Pay Later
+                </button>
+                {% elif not bnpl_plan %}
+                <button type="button" disabled class="px-4 py-2 rounded-full text-xs font-bold border border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed flex items-center gap-1.5" title="Buy Now Pay Later is not configured yet">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+                    FlexPay Unavailable
+                </button>
+                {% else %}
+                {# Some items are not BNPL-eligible — show disabled button + info banner #}
+                <button type="button" disabled
+                    class="px-4 py-2 rounded-full text-xs font-bold border border-amber-200 text-amber-600 bg-amber-50 cursor-not-allowed flex items-center gap-1.5"
+                    title="Remove non-eligible items to unlock FlexPay">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                    FlexPay Locked
+                </button>
+                {% endif %}
+            </div>
+
+            <!-- Flutterwave Card / Full Payment Panel -->
+            <div id="payment-card" class="space-y-4">
+                <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-5 text-white mb-4">
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-5 bg-[#F5A623] rounded text-[8px] font-black flex items-center justify-center text-slate-900">FLW</div>
+                            <span class="text-xs font-semibold text-slate-300">Powered by Flutterwave</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                            <span class="text-[10px] text-green-400 font-semibold">SSL Secured</span>
+                        </div>
+                    </div>
+                    <p class="text-sm text-slate-200 leading-relaxed">
+                        You will be securely redirected to <strong class="text-white">Flutterwave</strong> to complete your payment. We accept cards, bank transfers, USSD, and more.
+                    </p>
+                    <div class="flex items-center gap-3 mt-4 flex-wrap">
+                        <div class="h-6 bg-[#1a1f71] text-white text-[9px] font-black px-2 rounded flex items-center">VISA</div>
+                        <div class="h-6 rounded overflow-hidden flex w-10"><div class="w-1/2 bg-[#eb001b]"></div><div class="w-1/2 bg-[#f79e1b]"></div></div>
+                        <div class="h-6 bg-white/10 text-white text-[9px] font-black px-2 rounded flex items-center">Verve</div>
+                        <div class="h-6 bg-white/10 text-white text-[9px] font-bold px-2 rounded flex items-center">Bank</div>
+                        <div class="h-6 bg-white/10 text-white text-[9px] font-bold px-2 rounded flex items-center">USSD</div>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 text-center">You will be redirected to Flutterwave's secure checkout page after clicking "Place Order".</p>
+            </div>
+
+            {% if not all_bnpl_eligible and bnpl_plan and bnpl_ineligible_items %}
+            <!-- Why FlexPay is locked — actionable info -->
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                <svg class="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                <div>
+                    <p class="text-sm font-bold text-amber-800 mb-1">FlexPay is locked for this cart</p>
+                    <p class="text-xs text-amber-700 leading-relaxed">The following item{{ bnpl_ineligible_items|length|pluralize }} cannot be purchased with Buy Now Pay Later. Remove {{ bnpl_ineligible_items|length|pluralize:"it,them" }} to unlock FlexPay:</p>
+                    <ul class="mt-2 space-y-1">
+                        {% for name in bnpl_ineligible_items %}
+                        <li class="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                            <svg class="w-3 h-3 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="10"/></svg>
+                            {{ name }}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Buy Now Pay Later Panel -->
+            {% if all_bnpl_eligible and bnpl_plan %}
+            <div id="payment-bnpl" class="hidden">
+                <div class="bg-blue-50 border border-blue-100 rounded-xl p-5 mb-4">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <div class="bg-[#001b38] text-white text-[10px] font-black px-2 py-1 rounded uppercase tracking-wider inline-block mb-2">Techxagon FlexPay</div>
+                            <h3 class="font-bold text-gray-900">{{ num_installments }} Interest-Free Payments</h3>
+                            <p class="text-xs text-gray-500 mt-0.5">via Flutterwave — every {{ bnpl_plan.interval_days }} days</p>
+                        </div>
+                        <div class="text-right">
+                            <span class="block text-xl font-black text-gray-900">NGN{{ bnpl_installment|intcomma }}</span>
+                            <span class="text-xs text-gray-500">per installment</span>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-4 relative">
+                        <div class="absolute left-[7px] top-2 bottom-2 w-0.5 bg-blue-200"></div>
+                        <!-- Installment 1 — Due Today -->
+                        <div class="flex gap-4 relative">
+                            <div class="w-4 h-4 rounded-full bg-blue-600 border-4 border-blue-50 flex-shrink-0 relative z-10 mt-1"></div>
+                            <div class="flex-grow flex justify-between items-center bg-white p-3 rounded-lg shadow-sm border border-blue-100">
+                                <div><p class="text-sm font-bold text-gray-900">Due Today</p><p class="text-xs text-gray-500">Payment 1 of {{ num_installments }}</p></div>
+                                <span class="font-black text-gray-900">NGN{{ bnpl_installment|intcomma }}</span>
+                            </div>
+                        </div>
+                        <!-- Remaining installments -->
+                        <div class="flex gap-4 relative">
+                            <div class="w-4 h-4 rounded-full bg-blue-200 border-4 border-blue-50 flex-shrink-0 relative z-10 mt-1"></div>
+                            <div class="flex-grow flex justify-between items-center text-gray-500 px-3">
+                                <span class="text-xs font-semibold">{{ num_installments|add:"-1" }} upcoming payment{{ num_installments|add:"-1"|pluralize }}</span>
+                                <span class="text-xs font-semibold">NGN{{ bnpl_installment|intcomma }} each</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <p class="text-xs text-gray-500 leading-relaxed text-center mb-4">
+                    Your first payment of <strong>NGN{{ bnpl_installment|intcomma }}</strong> is charged today via Flutterwave. Subsequent payments are collected every {{ bnpl_plan.interval_days }} days.
+                </p>
+
+                <!-- BNPL Submit button — triggers the standalone #bnpl-form outside the main form -->
+                <button type="button" onclick="submitBNPL()"
+                    class="w-full bg-[#001b38] hover:bg-[#002a57] text-white font-black py-4 rounded-xl text-center text-base transition-all shadow-lg flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Pay NGN{{ bnpl_installment|intcomma }} Now (1 of {{ num_installments }})
+                </button>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Note to Seller -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <label class="block text-xs font-bold text-gray-700 mb-2 uppercase tracking-wider">Note to Seller (optional)</label>
+            <textarea name="notes" rows="3" placeholder="Any special instructions or notes for your order..." class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all resize-none"></textarea>
+        </div>
+    </div>
+
+    <!-- Right: Order Summary -->
+    <div class="w-full lg:w-[360px] flex-shrink-0 space-y-4 lg:sticky lg:top-28">
+        <!-- Items Summary -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <h2 class="text-base font-black text-gray-900 mb-4 pb-3 border-b border-gray-100">Your Order ({{ items|length }} item{{ items|length|pluralize }})</h2>
+            <div class="space-y-4 mb-5">
+                {% for item in items %}
+                <!-- Item row -->
+                <div class="flex items-center gap-3">
+                    <div class="w-14 h-14 bg-gray-50 rounded-lg overflow-hidden border border-gray-100 flex-shrink-0 relative">
+                        {% if item.product.images.first %}
+                        <img src="{{ item.product.images.first.product_image.url }}" alt="{{ item.product.title }}" class="w-full h-full object-contain p-1">
+                        {% else %}
+                        <div class="w-full h-full flex items-center justify-center text-gray-300">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        </div>
+                        {% endif %}
+                        <span class="absolute -top-1 -right-1 bg-gray-900 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{{ item.quantity }}</span>
+                    </div>
+                    <div class="flex-grow min-w-0">
+                        <p class="text-xs font-semibold text-gray-800 line-clamp-1">{{ item.product.title }}</p>
+                        <p class="text-xs text-gray-500 capitalize">{{ item.product.product_type }}</p>
+                        {% if item.product.bnpl_enabled %}
+                        <span class="text-[10px] text-blue-600 font-semibold">FlexPay eligible</span>
+                        {% else %}
+                        <span class="text-[10px] text-gray-400">No BNPL</span>
+                        {% endif %}
+                    </div>
+                    <div class="flex items-center gap-2.5 flex-shrink-0 text-right">
+                        <span class="text-sm font-black text-gray-900">NGN{{ item.product.price|intcomma }}</span>
+                        <button type="button" class="remove-item-btn text-gray-400 hover:text-red-500 transition-colors cursor-pointer" data-url="{% url 'store_frontend:remove_from_cart' item.id %}" title="Remove item">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                </div>
+                {% empty %}
+                <p class="text-sm text-gray-500 text-center py-4">Your cart is empty.</p>
+                {% endfor %}
+            </div>
+
+            <div class="border-t border-gray-100 pt-4 space-y-2.5 text-sm">
+                {% if applied_coupon %}
+                <!-- Applied coupon banner -->
+                <div class="flex items-center justify-between gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-1">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-3.5 h-3.5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 10V5a2 2 0 012-2z"></path></svg>
+                        <span class="text-xs font-bold text-green-800 tracking-wide">{{ applied_coupon.code }}</span>
+                        <span class="text-xs text-green-600">applied</span>
+                    </div>
+                    <a href="{% url 'store_frontend:cart' %}" class="text-xs text-red-500 hover:text-red-700 font-semibold">Remove</a>
+                </div>
+                {% endif %}
+                <div class="flex justify-between text-gray-600">
+                    <span>Subtotal</span>
+                    <span class="font-semibold {% if discount_total %}line-through text-gray-400{% else %}text-gray-900{% endif %}">NGN{{ subtotal|intcomma }}</span>
+                </div>
+                {% if discount_total %}
+                <div class="flex justify-between text-green-700 font-semibold">
+                    <span class="flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 10V5a2 2 0 012-2z"></path></svg>
+                        Discount
+                    </span>
+                    <span>-NGN{{ discount_total|intcomma }}</span>
+                </div>
+                {% endif %}
+                <div class="flex justify-between text-gray-600">
+                    <span>Shipping</span>
+                    <span id="summary-shipping" class="font-semibold {% if shipping_total == 0 %}text-green-600{% else %}text-gray-900{% endif %}">
+                        {% if shipping_total == 0 %}FREE{% else %}NGN{{ shipping_total|intcomma }}{% endif %}
+                    </span>
+                </div>
+                <div class="flex justify-between text-gray-600">
+                    <span>VAT ({{ tax_rate_percent }}%)</span>
+                    <span class="font-semibold text-gray-900">NGN{{ tax_total|intcomma }}</span>
+                </div>
+                <div class="border-t border-gray-100 pt-3 flex justify-between items-center">
+                    <span class="font-black text-gray-900 text-base">Total</span>
+                    <span id="summary-total" class="font-black text-gray-900 text-2xl">NGN{{ grand_total|intcomma }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Place Order (Full Payment) -->
+        <div id="place-order-section">
+            <button type="submit" form="checkout-form"
+                class="w-full bg-primary hover:bg-primary-hover text-white font-black py-4 rounded-xl text-center text-base transition-all shadow-lg shadow-primary/30 flex items-center justify-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                <span id="place-order-btn-text">Place Order Securely</span>
+            </button>
+            <p class="text-xs text-center text-gray-400 mt-2">By placing your order you agree to our <a href="#" class="underline hover:text-primary">Terms</a> and <a href="#" class="underline hover:text-primary">Privacy Policy</a></p>
+        </div>
+    </div>
+</div>
+
+</form>
+
+<form id="remove-item-form" method="POST" action="" style="display:none;">
+    {% csrf_token %}
+</form>
+
+<!-- Standalone BNPL form — outside the main checkout-form to avoid browser form nesting restrictions -->
+{% if all_bnpl_eligible and bnpl_plan %}
+<form id="bnpl-form" method="POST" action="{% url 'store_frontend:initiate_bnpl' %}" style="display:none;">
+    {% csrf_token %}
+    <input type="hidden" name="first_name" id="bnpl_first_name">
+    <input type="hidden" name="last_name" id="bnpl_last_name">
+    <input type="hidden" name="email" id="bnpl_email">
+    <input type="hidden" name="phone" id="bnpl_phone">
+    <input type="hidden" name="notes" id="bnpl_notes">
+    <input type="hidden" name="shipping_method" id="bnpl_shipping_method">
+</form>
+{% endif %}
+
+<!-- Modern Remove Item Confirmation Modal -->
+<div id="remove-confirm-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden p-4 transition-all duration-300 animate-fade-in">
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity opacity-0" onclick="hideRemoveModal()"></div>
+    
+    <!-- Modal Card -->
+    <div class="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-full border border-gray-100 shadow-[0_20px_50px_rgba(0,0,0,0.15)] relative z-10 transform scale-95 opacity-0 transition-all duration-300 ease-out" id="modal-card">
+        <!-- Close Button -->
+        <button type="button" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer" onclick="hideRemoveModal()">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+
+        <div class="text-center">
+            <!-- Icon -->
+            <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-50 text-red-500 border border-red-100 mb-6">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </div>
+            
+            <!-- Title -->
+            <h3 class="text-lg font-black text-gray-900 mb-2">Remove item?</h3>
+            <!-- Description -->
+            <p class="text-sm text-gray-500 leading-relaxed mb-6">Are you sure you want to remove this item from your order? This will update your total amount.</p>
+            
+            <!-- Actions -->
+            <div class="flex gap-3">
+                <button type="button" class="flex-1 px-4 py-3 border border-gray-200 hover:bg-gray-50 rounded-xl text-sm font-bold text-gray-700 transition-colors cursor-pointer" onclick="hideRemoveModal()">
+                    Cancel
+                </button>
+                <button type="button" id="confirm-remove-btn" class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-red-600/20 transition-colors cursor-pointer">
+                    Yes, remove
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- BNPL Validation Modal -->
+<div id="bnpl-validation-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden p-4 transition-all duration-300 animate-fade-in">
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity opacity-0" onclick="hideValidationModal()"></div>
+    
+    <!-- Modal Card -->
+    <div class="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-full border border-gray-100 shadow-[0_20px_50px_rgba(0,0,0,0.15)] relative z-10 transform scale-95 opacity-0 transition-all duration-300 ease-out" id="bnpl-validation-card">
+        <!-- Close Button -->
+        <button type="button" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer" onclick="hideValidationModal()">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+
+        <div class="text-center">
+            <!-- Icon -->
+            <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-amber-50 text-amber-500 border border-amber-100 mb-6">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            </div>
+            
+            <!-- Title -->
+            <h3 class="text-lg font-black text-gray-900 mb-2">Missing Information</h3>
+            <!-- Description -->
+            <p class="text-sm text-gray-500 leading-relaxed mb-6">Please fill in your contact information (First Name, Email, Phone) before proceeding with FlexPay.</p>
+            
+            <!-- Actions -->
+            <button type="button" class="w-full px-4 py-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-bold shadow-lg transition-colors cursor-pointer" onclick="hideValidationModal()">
+                Okay, I'll fill it out
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock content %}
+
+{% block extra_body %}
+<script>
+const tabs = ['card'{% if all_bnpl_eligible and bnpl_plan %}, 'bnpl'{% endif %}];
+
+// ── Shipping switcher ──────────────────────────────────────────────────────
+const BASE_GRAND_TOTAL = {{ grand_total }};
+const BASE_SHIPPING    = {{ shipping_total }};
+const EXPRESS_EXTRA    = 5000;
+
+function formatNGN(amount) {
+    return 'NGN' + Math.round(amount).toLocaleString('en-NG');
+}
+
+function selectShipping(clickedLabel, extraCost) {
+    // Style reset for all labels
+    ['label-standard', 'label-express'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove('border-2', 'border-primary', 'bg-primary/5');
+        el.classList.add('border', 'border-gray-200');
+    });
+    // Highlight selected
+    clickedLabel.classList.remove('border', 'border-gray-200');
+    clickedLabel.classList.add('border-2', 'border-primary', 'bg-primary/5');
+
+    // Update sidebar
+    const shippingEl = document.getElementById('summary-shipping');
+    const totalEl    = document.getElementById('summary-total');
+    const newShipping = BASE_SHIPPING + extraCost;
+    const newTotal    = BASE_GRAND_TOTAL + extraCost;
+
+    if (newShipping === 0) {
+        shippingEl.textContent = 'FREE';
+        shippingEl.className = 'font-semibold text-green-600';
+    } else {
+        shippingEl.textContent = formatNGN(newShipping);
+        shippingEl.className = 'font-semibold text-gray-900';
+    }
+    totalEl.textContent = formatNGN(newTotal);
+}
+
+// ── Payment tab switcher ───────────────────────────────────────────────────
+function showTab(tab) {
+    tabs.forEach(t => {
+        const panel = document.getElementById('payment-' + t);
+        const btn = document.getElementById('tab-' + t);
+        if (!panel || !btn) return;
+        panel.classList.add('hidden');
+        if (t === 'bnpl') {
+            btn.classList.remove('bg-blue-100', 'border-blue-300');
+            btn.classList.add('bg-blue-50/50', 'border-blue-200');
+        } else {
+            btn.classList.remove('bg-gray-900', 'text-white');
+            btn.classList.add('border', 'border-gray-200', 'text-gray-600');
+        }
+    });
+
+    const activePanel = document.getElementById('payment-' + tab);
+    const activeBtn = document.getElementById('tab-' + tab);
+    if (activePanel) activePanel.classList.remove('hidden');
+
+    if (tab === 'bnpl') {
+        activeBtn.classList.remove('bg-blue-50/50', 'border-blue-200');
+        activeBtn.classList.add('bg-blue-100', 'border-blue-300');
+        document.getElementById('place-order-section').classList.add('hidden');
+    } else {
+        if (activeBtn) {
+            activeBtn.classList.add('bg-gray-900', 'text-white');
+            activeBtn.classList.remove('border', 'border-gray-200', 'text-gray-600');
+        }
+        document.getElementById('place-order-section').classList.remove('hidden');
+    }
+}
+
+function submitBNPL() {
+    const fields = ['first_name', 'last_name', 'email', 'phone', 'notes'];
+    fields.forEach(f => {
+        const src = document.querySelector('[name="' + f + '"]');
+        const dst = document.getElementById('bnpl_' + f);
+        if (src && dst) dst.value = src.value;
+    });
+
+    // Copy selected shipping method
+    const shippingSelected = document.querySelector('[name="shipping_method"]:checked');
+    const bnplShipping = document.getElementById('bnpl_shipping_method');
+    if (shippingSelected && bnplShipping) bnplShipping.value = shippingSelected.value;
+
+    const firstName = document.querySelector('[name="first_name"]').value.trim();
+    const email = document.querySelector('[name="email"]').value.trim();
+    const phone = document.querySelector('[name="phone"]').value.trim();
+    if (!firstName || !email || !phone) {
+        showValidationModal();
+        return;
+    }
+    document.getElementById('bnpl-form').submit();
+}
+
+function showValidationModal() {
+    const modal = document.getElementById('bnpl-validation-modal');
+    const card = document.getElementById('bnpl-validation-card');
+    
+    modal.classList.remove('hidden');
+    modal.offsetHeight; // Force reflow
+    
+    modal.querySelector('.absolute.inset-0').classList.remove('opacity-0');
+    card.classList.remove('scale-95', 'opacity-0');
+    card.classList.add('scale-100', 'opacity-100');
+    
+    document.body.style.overflow = 'hidden';
+}
+
+function hideValidationModal() {
+    const modal = document.getElementById('bnpl-validation-modal');
+    const card = document.getElementById('bnpl-validation-card');
+    
+    card.classList.remove('scale-100', 'opacity-100');
+    card.classList.add('scale-95', 'opacity-0');
+    
+    setTimeout(() => {
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+    }, 200);
+}
+
+// Modal control for removing items
+let removeUrlToSubmit = '';
+
+function showRemoveModal(url) {
+    removeUrlToSubmit = url;
+    const modal = document.getElementById('remove-confirm-modal');
+    const card = document.getElementById('modal-card');
+    
+    modal.classList.remove('hidden');
+    // Force reflow
+    modal.offsetHeight;
+    
+    // Add animations
+    modal.querySelector('.absolute.inset-0').classList.remove('opacity-0');
+    card.classList.remove('scale-95', 'opacity-0');
+    card.classList.add('scale-100', 'opacity-100');
+    
+    document.body.style.overflow = 'hidden';
+}
+
+function hideRemoveModal() {
+    const modal = document.getElementById('remove-confirm-modal');
+    const card = document.getElementById('modal-card');
+    
+    card.classList.remove('scale-100', 'opacity-100');
+    card.classList.add('scale-95', 'opacity-0');
+    
+    setTimeout(() => {
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+    }, 200);
+}
+
+document.getElementById('confirm-remove-btn').addEventListener('click', function() {
+    if (removeUrlToSubmit) {
+        const form = document.getElementById('remove-item-form');
+        form.action = removeUrlToSubmit;
+        form.submit();
+    }
+});
+
+// Wire up remove buttons
+document.querySelectorAll('.remove-item-btn').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        showRemoveModal(this.dataset.url);
+    });
+});
+</script>
+{% endblock %}

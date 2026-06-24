@@ -24,6 +24,10 @@ KONNECT_MAX_ROOM = 25
 TAX_RATE = Decimal("0.08")
 FLAT_SHIPPING = Decimal("1000.99")
 
+ACCOUNT_SIGNUP_EMAIL = os.environ.get("ACCOUNT_SIGNUP_EMAIL", "1") == "1"
+
+ACCOUNT_EMAIL_NOTIFICATION = os.environ.get("ACCOUNT_EMAIL_NOTIFICATION", "1") == "1"
+
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     'http://127.0.0.1:3000',
@@ -102,7 +106,7 @@ INSTALLED_APPS = [
     "rest_framework_api_key",
     'django.contrib.sites',
     'django.contrib.sitemaps',
-
+    'django.contrib.humanize',
 ]
 
 SITE_ID = 1
@@ -142,6 +146,8 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'store.context_processors.cart_item_count',
+                'store.context_processors.unread_notifications_count',
             ],
         },
     },

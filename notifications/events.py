@@ -61,3 +61,18 @@ ORDER_CREATED = MessageSpec(
     email_html_template="emails/order_created.html",
     email_text_template="emails/order_created.txt",
 )
+
+ORDER_FULFILLED = MessageSpec(
+    kind=Notification.Kind.SYSTEM,
+    title_template="Order Shipped! 📦",
+    body_template="Great news! Your order {{ data.order_id }} containing {{ data.item_name }} has been shipped and is on its way.",
+    email_subject_template="Order Shipped: {{ data.order_id }}",
+)
+
+ORDER_CANCELLED = MessageSpec(
+    kind=Notification.Kind.ALERT,
+    title_template="Order Cancelled",
+    body_template="Your order {{ data.order_id }} has been cancelled.",
+    email_subject_template="Order Cancelled: {{ data.order_id }}",
+)
+

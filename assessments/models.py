@@ -68,6 +68,7 @@ class Question(TimeStampedModel):
     body = models.TextField()
     points = models.DecimalField(max_digits=6, decimal_places=2, default=1)
     meta = models.JSONField(default=dict, blank=True)
+    image = models.ImageField(upload_to="questions/", null=True, blank=True)
 
     class Meta:
         ordering = ["order"]

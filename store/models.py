@@ -30,23 +30,61 @@ class Category(TimeStampedModel):
         return self.name
 
 
+class StoreConfiguration(TimeStampedModel):
+    """
+    Singleton model for global store settings like tax rate and flat shipping cost.
+    """
+    tax_rate_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("7.50"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="VAT/Tax rate as a percentage (e.g., 7.50 for 7.5%)"
+    )
+    flat_shipping_rate = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Flat rate shipping cost applied to orders"
+    )
+
+    class Meta:
+        verbose_name = "Store Configuration"
+        verbose_name_plural = "Store Configuration"
+
+    def __str__(self):
+        return "Global Store Configuration"
+
+    def save(self, *args, **kwargs):
+        # Ensure only one instance exists
+        if StoreConfiguration.objects.exists() and not self.pk:
+            return StoreConfiguration.objects.first()
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls):
+        obj, created = cls.objects.get_or_create()
+        return obj
+
+
 class Product(TimeStampedModel):
     class ProductType(models.TextChoices):
-        COURSE = "course", _("Online Course")
-        BOOK = "book", _("Book / eBook")
-        AUDIO = "audio", _("Audio Course")
+        LAPTOP = "laptop", _("Laptop")
+        GADGET = "gadget", _("Gadget")
+        IOT_DEVICE = "iot_device", _("IoT Device")
+        ACCESSORY = "accessory", _("Accessory")
         HARDWARE = "hardware", _("Hardware")
-        BUNDLE = "bundle", _("Bundle")
-        BOOTCAMP = "bootcamp", _("Bootcamp")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=200, db_index=True)
     slug = models.SlugField(max_length=220, unique=True, default="slug001")
-    product_type = models.CharField(max_length=20, choices=ProductType.choices, db_index=True, default=ProductType.HARDWARE)
+    product_type = models.CharField(max_length=20, choices=ProductType.choices, db_index=True, default=ProductType.LAPTOP)
 
     category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products", blank=True, null=True)
     description = models.TextField(blank=True)
-
+    
+    # Detailed specs
+    brand = models.CharField(max_length=100, blank=True)
+    warranty = models.CharField(max_length=100, blank=True, help_text="e.g. 1 Year Limited Warranty")
+    features = models.TextField(blank=True, help_text="HTML or bullet points for key features")
+    specifications = models.JSONField(default=dict, blank=True, help_text="Key-value pairs for tech specs")
     # Pricing
     price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))])
     # Denormalized “pay in 4” display (optional). If null, compute on the fly.
@@ -65,8 +103,7 @@ class Product(TimeStampedModel):
     )
     rating_count = models.PositiveIntegerField(default=0)
 
-    # Digital/physical flags
-    is_digital = models.BooleanField(default=True, help_text="False for hardware/physical items.")
+    # Physical item details
     sku = models.CharField(max_length=64, blank=True, help_text="Required/used for physical items.")
     stock = models.PositiveIntegerField(default=0, help_text="Inventory for physical items only.")
 
@@ -255,18 +292,79 @@ class Payment(TimeStampedModel):
     error_message = models.TextField(blank=True)
 
 
-class Entitlement(TimeStampedModel):
-    """
-    Grants access for digital items after purchase (courses, ebooks, audio).
-    """
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="entitlements")
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="entitlements")
+class Ticket(TimeStampedModel):
+    class Status(models.TextChoices):
+        OPEN = "open", _("Open")
+        IN_PROGRESS = "in_progress", _("In Progress")
+        RESOLVED = "resolved", _("Resolved")
+        CLOSED = "closed", _("Closed")
+
+    class TicketType(models.TextChoices):
+        ORDER = "order", _("Order Issue")
+        PAYMENT = "payment", _("Payment Issue")
+        GENERAL = "general", _("General Issue")
+
+    class Priority(models.TextChoices):
+        LOW = "low", _("Low")
+        MEDIUM = "medium", _("Medium")
+        HIGH = "high", _("High")
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="tickets")
+    ticket_type = models.CharField(max_length=12, choices=TicketType.choices, default=TicketType.GENERAL)
+    order = models.ForeignKey(Order, null=True, blank=True, on_delete=models.SET_NULL, related_name="tickets")
+    payment = models.ForeignKey(Payment, null=True, blank=True, on_delete=models.SET_NULL, related_name="tickets")
+    subject = models.CharField(max_length=255)
+    description = models.TextField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    priority = models.CharField(max_length=8, choices=Priority.choices, default=Priority.MEDIUM)
+    admin_notes = models.TextField(blank=True, help_text="Notes/replies from support administrators")
+
+    def __str__(self):
+        return f"Ticket #{self.id} — {self.subject} ({self.get_status_display()})"
+
+
+class TicketMessage(TimeStampedModel):
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    message = models.TextField()
+    is_admin = models.BooleanField(default=False)
 
     class Meta:
-        unique_together = [("user", "product")]
-        indexes = [models.Index(fields=["user", "product"])]
+        ordering = ["created_at"]
 
+    def __str__(self):
+        return f"Message by {self.sender} on Ticket #{self.ticket.id}"
+
+    def save(self, *args, **kwargs):
+        is_new = self._state.adding
+        super().save(*args, **kwargs)
+        if is_new and self.is_admin:
+            # Send notification to the user
+            try:
+                from notifications.services import dispatch
+                from notifications.models import Notification
+                from notifications.messages import MessageSpec
+                from django.conf import settings
+                
+                send_email = getattr(settings, "ACCOUNT_EMAIL_NOTIFICATION", True)
+                spec = MessageSpec(
+                    kind=Notification.Kind.SYSTEM,
+                    title_template="Support ticket reply: #TCK-{{ data.ticket_id }}",
+                    body_template="Support staff replied to your ticket '{{ data.subject }}': {{ data.snippet }}",
+                )
+                snippet = self.message[:80] + "..." if len(self.message) > 80 else self.message
+                dispatch(
+                    users=[self.ticket.user],
+                    message=spec,
+                    data={
+                        "ticket_id": self.ticket.id,
+                        "subject": self.ticket.subject,
+                        "snippet": snippet
+                    },
+                    send_email=send_email
+                )
+            except Exception:
+                pass
 
 
 class BNPLPlanTemplate(TimeStampedModel):
@@ -277,13 +375,7 @@ class BNPLPlanTemplate(TimeStampedModel):
       2) generate schedules for orders that opt into BNPL.
     """
     class Provider(models.TextChoices):
-        AFTERPAY = "afterpay", _("Afterpay / Clearpay")
-        AFFIRM = "affirm", _("Affirm")
-        KLARNA = "klarna", _("Klarna")
-        PAYPAL_PAY_IN_4 = "paypal_pi4", _("PayPal Pay in 4")
-        ZIP = "zip", _("Zip")
-        SEZZLE = "sezzle", _("Sezzle")
-        MOCK = "mock", _("Mock")
+        FLUTTERWAVE = "flutterwave", _("Flutterwave")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     provider = models.CharField(max_length=20, choices=Provider.choices, db_index=True)
@@ -676,3 +768,28 @@ class ReturnItem(TimeStampedModel):
     class Meta:
         unique_together = [("rma", "order_item")]
         ordering = ["created_at"]
+
+class UserStoreProfile(TimeStampedModel):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="store_profile")
+    email_verified = models.BooleanField(default=False)
+    phone = models.CharField(max_length=32, blank=True)
+    address = models.TextField(blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    zip_code = models.CharField(max_length=20, blank=True)
+
+    def __str__(self):
+        return f"{self.user.email} - Store Profile"
+
+
+class SavedItem(TimeStampedModel):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="saved_items")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="saved_by_users")
+
+    class Meta:
+        unique_together = [("user", "product")]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.email} saved {self.product.title}"

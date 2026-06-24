@@ -1,0 +1,392 @@
+{% extends 'store/base.html' %}
+{% load static humanize %}
+
+{% block title %}Search Results {% if query %}for "{{ query }}" {% endif %}- Techxagon Store{% endblock %}
+
+{% block content %}
+
+<!-- ===== FILTER FORM wraps the entire page ===== -->
+<form id="search-filter-form" method="GET" action="{% url 'store_frontend:search' %}">
+    <!-- Preserve the search query -->
+    <input type="hidden" name="q" value="{{ query }}">
+
+<!-- Mobile Filter Drawer Backdrop -->
+<div id="filter-backdrop" class="fixed inset-0 bg-black/50 z-40 hidden md:hidden transition-opacity duration-300 opacity-0"></div>
+
+<!-- Mobile Filter Drawer -->
+<div id="filter-drawer" class="fixed top-0 left-0 h-full w-[85vw] max-w-sm bg-white z-50 shadow-2xl transform -translate-x-full transition-transform duration-300 ease-in-out flex flex-col md:hidden">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+            <h3 class="font-bold text-gray-900 text-lg">Filters</h3>
+        </div>
+        <button type="button" id="close-filter-btn" class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-800 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+    </div>
+    <div class="flex-1 overflow-y-auto px-5 py-4 space-y-1">
+        <!-- Product Type -->
+        <div class="filter-section border-b border-gray-100 pb-4 mb-1">
+            <button type="button" class="filter-toggle w-full flex items-center justify-between py-2 text-left">
+                <span class="font-semibold text-sm text-gray-900">Product Type</span>
+                <svg class="filter-chevron w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div class="filter-body pt-2 space-y-2.5">
+                <label class="flex items-center gap-3 cursor-pointer group">
+                    <input type="radio" name="product_type" value="" class="w-4 h-4 border-gray-300 accent-primary" {% if not product_type_filter %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="text-sm text-gray-600 group-hover:text-primary transition-colors">All Types</span>
+                </label>
+                {% for val, label in product_types %}
+                <label class="flex items-center gap-3 cursor-pointer group">
+                    <input type="radio" name="product_type" value="{{ val }}" class="w-4 h-4 border-gray-300 accent-primary" {% if product_type_filter == val %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="text-sm text-gray-600 group-hover:text-primary transition-colors">{{ label }}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        <!-- Price Range -->
+        <div class="filter-section border-b border-gray-100 pb-4 mb-1">
+            <button type="button" class="filter-toggle w-full flex items-center justify-between py-2 text-left">
+                <span class="font-semibold text-sm text-gray-900">Price Range (NGN)</span>
+                <svg class="filter-chevron w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div class="filter-body pt-2">
+                <div class="flex items-center gap-2 mb-3">
+                    <input type="number" name="min_price" id="m-min-price" placeholder="Min" value="{{ min_price }}" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors bg-gray-50">
+                    <span class="text-gray-400 font-medium">—</span>
+                    <input type="number" name="max_price" id="m-max-price" placeholder="Max" value="{{ max_price }}" class="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors bg-gray-50">
+                </div>
+                <div class="flex flex-wrap gap-2 mb-2">
+                    <button type="button" onclick="setPrice('m',0,10000)" class="px-3 py-1.5 text-xs rounded-full border border-gray-200 hover:border-primary hover:text-primary transition-colors {% if min_price == '0' and max_price == '10000' %}border-primary text-primary bg-orange-50{% endif %}">Under 10k</button>
+                    <button type="button" onclick="setPrice('m',10000,50000)" class="px-3 py-1.5 text-xs rounded-full border border-gray-200 hover:border-primary hover:text-primary transition-colors {% if min_price == '10000' and max_price == '50000' %}border-primary text-primary bg-orange-50{% endif %}">10k – 50k</button>
+                    <button type="button" onclick="setPrice('m',50000,200000)" class="px-3 py-1.5 text-xs rounded-full border border-gray-200 hover:border-primary hover:text-primary transition-colors {% if min_price == '50000' and max_price == '200000' %}border-primary text-primary bg-orange-50{% endif %}">50k – 200k</button>
+                    <button type="button" onclick="setPrice('m',200000,'')" class="px-3 py-1.5 text-xs rounded-full border border-gray-200 hover:border-primary hover:text-primary transition-colors {% if min_price == '200000' and not max_price %}border-primary text-primary bg-orange-50{% endif %}">200k+</button>
+                </div>
+                <button type="submit" class="w-full mt-1 py-1.5 text-xs font-semibold text-white bg-primary rounded-xl hover:bg-primary-hover transition-colors">Apply Price</button>
+            </div>
+        </div>
+        <!-- Rating -->
+        <div class="filter-section pb-4">
+            <button type="button" class="filter-toggle w-full flex items-center justify-between py-2 text-left">
+                <span class="font-semibold text-sm text-gray-900">Customer Rating</span>
+                <svg class="filter-chevron w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div class="filter-body pt-2 space-y-2.5">
+                <label class="flex items-center gap-3 cursor-pointer group">
+                    <input type="radio" name="min_rating" value="" class="w-4 h-4 border-gray-300 accent-primary" {% if not min_rating %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="text-sm text-gray-600">All Ratings</span>
+                </label>
+                <label class="flex items-center gap-3 cursor-pointer group">
+                    <input type="radio" name="min_rating" value="4" class="w-4 h-4 border-gray-300 accent-primary" {% if min_rating == '4' %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="flex items-center text-sm text-gray-600"><span class="text-yellow-400 mr-1">★★★★</span><span class="text-gray-300">☆</span><span class="ml-1.5">& Up</span></span>
+                </label>
+                <label class="flex items-center gap-3 cursor-pointer group">
+                    <input type="radio" name="min_rating" value="3" class="w-4 h-4 border-gray-300 accent-primary" {% if min_rating == '3' %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="flex items-center text-sm text-gray-600"><span class="text-yellow-400 mr-1">★★★</span><span class="text-gray-300">☆☆</span><span class="ml-1.5">& Up</span></span>
+                </label>
+                <label class="flex items-center gap-3 cursor-pointer group">
+                    <input type="radio" name="min_rating" value="2" class="w-4 h-4 border-gray-300 accent-primary" {% if min_rating == '2' %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="flex items-center text-sm text-gray-600"><span class="text-yellow-400 mr-1">★★</span><span class="text-gray-300">☆☆☆</span><span class="ml-1.5">& Up</span></span>
+                </label>
+            </div>
+        </div>
+    </div>
+    <div class="px-5 py-4 border-t border-gray-100 flex gap-3">
+        <a href="{% url 'store_frontend:search' %}?q={{ query }}" class="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors text-center">Reset</a>
+        <button type="submit" class="flex-1 py-2.5 rounded-xl bg-primary text-white text-sm font-bold hover:bg-primary-hover transition-colors shadow-md shadow-primary/25">Apply Filters</button>
+    </div>
+</div>
+
+<div class="flex flex-col md:flex-row gap-6 items-start">
+    <!-- ===== Desktop Sidebar ===== -->
+    <aside class="hidden md:flex w-64 flex-shrink-0 flex-col gap-0 bg-white rounded-2xl shadow-sm border border-gray-100 sticky top-24 overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+                <h3 class="font-bold text-gray-900 text-base">Filters</h3>
+            </div>
+            <a href="{% url 'store_frontend:search' %}?q={{ query }}" class="text-xs text-primary font-semibold hover:underline">Reset all</a>
+        </div>
+
+        <!-- Product Type -->
+        <div class="filter-section border-b border-gray-100">
+            <button type="button" class="filter-toggle w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-gray-50 transition-colors">
+                <span class="font-semibold text-sm text-gray-900">Product Type</span>
+                <svg class="filter-chevron w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div class="filter-body px-5 pb-4 space-y-2.5">
+                <label class="flex items-center gap-2.5 cursor-pointer group">
+                    <input type="radio" name="product_type" value="" class="w-4 h-4 border-gray-300 accent-primary" {% if not product_type_filter %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="text-sm text-gray-600 group-hover:text-primary transition-colors">All Types</span>
+                </label>
+                {% for val, label in product_types %}
+                <label class="flex items-center gap-2.5 cursor-pointer group">
+                    <input type="radio" name="product_type" value="{{ val }}" class="w-4 h-4 border-gray-300 accent-primary" {% if product_type_filter == val %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="text-sm text-gray-600 group-hover:text-primary transition-colors">{{ label }}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Price Range -->
+        <div class="filter-section border-b border-gray-100">
+            <button type="button" class="filter-toggle w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-gray-50 transition-colors">
+                <span class="font-semibold text-sm text-gray-900">Price Range (NGN)</span>
+                <svg class="filter-chevron w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div class="filter-body px-5 pb-4">
+                <div class="flex items-center gap-2 mb-3">
+                    <input type="number" name="min_price" id="d-min-price" placeholder="Min" value="{{ min_price }}" class="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors bg-gray-50">
+                    <span class="text-gray-400">—</span>
+                    <input type="number" name="max_price" id="d-max-price" placeholder="Max" value="{{ max_price }}" class="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors bg-gray-50">
+                </div>
+                <div class="flex flex-wrap gap-1.5 mb-3">
+                    <button type="button" onclick="setPrice('d',0,10000)" class="px-2.5 py-1 text-[11px] rounded-full border border-gray-200 hover:border-primary hover:text-primary transition-colors text-gray-600 {% if min_price == '0' and max_price == '10000' %}border-primary text-primary bg-orange-50{% endif %}">Under 10k</button>
+                    <button type="button" onclick="setPrice('d',10000,50000)" class="px-2.5 py-1 text-[11px] rounded-full border border-gray-200 hover:border-primary hover:text-primary transition-colors text-gray-600 {% if min_price == '10000' and max_price == '50000' %}border-primary text-primary bg-orange-50{% endif %}">10k–50k</button>
+                    <button type="button" onclick="setPrice('d',50000,200000)" class="px-2.5 py-1 text-[11px] rounded-full border border-gray-200 hover:border-primary hover:text-primary transition-colors text-gray-600 {% if min_price == '50000' and max_price == '200000' %}border-primary text-primary bg-orange-50{% endif %}">50k–200k</button>
+                    <button type="button" onclick="setPrice('d',200000,'')" class="px-2.5 py-1 text-[11px] rounded-full border border-gray-200 hover:border-primary hover:text-primary transition-colors text-gray-600 {% if min_price == '200000' and not max_price %}border-primary text-primary bg-orange-50{% endif %}">200k+</button>
+                </div>
+                <button type="submit" class="w-full py-1.5 text-xs font-semibold text-white bg-primary rounded-lg hover:bg-primary-hover transition-colors">Apply Price</button>
+            </div>
+        </div>
+
+        <!-- Customer Rating -->
+        <div class="filter-section border-b border-gray-100">
+            <button type="button" class="filter-toggle w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-gray-50 transition-colors">
+                <span class="font-semibold text-sm text-gray-900">Customer Rating</span>
+                <svg class="filter-chevron w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div class="filter-body px-5 pb-4 space-y-2.5">
+                <label class="flex items-center gap-2.5 cursor-pointer group">
+                    <input type="radio" name="min_rating" value="" class="w-4 h-4 border-gray-300 accent-primary" {% if not min_rating %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="text-sm text-gray-600 group-hover:text-primary transition-colors">All Ratings</span>
+                </label>
+                <label class="flex items-center gap-2.5 cursor-pointer group">
+                    <input type="radio" name="min_rating" value="4" class="w-4 h-4 border-gray-300 accent-primary" {% if min_rating == '4' %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="flex items-center text-sm text-gray-600 group-hover:text-primary transition-colors">
+                        <span class="text-yellow-400 mr-0.5">★★★★</span><span class="text-gray-300 mr-1.5">★</span>& Up
+                    </span>
+                </label>
+                <label class="flex items-center gap-2.5 cursor-pointer group">
+                    <input type="radio" name="min_rating" value="3" class="w-4 h-4 border-gray-300 accent-primary" {% if min_rating == '3' %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="flex items-center text-sm text-gray-600 group-hover:text-primary transition-colors">
+                        <span class="text-yellow-400 mr-0.5">★★★</span><span class="text-gray-300 mr-1.5">★★</span>& Up
+                    </span>
+                </label>
+                <label class="flex items-center gap-2.5 cursor-pointer group">
+                    <input type="radio" name="min_rating" value="2" class="w-4 h-4 border-gray-300 accent-primary" {% if min_rating == '2' %}checked{% endif %} onchange="this.form.submit()">
+                    <span class="flex items-center text-sm text-gray-600 group-hover:text-primary transition-colors">
+                        <span class="text-yellow-400 mr-0.5">★★</span><span class="text-gray-300 mr-1.5">★★★</span>& Up
+                    </span>
+                </label>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ===== Main Results Area ===== -->
+    <div class="flex-1 w-full min-w-0">
+        <!-- Toolbar -->
+        <div class="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+                <h1 class="text-xl font-bold text-gray-900">Search Results</h1>
+                {% if query %}
+                <p class="text-gray-500 text-sm mt-0.5">
+                    Results for <span class="font-semibold text-gray-800">"{{ query }}"</span>
+                    &mdash; <span class="text-gray-400">{{ total_count }} item{{ total_count|pluralize }}</span>
+                </p>
+                {% else %}
+                <p class="text-gray-500 text-sm mt-0.5">Showing all items &mdash; <span class="text-gray-400">{{ total_count }} item{{ total_count|pluralize }}</span></p>
+                {% endif %}
+            </div>
+            <div class="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
+                <!-- Mobile Filter Button -->
+                <button type="button" id="mobile-filter-btn" class="md:hidden flex items-center gap-1.5 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-full text-sm font-semibold shadow-sm hover:border-primary hover:text-primary transition-colors active:scale-95">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+                    Filter
+                </button>
+                <!-- Sort Dropdown -->
+                <div class="flex items-center gap-2">
+                    <span class="text-sm text-gray-500 whitespace-nowrap hidden sm:inline">Sort by:</span>
+                    <select name="sort" onchange="this.form.submit()" class="text-sm border border-gray-200 text-gray-700 rounded-full shadow-sm focus:border-primary focus:ring focus:ring-primary focus:ring-opacity-50 px-4 py-2 outline-none bg-white cursor-pointer hover:border-gray-300 transition-colors">
+                        <option value="best" {% if sort == 'best' %}selected{% endif %}>Best Match</option>
+                        <option value="price_asc" {% if sort == 'price_asc' %}selected{% endif %}>Price: Low to High</option>
+                        <option value="price_desc" {% if sort == 'price_desc' %}selected{% endif %}>Price: High to Low</option>
+                        <option value="top_rated" {% if sort == 'top_rated' %}selected{% endif %}>Top Rated</option>
+                        <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest Arrivals</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active filter chips -->
+        {% if product_type_filter or min_price or max_price or min_rating %}
+        <div class="flex flex-wrap gap-2 mb-4">
+            {% if product_type_filter %}
+            <a href="?{{ filter_querystring|cut:'product_type='|cut:product_type_filter }}&q={{ query }}" class="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-50 border border-primary text-primary text-xs font-semibold rounded-full hover:bg-orange-100 transition-colors">
+                Type: {{ product_type_filter }}
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+            </a>
+            {% endif %}
+            {% if min_price or max_price %}
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-50 border border-primary text-primary text-xs font-semibold rounded-full">
+                Price: {% if min_price %}₦{{ min_price|floatformat:0 }}{% else %}0{% endif %} – {% if max_price %}₦{{ max_price|floatformat:0 }}{% else %}any{% endif %}
+                <a href="{% url 'store_frontend:search' %}?q={{ query }}&sort={{ sort }}&product_type={{ product_type_filter }}&min_rating={{ min_rating }}" class="hover:opacity-70">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                </a>
+            </span>
+            {% endif %}
+            {% if min_rating %}
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-50 border border-primary text-primary text-xs font-semibold rounded-full">
+                Rating: {{ min_rating }}★ & up
+                <a href="{% url 'store_frontend:search' %}?q={{ query }}&sort={{ sort }}&product_type={{ product_type_filter }}&min_price={{ min_price }}&max_price={{ max_price }}" class="hover:opacity-70">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                </a>
+            </span>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Product Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {% for product in products %}
+            <div class="bg-white rounded-2xl overflow-hidden border border-transparent hover:border-gray-200 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)] transition-all duration-300 group relative flex flex-col h-full">
+                <div class="relative pt-[100%] bg-[#f5f5f5]">
+                    <a href="{% url 'store_frontend:detail' slug=product.slug %}" class="absolute inset-0 z-0"></a>
+                    {% if product.bnpl_enabled %}
+                    <div class="absolute top-2 right-2 bg-[#f0f5ff]/90 backdrop-blur-sm border border-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm z-10 leading-tight text-center">Pay in<br>4</div>
+                    {% endif %}
+                    {% if product.images.all %}
+                        <img src="{{ product.images.all.0.product_image.url }}" alt="{{ product.title }}" class="absolute inset-0 w-full h-full object-cover pointer-events-none">
+                    {% else %}
+                        <div class="absolute inset-0 w-full h-full flex items-center justify-center text-gray-400 bg-gray-100 text-xs pointer-events-none">No Image</div>
+                    {% endif %}
+                    <form action="{% url 'store_frontend:add_to_cart' %}" method="POST" class="absolute bottom-3 right-3 z-20">
+                        {% csrf_token %}
+                        <input type="hidden" name="product_id" value="{{ product.id }}">
+                        <input type="hidden" name="quantity" value="1">
+                        <button type="submit" class="bg-white text-gray-900 p-2.5 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transform translate-y-4 group-hover:translate-y-0 transition-all duration-300 hover:bg-gray-100 border border-gray-100 cursor-pointer">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                        </button>
+                    </form>
+                </div>
+                <a href="{% url 'store_frontend:detail' slug=product.slug %}" class="p-3.5 flex flex-col flex-grow z-10 relative cursor-pointer">
+                    <h3 class="text-[13px] text-gray-800 leading-snug line-clamp-2 mb-2 group-hover:text-primary transition-colors mt-1">{{ product.title }}</h3>
+                    <div class="mt-auto">
+                        <div class="flex items-end gap-1 mb-1">
+                            <span class="text-lg font-bold text-gray-900 leading-none">NGN{{ product.price|intcomma }}</span>
+                        </div>
+                        <div class="flex items-center text-[11px] text-gray-500 mb-1.5">
+                            <div class="flex text-gray-900 mr-1 font-medium">★ {{ product.rating }}</div><span>|</span><span class="ml-1">{{ product.rating_count }} sold</span>
+                        </div>
+                        <div class="text-[11px] text-primary flex items-center gap-1">{% if product.stock > 0 %}In Stock{% else %}Out of Stock{% endif %}</div>
+                    </div>
+                </a>
+            </div>
+            {% empty %}
+            <div class="col-span-full py-20 text-center">
+                <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
+                    <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                </div>
+                <p class="text-gray-700 font-semibold text-lg">No products found</p>
+                <p class="text-gray-400 text-sm mt-1">Try adjusting your search or filters</p>
+                <a href="{% url 'store_frontend:search' %}" class="mt-4 inline-block px-5 py-2 bg-primary text-white text-sm font-semibold rounded-full hover:bg-primary-hover transition-colors">Clear all filters</a>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- ===== Pagination ===== -->
+        {% if paginator.num_pages > 1 %}
+        <div class="mt-12 mb-8 flex justify-center">
+            <nav class="flex items-center gap-2" aria-label="Pagination">
+                <!-- Previous -->
+                {% if page_obj.has_previous %}
+                <a href="?{{ filter_querystring }}&page={{ page_obj.previous_page_number }}" class="p-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors" aria-label="Previous page">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </a>
+                {% else %}
+                <span class="p-2 rounded-lg text-gray-300 cursor-not-allowed" aria-disabled="true">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </span>
+                {% endif %}
+
+                <!-- Page Numbers -->
+                {% for num in paginator.page_range %}
+                    {% if num == page_obj.number %}
+                    <span class="w-10 h-10 rounded-lg bg-primary text-white font-semibold flex items-center justify-center shadow-sm text-sm">{{ num }}</span>
+                    {% elif num == 1 or num == paginator.num_pages or num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' %}
+                    <a href="?{{ filter_querystring }}&page={{ num }}" class="w-10 h-10 rounded-lg text-gray-700 bg-white border border-gray-200 hover:border-primary hover:text-primary font-medium flex items-center justify-center transition-colors text-sm">{{ num }}</a>
+                    {% elif num == page_obj.number|add:'-3' or num == page_obj.number|add:'3' %}
+                    <span class="text-gray-400 px-1 font-medium">…</span>
+                    {% endif %}
+                {% endfor %}
+
+                <!-- Next -->
+                {% if page_obj.has_next %}
+                <a href="?{{ filter_querystring }}&page={{ page_obj.next_page_number }}" class="p-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors" aria-label="Next page">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                </a>
+                {% else %}
+                <span class="p-2 rounded-lg text-gray-300 cursor-not-allowed" aria-disabled="true">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                </span>
+                {% endif %}
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+</form><!-- End search-filter-form -->
+
+<script>
+// Set price quick-chips and submit
+function setPrice(prefix, min, max) {
+    const minEl = document.getElementById(prefix + '-min-price');
+    const maxEl = document.getElementById(prefix + '-max-price');
+    if (minEl) minEl.value = min;
+    if (maxEl) maxEl.value = max;
+    document.getElementById('search-filter-form').submit();
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    const openBtn = document.getElementById('mobile-filter-btn');
+    const closeBtn = document.getElementById('close-filter-btn');
+    const drawer = document.getElementById('filter-drawer');
+    const backdrop = document.getElementById('filter-backdrop');
+
+    function openDrawer() {
+        drawer.classList.remove('-translate-x-full');
+        backdrop.classList.remove('hidden');
+        requestAnimationFrame(() => backdrop.classList.remove('opacity-0'));
+        document.body.style.overflow = 'hidden';
+    }
+    function closeDrawer() {
+        drawer.classList.add('-translate-x-full');
+        backdrop.classList.add('opacity-0');
+        setTimeout(() => backdrop.classList.add('hidden'), 300);
+        document.body.style.overflow = '';
+    }
+
+    if (openBtn) openBtn.addEventListener('click', openDrawer);
+    if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
+    if (backdrop) backdrop.addEventListener('click', closeDrawer);
+
+    // Accordion logic
+    document.querySelectorAll('.filter-section').forEach(function (section) {
+        const toggle = section.querySelector('.filter-toggle');
+        const body = section.querySelector('.filter-body');
+        const chevron = section.querySelector('.filter-chevron');
+        if (!toggle || !body) return;
+        body.style.maxHeight = body.scrollHeight + 'px';
+        body.style.overflow = 'hidden';
+        body.style.transition = 'max-height 0.25s ease';
+        toggle.addEventListener('click', function () {
+            const isOpen = body.style.maxHeight !== '0px';
+            body.style.maxHeight = isOpen ? '0px' : body.scrollHeight + 'px';
+            if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+        });
+    });
+});
+</script>
+
+{% endblock content %}
