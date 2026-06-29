@@ -1460,15 +1460,6 @@ def course_create(request):
             return Response({"detail": "subject and teacher are required."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        exists = Course.objects.filter(
-            organization=org,
-            subject_id=subject_id,
-            classroom_id=classroom_id,  # None is a valid value here
-            teacher_id=teacher_id
-        ).exists()
-        if exists:
-            return Response({"detail": "A course with this subject, classroom and teacher already exists."},
-                            status=status.HTTP_400_BAD_REQUEST)
 
         c = Course.objects.create(
             organization=org,
@@ -1480,6 +1471,7 @@ def course_create(request):
             is_active=bool(data.get("is_active", True)),
             course_type=data.get("course_type", "public"),
         )
+
 
         c = (Course.objects
              .filter(pk=c.pk)

@@ -318,7 +318,9 @@ def _get_ids_from_payload(data, org):
     if not classroom_id:
         classroom_name = data.get("classroom")
         if classroom_name:
-            room = Classroom.objects.filter(organization=org, name=classroom_name).first()
+            room = Classroom.objects.filter(
+                organization=org, name=classroom_name
+            ).exclude(class_type="private").first()
             classroom_id = getattr(room, "id", None)
 
     if not teacher_id:
