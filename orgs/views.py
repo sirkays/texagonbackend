@@ -1521,15 +1521,7 @@ def course_update(request, course_id: int):
             )
             c.teacher_id = teacher_id or c.teacher_id
 
-            dup = Course.objects.filter(
-                organization=org,
-                subject_id=c.subject_id,
-                classroom_id=c.classroom_id,
-                teacher_id=c.teacher_id
-            ).exclude(pk=c.pk).exists()
-            if dup:
-                return Response({"detail": "A course with this subject, classroom and teacher already exists."},
-                                status=status.HTTP_400_BAD_REQUEST)
+
 
         if "description" in data:
             c.description = data.get("description") or ""
