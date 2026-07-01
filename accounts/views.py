@@ -1186,6 +1186,25 @@ def post_login(request):
         status=status.HTTP_200_OK,
     )
 
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def dismiss_password_change(request):
+    """
+    Mark the user's is_generated flag as False so they are no longer
+    prompted to change their password. Called when the change-password
+    page is visited, regardless of whether the user actually changes it.
+    """
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if user.is_generated:
+        user.is_generated = False
+        user.save(update_fields=["is_generated"])
+
+    return Response({"detail": "Password change prompt dismissed."}, status=status.HTTP_200_OK)
+
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])

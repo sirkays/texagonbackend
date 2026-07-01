@@ -4,6 +4,7 @@ urlpatterns = [
     path("test_email/", views.test_email, name="test_email"),
     path("create_admin/", views.create_admin, name="create_admin"),
     path("api/post-login/", views.post_login, name="post_login"),
+    path("api/dismiss-password-change/", views.dismiss_password_change, name="dismiss-password-change"),
     path("api/dashboard/overview/", views.dashboard_overview, name="dashboard-overview"),
 
     path("api/reset-password/", views.ResetPasswordView.as_view({"post": "post"}), name="api-reset-password"),
