@@ -7,6 +7,8 @@ courses_completion_dashboard,course_completed_enrollments,
     certificate_teacher_approve,
     certificate_approval_status,
     student_course_activity_metrics,
+    upload_manual_certificates,
+    list_manual_certificates,
 )
 
 from .report_views import (
@@ -55,6 +57,9 @@ urlpatterns = [
         certificate_admin_approve,
         name="certificate-admin-approve",
     ),
+
+    path("api/certificates/manual-upload/", upload_manual_certificates, name="upload_manual_certificates"),
+    path("api/certificates/manual-list/", list_manual_certificates, name="list_manual_certificates"),
 
     path(
         "api/courses/<int:course_id>/students/<int:student_id>/activity-metrics/",

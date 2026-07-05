@@ -71,7 +71,7 @@ from core.utils import (
 
 from texagonbackend.settings import pass_mark as PASS_MARK, LOW_SCORE
 
-from .models import EnrollmentCertificate, StudentEnrollmentCertificateApproval
+from .models import EnrollmentCertificate, StudentEnrollmentCertificateApproval, ManualCertificate
 from accounts.models import AdminAccess
 
 from learning.models import Module, CoursePassCriteria
@@ -1745,4 +1745,126 @@ def certificate_create(request):
     except Exception as e:
         print(e)
 
+
+import openpyxl
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def upload_manual_certificates(request):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    file_obj = request.FILES.get("file")
+    if not file_obj:
+        return Response({"detail": "No file uploaded."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not file_obj.name.endswith(('.xlsx', '.xls')):
+        return Response({"detail": "Invalid file format. Please upload an Excel file."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        wb = openpyxl.load_workbook(file_obj, data_only=True)
+        sheet = wb.active
+        
+        headers = []
+        rows = list(sheet.iter_rows(values_only=True))
+        if not rows:
+            return Response({"detail": "The uploaded Excel file is empty."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        headers = [str(h).strip().lower() if h else "" for h in rows[0]]
+        
+        # Check expected columns
+        name_idx = None
+        course_idx = None
+        school_idx = None
+        
+        for i, header in enumerate(headers):
+            if "name" in header and "student" in header:
+                name_idx = i
+            elif "student" in header and name_idx is None:
+                name_idx = i
+            elif "course" in header:
+                course_idx = i
+            elif "school" in header:
+                school_idx = i
+                
+        if name_idx is None:
+            name_idx = 0
+        if course_idx is None:
+            course_idx = 1
+            
+        created_certs = []
+        with transaction.atomic():
+            for i, row in enumerate(rows[1:], start=2):
+                if not row or not any(row):
+                    continue
+                
+                try:
+                    s_name = str(row[name_idx]).strip() if len(row) > name_idx and row[name_idx] else ""
+                except IndexError:
+                    s_name = ""
+                    
+                try:
+                    c_name = str(row[course_idx]).strip() if len(row) > course_idx and row[course_idx] else ""
+                except IndexError:
+                    c_name = ""
+                    
+                s_school = ""
+                if school_idx is not None and len(row) > school_idx and row[school_idx]:
+                    s_school = str(row[school_idx]).strip()
+                    
+                if not s_name:
+                    continue
+                    
+                cert = ManualCertificate.objects.create(
+                    organization=org,
+                    student_name=s_name,
+                    course_name=c_name,
+                    school_name=s_school,
+                    issued_by=request.user
+                )
+                created_certs.append({
+                    "id": cert.id,
+                    "student_name": cert.student_name,
+                    "course_name": cert.course_name,
+                    "school_name": cert.school_name,
+                    "number": cert.number,
+                    "created_at": cert.created_at
+                })
+                
+        return Response({"detail": f"Successfully imported {len(created_certs)} certificates.", "results": created_certs}, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        return Response({"detail": f"Error parsing Excel file: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def list_manual_certificates(request):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+        
+    qs = ManualCertificate.objects.filter(organization=org).order_by("-created_at")
     
+    results = []
+    for cert in qs:
+        results.append({
+            "id": cert.id,
+            "student_name": cert.student_name,
+            "course_name": cert.course_name,
+            "school_name": cert.school_name,
+            "number": cert.number,
+            "created_at": cert.created_at,
+            "issued_by": cert.issued_by.get_full_name() if cert.issued_by else ""
+        })
+        
+    return Response({"results": results}, status=status.HTTP_200_OK)

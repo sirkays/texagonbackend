@@ -841,3 +841,54 @@ class ReportRecipient(TimeStampedModel):
 
     def __str__(self):
         return f"[Recipient] student={self.student_id} report={self.report_id}"
+
+
+class ManualCertificate(models.Model):
+    """
+    Manually generated certificates from Excel upload.
+    """
+    organization = models.ForeignKey(
+        "orgs.Organization",
+        on_delete=models.CASCADE,
+        related_name="manual_certificates",
+        db_index=True,
+    )
+    student_name = models.CharField(max_length=255)
+    course_name = models.CharField(max_length=255)
+    school_name = models.CharField(max_length=255, blank=True)
+    number = models.CharField(max_length=32, unique=True, db_index=True, editable=False)
+    
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="issued_manual_certificates",
+    )
+    
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["organization", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.number} — {self.student_name} ({self.course_name})"
+
+    @staticmethod
+    def _generate_number() -> str:
+        import secrets
+        return f"MCERT-{secrets.token_hex(4).upper()}-{secrets.token_hex(2).upper()}"
+
+    def save(self, *args, **kwargs):
+        if not self.number:
+            for _ in range(5):
+                cand = self._generate_number()
+                if not ManualCertificate.objects.filter(number=cand).exists():
+                    self.number = cand
+                    break
+        super().save(*args, **kwargs)
+
