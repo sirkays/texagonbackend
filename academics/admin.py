@@ -3,6 +3,7 @@ from .models import (Language, Classroom, Subject, StudentProfile,
     TeacherProfile, ParentProfile, ParentChildLink,OrganizationCertificateSignatures,EnrollmentCertificate,
     StudentEnrollmentCertificateApproval,
     TeacherReport, ReportCBTItem, ReportCodingItem, ReportActivity, ReportVideo, ReportRecipient,
+    ManualCertificate,
     )
 from django.utils import timezone
 from django.utils.html import format_html
@@ -419,3 +420,19 @@ class ReportRecipientAdmin(admin.ModelAdmin):
     list_filter = ("parent_viewed",)
     search_fields = ("student__user__email", "student__user__first_name", "report__title")
     autocomplete_fields = ("report", "student")
+
+@admin.register(ManualCertificate)
+class ManualCertificateAdmin(admin.ModelAdmin):
+    list_display = (
+        "number",
+        "student_name",
+        "course_name",
+        "organization",
+        "template",
+        "issued_by",
+        "created_at",
+    )
+    list_filter = ("organization", "template", "created_at")
+    search_fields = ("student_name", "course_name", "number", "organization__name", "issued_by__email")
+    autocomplete_fields = ("organization", "issued_by")
+    readonly_fields = ("number", "created_at", "updated_at")
