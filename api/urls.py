@@ -27,6 +27,7 @@ from .views import (
 )
 from .dashboard_views import student_dashboard_overview
 from .student_cbt_views import student_cbt_list, student_cbt_start, student_cbt_submit
+from .admin_assessment_overview import assessment_overview, assessment_classrooms, assessment_courses
 
 router = DefaultRouter()
 router.register(r"organizations", OrganizationViewSet)
@@ -102,6 +103,11 @@ urlpatterns = [
     path("student/cbt/list/", student_cbt_list, name="student_cbt_list"),
     path("student/cbt/start/", student_cbt_start, name="student_cbt_start"),
     path("student/cbt/submit/", student_cbt_submit, name="student_cbt_submit"),
+
+    # Admin Assessment Overview
+    path("admin/assessment-overview/", assessment_overview, name="admin_assessment_overview"),
+    path("admin/assessment-overview/classrooms/", assessment_classrooms, name="admin_assessment_classrooms"),
+    path("admin/assessment-overview/courses/", assessment_courses, name="admin_assessment_courses"),
 ]
 
 

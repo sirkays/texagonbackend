@@ -107,6 +107,7 @@ INSTALLED_APPS = [
     'django.contrib.sites',
     'django.contrib.sitemaps',
     'django.contrib.humanize',
+    "offline_work",
 ]
 
 SITE_ID = 1

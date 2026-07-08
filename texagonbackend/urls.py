@@ -39,6 +39,7 @@ urlpatterns = [
     path('notifications/', include('notifications.urls')),
     path('api/attendance/', include('attendance.urls')),
     path('konnect/', include('konnect.urls')),
+    path('opw/', include('offline_work.urls')),
 
     path('', include('app_updates.urls')),
     path('', include('corefrontend.urls')),
