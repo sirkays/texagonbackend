@@ -856,6 +856,11 @@ class ManualCertificate(models.Model):
     student_name = models.CharField(max_length=255)
     course_name = models.CharField(max_length=255)
     school_name = models.CharField(max_length=255, blank=True)
+    template = models.CharField(
+        max_length=32,
+        default="techxagon",
+        help_text="Certificate template: techxagon or akure",
+    )
     number = models.CharField(max_length=32, unique=True, db_index=True, editable=False)
     
     issued_by = models.ForeignKey(
@@ -892,3 +897,81 @@ class ManualCertificate(models.Model):
                     break
         super().save(*args, **kwargs)
 
+
+class CertificateRequest(models.Model):
+    """
+    A certificate request submitted by a student who is NOT on the LMS.
+    The admin reviews and approves/rejects from their dashboard.
+    On approval a ManualCertificate record is created automatically.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    # Unique ID given to the student for follow-up access (no account needed)
+    access_id = models.CharField(max_length=32, unique=True, db_index=True, editable=False)
+
+    organization = models.ForeignKey(
+        "orgs.Organization",
+        on_delete=models.CASCADE,
+        related_name="certificate_requests",
+        db_index=True,
+    )
+
+    # Student-supplied details (no account required)
+    student_name = models.CharField(max_length=255)
+    student_email = models.EmailField(blank=True)
+    course_name = models.CharField(max_length=255)
+
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+
+    # Populated on approval
+    certificate = models.OneToOneField(
+        ManualCertificate,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="certificate_request",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_cert_requests",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_note = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["organization", "status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.access_id} — {self.student_name} ({self.status})"
+
+    @staticmethod
+    def _generate_access_id() -> str:
+        import secrets
+        return f"CREQ-{secrets.token_hex(3).upper()}-{secrets.token_hex(3).upper()}"
+
+    def save(self, *args, **kwargs):
+        if not self.access_id:
+            for _ in range(5):
+                cand = self._generate_access_id()
+                if not CertificateRequest.objects.filter(access_id=cand).exists():
+                    self.access_id = cand
+                    break
+        super().save(*args, **kwargs)

@@ -18,6 +18,10 @@ class Organization(NamedModel):
     is_active = models.BooleanField(default=True)
     year = models.CharField(default="2026")
     allow_unsubscribed_users = models.BooleanField(default=False)
+    allow_public_cert_request = models.BooleanField(
+        default=False,
+        help_text="When enabled, this organisation appears in the public certificate request form.",
+    )
     video_conferencing = models.CharField(
         max_length=16,
         choices=VideoConferencing.choices,

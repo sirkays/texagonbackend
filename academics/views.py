@@ -71,7 +71,7 @@ from core.utils import (
 
 from texagonbackend.settings import pass_mark as PASS_MARK, LOW_SCORE
 
-from .models import EnrollmentCertificate, StudentEnrollmentCertificateApproval, ManualCertificate
+from .models import EnrollmentCertificate, StudentEnrollmentCertificateApproval, ManualCertificate, CertificateRequest
 from accounts.models import AdminAccess
 
 from learning.models import Module, CoursePassCriteria
@@ -1766,6 +1766,10 @@ def upload_manual_certificates(request):
     if not file_obj.name.endswith(('.xlsx', '.xls')):
         return Response({"detail": "Invalid file format. Please upload an Excel file."}, status=status.HTTP_400_BAD_REQUEST)
 
+    template = request.POST.get("template", "techxagon").strip()
+    if template not in ("techxagon", "akure"):
+        template = "techxagon"
+
     try:
         wb = openpyxl.load_workbook(file_obj, data_only=True)
         sheet = wb.active
@@ -1825,6 +1829,7 @@ def upload_manual_certificates(request):
                     student_name=s_name,
                     course_name=c_name,
                     school_name=s_school,
+                    template=template,
                     issued_by=request.user
                 )
                 created_certs.append({
@@ -1832,6 +1837,7 @@ def upload_manual_certificates(request):
                     "student_name": cert.student_name,
                     "course_name": cert.course_name,
                     "school_name": cert.school_name,
+                    "template": cert.template,
                     "number": cert.number,
                     "created_at": cert.created_at
                 })
@@ -1862,9 +1868,352 @@ def list_manual_certificates(request):
             "student_name": cert.student_name,
             "course_name": cert.course_name,
             "school_name": cert.school_name,
+            "template": cert.template,
             "number": cert.number,
             "created_at": cert.created_at,
             "issued_by": cert.issued_by.get_full_name() if cert.issued_by else ""
         })
         
-    return Response({"results": results}, status=status.HTTP_200_OK)
+    return Response({"results": results}, status=status.HTTP_200_OK)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PUBLIC Certificate Request Endpoints  (no authentication required)
+# ─────────────────────────────────────────────────────────────────────────────
+
+from django.core.mail import send_mail
+from orgs.models import Organization
+
+
+@api_view(["GET"])
+@permission_classes([])
+@authentication_classes([])
+def public_cert_request_orgs(request):
+    """
+    Returns organisations that have opted in to public certificate requests.
+    Used to populate the organisation dropdown on the public request form.
+    """
+    orgs = Organization.objects.filter(
+        allow_public_cert_request=True, is_active=True
+    ).values("id", "name", "slug")
+    return Response({"results": list(orgs)}, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([])
+@authentication_classes([])
+def public_cert_request_courses(request):
+    """
+    Returns active course names for a given organisation.
+    ?org_id=<id>
+    """
+    org_id = request.query_params.get("org_id")
+    if not org_id:
+        return Response({"detail": "org_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        org = Organization.objects.get(pk=org_id, allow_public_cert_request=True, is_active=True)
+    except Organization.DoesNotExist:
+        return Response({"detail": "Organisation not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    from learning.models import Course
+    courses = (
+        Course.objects.filter(organization=org, is_active=True)
+        .values_list("name", flat=True)
+        .distinct()
+        .order_by("name")
+    )
+    return Response({"results": list(courses)}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([])
+@authentication_classes([])
+def public_cert_request_submit(request):
+    """
+    Student submits a certificate request (no account needed).
+    Returns the generated access_id for follow-up.
+    Sends a notification email to the org's contact_email.
+    """
+    data = request.data
+    student_name = str(data.get("student_name", "")).strip()
+    student_email = str(data.get("student_email", "")).strip()
+    course_name = str(data.get("course_name", "")).strip()
+    org_id = data.get("org_id")
+
+    if not student_name:
+        return Response({"detail": "Student name is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if not course_name:
+        return Response({"detail": "Course name is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if not org_id:
+        return Response({"detail": "Organisation is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        org = Organization.objects.get(pk=org_id, allow_public_cert_request=True, is_active=True)
+    except Organization.DoesNotExist:
+        return Response({"detail": "Organisation not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    cert_request = CertificateRequest.objects.create(
+        organization=org,
+        student_name=student_name,
+        student_email=student_email,
+        course_name=course_name,
+    )
+
+    # Send email to org admin
+    if org.contact_email:
+        try:
+            from notifications.services import _send_email
+            from django.conf import settings as dj_settings
+            html_body = f"""
+            <h2>New Certificate Request</h2>
+            <p>A student has submitted a certificate request for <strong>{org.name}</strong>.</p>
+            <table>
+              <tr><td><strong>Student Name:</strong></td><td>{student_name}</td></tr>
+              <tr><td><strong>Student Email:</strong></td><td>{student_email or "Not provided"}</td></tr>
+              <tr><td><strong>Course:</strong></td><td>{course_name}</td></tr>
+              <tr><td><strong>Request ID:</strong></td><td>{cert_request.access_id}</td></tr>
+              <tr><td><strong>Submitted:</strong></td><td>{cert_request.created_at.strftime("%d %b %Y, %H:%M")}</td></tr>
+            </table>
+            <p>Please log in to your admin dashboard to review and approve this request.</p>
+            """
+            _send_email(
+                to=[org.contact_email],
+                subject=f"[Techxagon] New Certificate Request — {student_name}",
+                text_body=f"New certificate request from {student_name} for {course_name}. Request ID: {cert_request.access_id}. Please log in to your admin dashboard to review.",
+                html_body=html_body,
+                from_email=getattr(dj_settings, "DEFAULT_FROM_EMAIL", "noreply@techxagon.com"),
+            )
+        except Exception:
+            pass  # Don't fail if email is not configured
+
+    return Response({
+        "detail": "Certificate request submitted successfully.",
+        "access_id": cert_request.access_id,
+        "status": cert_request.status,
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([])
+@authentication_classes([])
+def public_cert_request_status(request, access_id):
+    """
+    Student checks the status of their certificate request using their access_id.
+    If approved, returns certificate details for rendering/printing.
+    """
+    try:
+        req = CertificateRequest.objects.select_related("certificate", "organization").get(
+            access_id=access_id
+        )
+    except CertificateRequest.DoesNotExist:
+        return Response({"detail": "No request found with that ID."}, status=status.HTTP_404_NOT_FOUND)
+
+    result = {
+        "access_id": req.access_id,
+        "student_name": req.student_name,
+        "course_name": req.course_name,
+        "organization_name": req.organization.name,
+        "status": req.status,
+        "rejection_note": req.rejection_note,
+        "created_at": req.created_at,
+        "certificate": None,
+    }
+
+    if req.status == CertificateRequest.Status.APPROVED and req.certificate:
+        cert = req.certificate
+        result["certificate"] = {
+            "id": cert.id,
+            "number": cert.number,
+            "student_name": cert.student_name,
+            "course_name": cert.course_name,
+            "school_name": cert.school_name,
+            "template": cert.template,
+            "created_at": cert.created_at,
+        }
+
+    return Response(result, status=status.HTTP_200_OK)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  ADMIN Certificate Request Endpoints  (authentication required)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_list_cert_requests(request):
+    """
+    Lists all certificate requests for the admin's organisation.
+    Optional filter: ?status=pending|approved|rejected
+    """
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    status_filter = request.query_params.get("status")
+    qs = CertificateRequest.objects.filter(organization=org)
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+
+    results = []
+    for req in qs.select_related("certificate", "reviewed_by"):
+        results.append({
+            "id": req.id,
+            "access_id": req.access_id,
+            "student_name": req.student_name,
+            "student_email": req.student_email,
+            "course_name": req.course_name,
+            "status": req.status,
+            "rejection_note": req.rejection_note,
+            "reviewed_by": req.reviewed_by.get_full_name() if req.reviewed_by else "",
+            "reviewed_at": req.reviewed_at,
+            "created_at": req.created_at,
+            "certificate_number": req.certificate.number if req.certificate else None,
+            "certificate": {
+                "id": req.certificate.id,
+                "number": req.certificate.number,
+                "template": req.certificate.template,
+                "school_name": req.certificate.school_name,
+            } if req.certificate else None,
+        })
+
+    return Response({"results": results}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_approve_cert_request(request, request_id):
+    """
+    Admin approves a certificate request.
+    Body: { "template": "techxagon" | "akure" }
+    Creates a ManualCertificate and links it to the request.
+    Sends approval email to student if they provided one.
+    """
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        cert_req = CertificateRequest.objects.get(pk=request_id, organization=org)
+    except CertificateRequest.DoesNotExist:
+        return Response({"detail": "Request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if cert_req.status != CertificateRequest.Status.PENDING:
+        return Response({"detail": "This request has already been reviewed."}, status=status.HTTP_400_BAD_REQUEST)
+
+    template = request.data.get("template", "techxagon")
+    if template not in ("techxagon", "akure"):
+        template = "techxagon"
+
+    with transaction.atomic():
+        cert = ManualCertificate.objects.create(
+            organization=org,
+            student_name=cert_req.student_name,
+            course_name=cert_req.course_name,
+            school_name=org.name,
+            template=template,
+            issued_by=request.user,
+        )
+        cert_req.status = CertificateRequest.Status.APPROVED
+        cert_req.certificate = cert
+        cert_req.reviewed_by = request.user
+        cert_req.reviewed_at = timezone.now()
+        cert_req.save(update_fields=["status", "certificate", "reviewed_by", "reviewed_at", "updated_at"])
+
+    # Email student
+    if cert_req.student_email:
+        try:
+            from notifications.services import _send_email
+            from django.conf import settings as dj_settings
+            html_body = f"""
+            <h2>Your Certificate is Ready! 🎉</h2>
+            <p>Dear {cert_req.student_name},</p>
+            <p>Your certificate request for <strong>{cert_req.course_name}</strong> at <strong>{org.name}</strong> has been <strong>approved</strong>.</p>
+            <p><strong>Your Access ID:</strong> <code style="font-size:1.2em;background:#f4f4f4;padding:4px 8px;border-radius:4px;">{cert_req.access_id}</code></p>
+            <p>Visit our certificate page and enter your Access ID to view and download your certificate.</p>
+            <br>
+            <p>Congratulations!</p>
+            <p>— {org.name} Team</p>
+            """
+            _send_email(
+                to=[cert_req.student_email],
+                subject=f"[{org.name}] Your Certificate is Approved!",
+                text_body=f"Dear {cert_req.student_name}, your certificate for {cert_req.course_name} has been approved. Your Access ID is: {cert_req.access_id}.",
+                html_body=html_body,
+                from_email=getattr(dj_settings, "DEFAULT_FROM_EMAIL", "noreply@techxagon.com"),
+            )
+        except Exception:
+            pass
+
+    return Response({
+        "detail": "Certificate request approved.",
+        "certificate_number": cert.number,
+        "access_id": cert_req.access_id,
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def admin_reject_cert_request(request, request_id):
+    """
+    Admin rejects a certificate request.
+    Body: { "rejection_note": "..." }
+    Sends rejection email to student if they provided one.
+    """
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        cert_req = CertificateRequest.objects.get(pk=request_id, organization=org)
+    except CertificateRequest.DoesNotExist:
+        return Response({"detail": "Request not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if cert_req.status != CertificateRequest.Status.PENDING:
+        return Response({"detail": "This request has already been reviewed."}, status=status.HTTP_400_BAD_REQUEST)
+
+    rejection_note = str(request.data.get("rejection_note", "")).strip()
+
+    cert_req.status = CertificateRequest.Status.REJECTED
+    cert_req.rejection_note = rejection_note
+    cert_req.reviewed_by = request.user
+    cert_req.reviewed_at = timezone.now()
+    cert_req.save(update_fields=["status", "rejection_note", "reviewed_by", "reviewed_at", "updated_at"])
+
+    # Email student
+    if cert_req.student_email:
+        try:
+            from notifications.services import _send_email
+            from django.conf import settings as dj_settings
+            html_body = f"""
+            <h2>Certificate Request Update</h2>
+            <p>Dear {cert_req.student_name},</p>
+            <p>Unfortunately, your certificate request for <strong>{cert_req.course_name}</strong> at <strong>{org.name}</strong> was <strong>not approved</strong>.</p>
+            {"<p><strong>Reason:</strong> " + rejection_note + "</p>" if rejection_note else ""}
+            <p>If you believe this is an error, please contact the organisation directly.</p>
+            <p>— {org.name} Team</p>
+            """
+            _send_email(
+                to=[cert_req.student_email],
+                subject=f"[{org.name}] Certificate Request Update",
+                text_body=f"Dear {cert_req.student_name}, your certificate request for {cert_req.course_name} was not approved. {rejection_note}",
+                html_body=html_body,
+                from_email=getattr(dj_settings, "DEFAULT_FROM_EMAIL", "noreply@techxagon.com"),
+            )
+        except Exception:
+            pass
+
+    return Response({"detail": "Certificate request rejected."}, status=status.HTTP_200_OK)
+

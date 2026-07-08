@@ -9,6 +9,14 @@ courses_completion_dashboard,course_completed_enrollments,
     student_course_activity_metrics,
     upload_manual_certificates,
     list_manual_certificates,
+    # Certificate Request Portal
+    public_cert_request_orgs,
+    public_cert_request_courses,
+    public_cert_request_submit,
+    public_cert_request_status,
+    admin_list_cert_requests,
+    admin_approve_cert_request,
+    admin_reject_cert_request,
 )
 
 from .report_views import (
@@ -87,5 +95,16 @@ urlpatterns = [
 
     # ─── Parent: Report by Share Token ──────────────────────
     path("api/report/parent/<str:token>/", parent_report_by_token, name="parent-report-by-token"),
+
+    # ─── Public Certificate Request Portal (no auth) ─────────
+    path("api/certificates/public/orgs/", public_cert_request_orgs, name="public-cert-orgs"),
+    path("api/certificates/public/courses/", public_cert_request_courses, name="public-cert-courses"),
+    path("api/certificates/public/request/", public_cert_request_submit, name="public-cert-request"),
+    path("api/certificates/public/status/<str:access_id>/", public_cert_request_status, name="public-cert-status"),
+
+    # ─── Admin Certificate Request Management (auth required) ─
+    path("api/certificates/requests/", admin_list_cert_requests, name="admin-cert-requests"),
+    path("api/certificates/requests/<int:request_id>/approve/", admin_approve_cert_request, name="admin-cert-approve"),
+    path("api/certificates/requests/<int:request_id>/reject/", admin_reject_cert_request, name="admin-cert-reject"),
 
 ]
