@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Course, Enrollment, Module, Lesson, Material, Bookmark, Note,ModuleCategory,CoursePassCriteria
+from .models import Course, Enrollment, Module, Lesson, Material, Bookmark, Note,ModuleCategory,CoursePassCriteria, EnrollmentAssessmentConfig
 
 class EnrollmentInline(admin.TabularInline):
     model = Enrollment
@@ -37,13 +37,19 @@ class LessonAdmin(admin.ModelAdmin):
     search_fields = ("name", "module__course__name", "module__name")
     autocomplete_fields = ("module",)
 
+@admin.register(EnrollmentAssessmentConfig)
+class EnrollmentAssessmentConfigAdmin(admin.ModelAdmin):
+    list_display = ("name", "organization", "use_cbt", "use_code", "use_assignment", "use_opw")
+    list_filter = ("organization",)
+    search_fields = ("name", "organization__name")
+
 @admin.register(Enrollment)
 class EnrollmentAdmin(admin.ModelAdmin):
-    list_display = ("student", "course", "status","leaderboard_season", "progress_pct", "created_at")
-    list_filter = ("status", "course")
+    list_display = ("student", "course", "status","leaderboard_season", "progress_pct", "assessment_config", "created_at")
+    list_filter = ("status", "course", "course__classroom", "assessment_config")
     search_fields = ("student__user__username", "course__name", "leaderboard_season__name")
     autocomplete_fields = ("student", "course")
-
+    list_editable = ("assessment_config",)
 @admin.register(Material)
 class MaterialAdmin(admin.ModelAdmin):
     list_display = ("title", "organization", "owner", "kind", "is_public", "created_at")

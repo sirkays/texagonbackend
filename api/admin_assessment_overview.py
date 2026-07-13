@@ -59,13 +59,13 @@ def assessment_overview(request):
         return Response({"detail": msg or "Organization not found."}, status=400)
 
     # Must be admin or staff
-    if not (user.is_staff or user.is_superuser or _is_org_admin_or_teacher(user, org)):
+    if not (user.is_staff or user.is_superuser or _is_org_admin_or_teacher(request, org)):
         return Response({"detail": "Admin access required."}, status=403)
 
     # Base student queryset for this org
     qs = StudentProfile.objects.filter(
         organization=org
-    ).select_related("user", "current_classroom").order_by(
+    ).select_related("user", "current_classroom").prefetch_related("enrollments__assessment_config").order_by(
         "user__first_name", "user__last_name"
     )
 
@@ -171,10 +171,34 @@ def assessment_overview(request):
     def safe_avg(vals: list[float]) -> float | None:
         return round(sum(vals) / len(vals), 1) if vals else None
 
-    def overall(cbt, code, assign, opw):
-        """Weighted average — only categories with data contribute."""
-        parts = [x for x in [cbt, code, assign, opw] if x is not None]
-        return round(sum(parts) / len(parts), 1) if parts else None
+    def overall(cbt, code, assign, opw, config=None):
+        """Weighted average based on Assessment Config."""
+        if config:
+            total_weight = 0
+            score = 0
+            
+            if cbt is not None and config.use_cbt:
+                w = float(config.cbt_weight)
+                total_weight += w
+                score += cbt * w
+            if code is not None and config.use_code:
+                w = float(config.code_weight)
+                total_weight += w
+                score += code * w
+            if assign is not None and config.use_assignment:
+                w = float(config.assignment_weight)
+                total_weight += w
+                score += assign * w
+            if opw is not None and config.use_opw:
+                w = float(config.opw_weight)
+                total_weight += w
+                score += opw * w
+                
+            return round(score / total_weight, 1) if total_weight > 0 else None
+        else:
+            # Fallback
+            parts = [x for x in [cbt, code, assign, opw] if x is not None]
+            return round(sum(parts) / len(parts), 1) if parts else None
 
     results = []
     for student in student_list:
@@ -186,7 +210,28 @@ def assessment_overview(request):
         code_avg = safe_avg(code_map[sid])
         assign_avg = safe_avg(assign_map[sid])
         opw_avg = safe_avg(opw_map[sid])
-        overall_avg = overall(cbt_avg, code_avg, assign_avg, opw_avg)
+        # Find appropriate config
+        config = None
+        for enr in student.enrollments.all():
+            if enr.status == "active":
+                if course_id and str(enr.course_id) != str(course_id):
+                    continue
+                if enr.assessment_config:
+                    config = enr.assessment_config
+                    break
+        
+        overall_avg = overall(cbt_avg, code_avg, assign_avg, opw_avg, config)
+        
+        grade_scale = {
+            "a": 90, "b": 80, "c": 70, "d": 50
+        }
+        if config:
+            grade_scale = {
+                "a": float(config.grade_a_threshold),
+                "b": float(config.grade_b_threshold),
+                "c": float(config.grade_c_threshold),
+                "d": float(config.grade_d_threshold),
+            }
 
         results.append({
             "student_id": sid,
@@ -194,15 +239,16 @@ def assessment_overview(request):
             "student_email": user.email,
             "classroom_id": student.current_classroom_id,
             "classroom_name": student.current_classroom.name if student.current_classroom else None,
-            "cbt_avg": cbt_avg,
-            "cbt_count": len(cbt_map[sid]),
-            "code_avg": code_avg,
-            "code_count": len(code_map[sid]),
-            "assignment_avg": assign_avg,
-            "assignment_count": len(assign_map[sid]),
-            "opw_avg": opw_avg,
-            "opw_count": len(opw_map[sid]),
+            "cbt_avg": cbt_avg if (not config or config.use_cbt) else None,
+            "cbt_count": len(cbt_map[sid]) if (not config or config.use_cbt) else 0,
+            "code_avg": code_avg if (not config or config.use_code) else None,
+            "code_count": len(code_map[sid]) if (not config or config.use_code) else 0,
+            "assignment_avg": assign_avg if (not config or config.use_assignment) else None,
+            "assignment_count": len(assign_map[sid]) if (not config or config.use_assignment) else 0,
+            "opw_avg": opw_avg if (not config or config.use_opw) else None,
+            "opw_count": len(opw_map[sid]) if (not config or config.use_opw) else 0,
             "overall_avg": overall_avg,
+            "grade_scale": grade_scale,
         })
 
     # ── Platform-wide summary ───────────────────────────────────────────────
@@ -237,7 +283,7 @@ def assessment_classrooms(request):
     if not org:
         return Response({"detail": msg or "Organization not found."}, status=400)
 
-    if not (user.is_staff or user.is_superuser or _is_org_admin_or_teacher(user, org)):
+    if not (user.is_staff or user.is_superuser or _is_org_admin_or_teacher(request, org)):
         return Response({"detail": "Admin access required."}, status=403)
 
     classrooms = Classroom.objects.filter(organization=org).order_by("name")
@@ -258,7 +304,7 @@ def assessment_courses(request):
     if not org:
         return Response({"detail": msg or "Organization not found."}, status=400)
 
-    if not (user.is_staff or user.is_superuser or _is_org_admin_or_teacher(user, org)):
+    if not (user.is_staff or user.is_superuser or _is_org_admin_or_teacher(request, org)):
         return Response({"detail": "Admin access required."}, status=403)
 
     courses = Course.objects.filter(organization=org).order_by("name")

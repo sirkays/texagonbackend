@@ -24,7 +24,7 @@ from .serializers import (
     ClassroomSerializer, SubjectSerializer, StudentProfileSerializer, TeacherProfileSerializer,
     ParentProfileSerializer, ParentChildLinkSerializer,
     CourseSerializer, EnrollmentSerializer, ModuleSerializer, LessonSerializer, MaterialSerializer,
-    BookmarkSerializer, NoteSerializer,
+    BookmarkSerializer, NoteSerializer, EnrollmentAssessmentConfigSerializer,
     TestSerializer, QuestionSerializer, ChoiceSerializer, TestAttemptSerializer, AssignmentSerializer, SubmissionSerializer, SubmissionCommentSerializer,
     AttendanceSessionSerializer, AttendanceRecordSerializer,
     BadgeSerializer, BadgeAwardSerializer, PointTransactionSerializer, StreakSerializer,
@@ -39,7 +39,7 @@ from academics.models import (
     Classroom, Subject, StudentProfile, TeacherProfile,
     ParentProfile, ParentChildLink,
 )
-from learning.models import Course, Enrollment, Module, Lesson, Material, Bookmark, Note
+from learning.models import Course, Enrollment, Module, Lesson, Material, Bookmark, Note, EnrollmentAssessmentConfig
 from assessments.models import Test, Question, Choice, TestAttempt, Assignment, Submission, SubmissionComment
 from attendance.models import AttendanceSession, AttendanceRecord
 from gamification.models import Badge, BadgeAward, PointTransaction, Streak
@@ -443,6 +443,101 @@ class ParentChildLinkViewSet(APIKeySessionViewSet):
 class CourseViewSet(APIKeySessionViewSet):
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
+
+class EnrollmentAssessmentConfigViewSet(APIKeySessionViewSet):
+    queryset = EnrollmentAssessmentConfig.objects.all()
+    serializer_class = EnrollmentAssessmentConfigSerializer
+
+    def get_queryset(self):
+        org, error_response = _resolve_org(self.request)
+        if error_response is not None:
+            self._org_error = error_response
+            return EnrollmentAssessmentConfig.objects.none()
+        
+        # Must have AdminAccess to view/edit configs
+        is_admin_user = AdminAccess.user_has_admin_access(self.request.user)
+        if not (self.request.user.is_superuser or is_admin_user):
+            return EnrollmentAssessmentConfig.objects.none()
+
+        return EnrollmentAssessmentConfig.objects.filter(organization=org)
+
+    def perform_create(self, serializer):
+        org, error_response = _resolve_org(self.request)
+        if error_response is not None:
+            raise PermissionDenied("Invalid organization")
+        
+        is_admin_user = AdminAccess.user_has_admin_access(self.request.user)
+        if not (self.request.user.is_superuser or is_admin_user):
+            raise PermissionDenied("Only admins can create assessment configs")
+        
+        serializer.save(organization=org)
+
+    @action(detail=True, methods=["post"])
+    def attach(self, request, pk=None):
+        config = self.get_object()
+        
+        # Verify permissions again just in case
+        is_admin_user = AdminAccess.user_has_admin_access(request.user)
+        if not (request.user.is_superuser or is_admin_user):
+            return Response({"detail": "Admin access required"}, status=status.HTTP_403_FORBIDDEN)
+        if not (request.user.is_superuser or is_admin_user):
+            raise PermissionDenied("Only admins can attach assessment configs")
+
+        classroom_id = request.data.get("classroom_id")
+        course_id = request.data.get("course_id")
+
+        if not classroom_id and not course_id:
+            return Response({"detail": "Must provide classroom_id or course_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+        from learning.models import Enrollment
+        # Base enrollments in this org
+        qs = Enrollment.objects.filter(student__organization=config.organization, status="active")
+
+        if classroom_id:
+            qs = qs.filter(student__classroom_id=classroom_id)
+        if course_id:
+            qs = qs.filter(course_id=course_id)
+
+        updated = qs.update(assessment_config=config)
+
+        return Response({"detail": f"Configuration attached to {updated} active enrollments."})
+
+    @action(detail=True, methods=["get"])
+    def usage(self, request, pk=None):
+        config = self.get_object()
+        from learning.models import Enrollment
+        enrollments = Enrollment.objects.filter(assessment_config=config).select_related(
+            "student__user", "course", "student__current_classroom"
+        )
+        
+        data = []
+        for e in enrollments:
+            user = e.student.user
+            full_name = f"{user.first_name} {user.last_name}".strip()
+            data.append({
+                "enrollment_id": e.id,
+                "student_name": full_name or user.email,
+                "course_name": e.course.title if e.course else None,
+                "classroom_name": e.student.current_classroom.name if e.student.current_classroom else None
+            })
+            
+        return Response({"enrollments": data})
+        
+    @action(detail=True, methods=["post"], url_path="remove-enrollment")
+    def remove_enrollment(self, request, pk=None):
+        config = self.get_object()
+        enrollment_id = request.data.get("enrollment_id")
+        if not enrollment_id:
+            return Response({"detail": "enrollment_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        from learning.models import Enrollment
+        try:
+            enrollment = Enrollment.objects.get(id=enrollment_id, assessment_config=config)
+            enrollment.assessment_config = None
+            enrollment.save(update_fields=["assessment_config"])
+            return Response({"detail": "Configuration removed from enrollment successfully."})
+        except Enrollment.DoesNotExist:
+            return Response({"detail": "Enrollment not found or not attached to this configuration."}, status=status.HTTP_404_NOT_FOUND)
 
 class EnrollmentViewSet(APIKeySessionViewSet):
     queryset = Enrollment.objects.all()

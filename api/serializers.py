@@ -23,6 +23,7 @@ from learning.models import (
     Material,
     Bookmark,
     Note,
+    EnrollmentAssessmentConfig,
 )
 from assessments.models import (
     Test,
@@ -132,6 +133,12 @@ class CourseSerializer(serializers.ModelSerializer):
         model = Course
         fields = "__all__"
 
+
+class EnrollmentAssessmentConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EnrollmentAssessmentConfig
+        fields = "__all__"
+        read_only_fields = ["organization"]
 
 class EnrollmentSerializer(serializers.ModelSerializer):
     class Meta:

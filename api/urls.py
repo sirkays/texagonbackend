@@ -24,6 +24,7 @@ from .views import (
     CancelTutoringBookingView,
     verify_session,
     presign_attachment_download,
+    EnrollmentAssessmentConfigViewSet,
 )
 from .dashboard_views import student_dashboard_overview
 from .student_cbt_views import student_cbt_list, student_cbt_start, student_cbt_submit
@@ -41,6 +42,7 @@ router.register(r"teachers", TeacherProfileViewSet)
 router.register(r"parents", ParentProfileViewSet)
 router.register(r"parent-links", ParentChildLinkViewSet)
 router.register(r"courses", CourseViewSet)
+router.register(r"assessment-configs", EnrollmentAssessmentConfigViewSet)
 router.register(r"enrollments", EnrollmentViewSet)
 router.register(r"modules", ModuleViewSet)
 router.register(r"lessons", LessonViewSet, basename="lesson")

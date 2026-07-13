@@ -41,6 +41,28 @@ class CoursePassCriteria(models.Model):
     total_pass_mark_cbt = models.PositiveIntegerField(default=500)
     total_pass_mark_code = models.PositiveIntegerField(default=500)
 
+class EnrollmentAssessmentConfig(TimeStampedModel):
+    name = models.CharField(max_length=255, help_text="e.g. Standard 2026 Grade Scale")
+    organization = models.ForeignKey("orgs.Organization", on_delete=models.CASCADE, related_name="assessment_configs")
+    
+    use_cbt = models.BooleanField(default=True)
+    use_code = models.BooleanField(default=True)
+    use_assignment = models.BooleanField(default=True)
+    use_opw = models.BooleanField(default=True)
+    
+    cbt_weight = models.DecimalField(max_digits=5, decimal_places=2, default=25.0)
+    code_weight = models.DecimalField(max_digits=5, decimal_places=2, default=25.0)
+    assignment_weight = models.DecimalField(max_digits=5, decimal_places=2, default=25.0)
+    opw_weight = models.DecimalField(max_digits=5, decimal_places=2, default=25.0)
+    
+    grade_a_threshold = models.DecimalField(max_digits=5, decimal_places=2, default=90.0)
+    grade_b_threshold = models.DecimalField(max_digits=5, decimal_places=2, default=80.0)
+    grade_c_threshold = models.DecimalField(max_digits=5, decimal_places=2, default=70.0)
+    grade_d_threshold = models.DecimalField(max_digits=5, decimal_places=2, default=50.0)
+
+    def __str__(self):
+        return f"{self.name} ({self.organization})"
+
 
 
 class Enrollment(TimeStampedModel):
@@ -67,6 +89,12 @@ class Enrollment(TimeStampedModel):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
     progress_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     completed_at = models.DateTimeField(blank=True, null=True)
+    assessment_config = models.ForeignKey(
+        EnrollmentAssessmentConfig,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="enrollments"
+    )
     
 
     class Meta:
