@@ -12,8 +12,10 @@ urlpatterns = [
     # Upsert scores
     path("api/works/<int:opw_id>/scores/submit/", views.opw_submit_scores, name="opw_submit_scores"),
 
-    # CSV export
+    # CSV/Excel export and import
     path("api/works/<int:opw_id>/scores/export/", views.opw_export_csv, name="opw_export_csv"),
+    path("api/works/<int:opw_id>/scores/export-excel/", views.opw_export_excel, name="opw_export_excel"),
+    path("api/works/<int:opw_id>/scores/import-excel/", views.opw_import_excel, name="opw_import_excel"),
 
     # Helper lookups
     path("api/courses/", views.opw_teacher_courses, name="opw_teacher_courses"),

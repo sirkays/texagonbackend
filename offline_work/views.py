@@ -1,6 +1,7 @@
 import csv
 import io
 import logging
+import openpyxl
 from decimal import Decimal, InvalidOperation
 
 from django.core.paginator import Paginator
@@ -446,9 +447,187 @@ def opw_course_classrooms(request):
             course=course,
             status=Enrollment.Status.ACTIVE,
         ).values_list("student_id", flat=True),
-        classroom__isnull=False,
-    ).values_list("classroom_id", flat=True).distinct()
+        current_classroom__isnull=False,
+    ).values_list("current_classroom_id", flat=True).distinct()
 
     classrooms = Classroom.objects.filter(pk__in=classroom_ids).order_by("name")
     data = [{"id": c.id, "name": c.name} for c in classrooms]
     return Response(data)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. EXPORT SCORES AS EXCEL  —  /opw/api/works/<id>/scores/export-excel/
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_view(["GET"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def opw_export_excel(request, opw_id):
+    teacher, err = _teacher_required(request)
+    if err:
+        return err
+
+    opw = _get_opw_for_teacher(opw_id, teacher)
+    if not opw:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # All actively enrolled students for this course
+    enrolled_ids = Enrollment.objects.filter(
+        course=opw.course,
+        status=Enrollment.Status.ACTIVE,
+    ).values_list("student_id", flat=True)
+
+    students = StudentProfile.objects.filter(
+        pk__in=enrolled_ids
+    ).select_related("user", "current_classroom").order_by(
+        "user__first_name", "user__last_name"
+    )
+
+    scores_map = {
+        s.student_id: s
+        for s in OfflinePracticalScore.objects.filter(opw=opw, student_id__in=enrolled_ids)
+    }
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "OPW Scores"
+
+    headers = ["Student ID", "Student Name", "Email", "Classroom", "Score", "Feedback"]
+    ws.append(headers)
+
+    for student in students:
+        user = student.user
+        name = f"{user.first_name} {user.last_name}".strip() or user.email
+        classroom = student.current_classroom.name if student.current_classroom else ""
+        score_obj = scores_map.get(student.id)
+        
+        score_val = float(score_obj.score) if (score_obj and score_obj.score is not None) else ""
+        feedback = score_obj.feedback if score_obj else ""
+        
+        ws.append([
+            student.id,
+            name,
+            user.email,
+            classroom,
+            score_val,
+            feedback
+        ])
+
+    # Auto-adjust column widths
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter # Get the column name
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = (max_length + 2)
+        ws.column_dimensions[column].width = adjusted_width
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    safe_title = opw.title.replace(" ", "_")[:40]
+    filename = f"OPW_{safe_title}_{timezone.now().strftime('%Y%m%d')}.xlsx"
+
+    response = HttpResponse(
+        output,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. IMPORT SCORES FROM EXCEL  —  /opw/api/works/<id>/scores/import-excel/
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_view(["POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def opw_import_excel(request, opw_id):
+    teacher, err = _teacher_required(request)
+    if err:
+        return err
+
+    opw = _get_opw_for_teacher(opw_id, teacher)
+    if not opw:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    file_obj = request.FILES.get("file")
+    if not file_obj:
+        return Response({"error": "No file uploaded."}, status=status.HTTP_400_BAD_REQUEST)
+        
+    if not file_obj.name.endswith(".xlsx"):
+        return Response({"error": "Please upload a valid .xlsx file."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        wb = openpyxl.load_workbook(file_obj, data_only=True)
+        ws = wb.active
+    except Exception as e:
+        logger.error(f"Excel read error: {e}")
+        return Response({"error": "Failed to read Excel file. It might be corrupted."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Find headers
+    headers = [str(cell.value).strip().lower() for cell in ws[1] if cell.value is not None]
+    
+    try:
+        id_idx = headers.index("student id")
+    except ValueError:
+        return Response({"error": "'Student ID' column not found in row 1."}, status=status.HTTP_400_BAD_REQUEST)
+
+    score_idx = headers.index("score") if "score" in headers else None
+    feedback_idx = headers.index("feedback") if "feedback" in headers else None
+
+    if score_idx is None:
+        return Response({"error": "'Score' column not found in row 1."}, status=status.HTTP_400_BAD_REQUEST)
+
+    saved_count = 0
+    errors = []
+
+    for row_idx, row in enumerate(ws.iter_rows(min_row=2), start=2):
+        student_id_val = row[id_idx].value
+        if not student_id_val:
+            continue
+            
+        try:
+            student_id = int(student_id_val)
+        except ValueError:
+            errors.append({"row": row_idx, "error": f"Invalid Student ID: {student_id_val}"})
+            continue
+            
+        score_val_raw = row[score_idx].value
+        feedback_val = row[feedback_idx].value if feedback_idx is not None else ""
+        
+        if score_val_raw is None or str(score_val_raw).strip() == "":
+            continue # Skip blank scores
+            
+        try:
+            score_val = Decimal(str(score_val_raw))
+        except InvalidOperation:
+            errors.append({"row": row_idx, "error": f"Invalid Score: {score_val_raw} for Student {student_id}"})
+            continue
+
+        if score_val < 0 or score_val > opw.max_score:
+            errors.append({"row": row_idx, "error": f"Score {score_val} is outside valid range (0 - {opw.max_score}) for Student {student_id}"})
+            continue
+            
+        OfflinePracticalScore.objects.update_or_create(
+            opw=opw,
+            student_id=student_id,
+            defaults={
+                "score": score_val,
+                "feedback": str(feedback_val) if feedback_val is not None else "",
+                "recorded_at": timezone.now(),
+                "recorded_by": teacher,
+            },
+        )
+        saved_count += 1
+
+    return Response({
+        "message": f"Successfully updated {saved_count} scores.",
+        "saved_count": saved_count,
+        "errors": errors
+    }, status=status.HTTP_200_OK)

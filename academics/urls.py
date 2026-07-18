@@ -9,6 +9,7 @@ courses_completion_dashboard,course_completed_enrollments,
     student_course_activity_metrics,
     upload_manual_certificates,
     list_manual_certificates,
+    certificate_layout_config,
     # Certificate Request Portal
     public_cert_request_orgs,
     public_cert_request_courses,
@@ -68,6 +69,7 @@ urlpatterns = [
 
     path("api/certificates/manual-upload/", upload_manual_certificates, name="upload_manual_certificates"),
     path("api/certificates/manual-list/", list_manual_certificates, name="list_manual_certificates"),
+    path("api/certificates/layout/", certificate_layout_config, name="certificate_layout_config"),
 
     path(
         "api/courses/<int:course_id>/students/<int:student_id>/activity-metrics/",

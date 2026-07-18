@@ -40,6 +40,7 @@ from academics.models import (
     TeacherProfile,
     Classroom,
     Subject,
+    OrganizationCertificateSignatures,
 )
 from learning.models import Course, Enrollment, Lesson
 from assessments.models import Test, TestAttempt, TestAnswer, Question
@@ -1747,6 +1748,34 @@ def certificate_create(request):
 
 
 import openpyxl
+
+@api_view(["GET", "POST"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def certificate_layout_config(request):
+    org, err = _resolve_org(request)
+    if err:
+        return err
+
+    if not _is_org_admin_or_teacher(request, org):
+        return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+        
+    sigs, _ = OrganizationCertificateSignatures.objects.get_or_create(organization=org)
+
+    if request.method == "POST":
+        data = request.data.get("certificate_layout")
+        if data is not None:
+            if not isinstance(sigs.meta, dict):
+                sigs.meta = {}
+            sigs.meta["certificate_layout"] = data
+            sigs.save(update_fields=["meta", "updated_at"])
+            return Response({"detail": "Layout updated successfully", "certificate_layout": data})
+        return Response({"detail": "No layout data provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+    meta = sigs.meta or {}
+    layout = meta.get("certificate_layout", None)
+    return Response({"certificate_layout": layout})
+
 
 @api_view(["POST"])
 @permission_classes([HasAPIKey])
