@@ -22,12 +22,13 @@ from orgs.models import Organization, OrganizationMembership
 from accounts.models import User
 from academics.models import (
     StudentProfile, TeacherProfile, ParentProfile, ParentChildLink,
-    TeacherReport, ReportCBTItem, ReportCodingItem, ReportActivity,
+    TeacherReport, ReportCBTItem, ReportCodingItem, ReportOfflineItem, ReportActivity,
     ReportVideo, ReportRecipient,
 )
 from learning.models import Course, Enrollment, Lesson
 from assessments.models import Test, TestAttempt
 from codeide.models import CodeProject
+from offline_work.models import OfflinePracticalWork, OfflinePracticalScore
 from core.utils import _resolve_org, _is_org_admin_or_teacher
 
 
@@ -114,6 +115,15 @@ def _serialize_report_detail(report, student=None, request=None):
             "lesson_title": item.lesson_title or (item.lesson.name if item.lesson else ""),
         })
 
+    offline_items = []
+    for item in report.offline_items.select_related("opw").all():
+        offline_items.append({
+            "id": item.id,
+            "opw_id": item.opw_id,
+            "opw_title": item.opw_title or (item.opw.title if item.opw else ""),
+            "max_score": str(item.max_score),
+        })
+
     activities = []
     for act in report.activities.all():
         activities.append({
@@ -161,6 +171,7 @@ def _serialize_report_detail(report, student=None, request=None):
         "share_token": report.share_token,
         "cbt_items": cbt_items,
         "coding_items": coding_items,
+        "offline_items": offline_items,
         "activities": activities,
         "videos": videos,
         "created_at": report.created_at,
@@ -177,6 +188,7 @@ def _serialize_report_detail(report, student=None, request=None):
                 "classroom": student.current_classroom.name if student.current_classroom else "",
                 "cbt_scores": recipient.cbt_scores,
                 "coding_scores": recipient.coding_scores,
+                "offline_scores": recipient.offline_scores,
                 "teacher_remark": recipient.teacher_remark,
             }
 
@@ -214,7 +226,21 @@ def _snapshot_student_scores(report, student):
             "status": project.status if project else "not_submitted",
         }
 
-    return cbt_scores, coding_scores
+    offline_scores = {}
+    for item in report.offline_items.all():
+        score_obj = (
+            OfflinePracticalScore.objects
+            .filter(student=student, opw_id=item.opw_id)
+            .first()
+        )
+        offline_scores[str(item.opw_id)] = {
+            "score": str(score_obj.score) if score_obj and score_obj.score is not None else "0",
+            "max_score": str(item.max_score),
+            "feedback": score_obj.feedback if score_obj else "",
+            "status": "graded" if score_obj and score_obj.score is not None else "not_graded",
+        }
+
+    return cbt_scores, coding_scores, offline_scores
 
 
 # ─── Teacher Endpoints ──────────────────────────────────────
@@ -286,6 +312,12 @@ def teacher_report_create(request):
             lesson = Lesson.objects.filter(id=lesson_id, module__course=course).first()
             if lesson:
                 ReportCodingItem.objects.create(report=report, lesson=lesson)
+
+        # Offline items
+        for opw_id in data.get("offline_work_ids", []):
+            opw = OfflinePracticalWork.objects.filter(id=opw_id, course=course).first()
+            if opw:
+                ReportOfflineItem.objects.create(report=report, opw=opw)
 
         # Activities
         for i, act in enumerate(data.get("activities", [])):
@@ -364,6 +396,7 @@ def teacher_report_detail(request, report_id):
             "classroom": r.student.current_classroom.name if r.student.current_classroom else "",
             "cbt_scores": r.cbt_scores,
             "coding_scores": r.coding_scores,
+            "offline_scores": r.offline_scores,
             "teacher_remark": r.teacher_remark,
             "parent_viewed": r.parent_viewed,
         })
@@ -418,10 +451,11 @@ def teacher_report_publish(request, report_id):
     with transaction.atomic():
         # Snapshot scores for each recipient
         for recipient in report.recipients.select_related("student").all():
-            cbt_scores, coding_scores = _snapshot_student_scores(report, recipient.student)
+            cbt_scores, coding_scores, offline_scores = _snapshot_student_scores(report, recipient.student)
             recipient.cbt_scores = cbt_scores
             recipient.coding_scores = coding_scores
-            recipient.save(update_fields=["cbt_scores", "coding_scores"])
+            recipient.offline_scores = offline_scores
+            recipient.save(update_fields=["cbt_scores", "coding_scores", "offline_scores"])
 
         report.status = "published"
         report.published_at = timezone.now()
@@ -455,7 +489,7 @@ def teacher_report_delete(request, report_id):
 @permission_classes([HasAPIKey])
 @authentication_classes([SessionTokenAuthentication])
 def teacher_report_student_data(request):
-    """Get available CBT tests and coding lessons for a course (for report creation)."""
+    """Get available CBT tests, coding lessons, and off-practical work for a course (for report creation)."""
     org, err = _resolve_org(request)
     if err:
         return err
@@ -478,6 +512,17 @@ def teacher_report_student_data(request):
     lessons = Lesson.objects.filter(module__course=course).select_related("module").order_by("module__order", "order")
     lesson_data = [{"id": l.id, "name": l.name, "module_name": l.module.name} for l in lessons]
 
+    offline_works = OfflinePracticalWork.objects.filter(course=course).order_by("-created_at")
+    offline_data = [
+        {
+            "id": o.id,
+            "title": o.title,
+            "max_score": str(o.max_score),
+            "assessment_type": o.assessment_type,
+        }
+        for o in offline_works
+    ]
+
     # Students enrolled (Active status only)
     enrollments = Enrollment.objects.filter(
         course=course,
@@ -493,7 +538,7 @@ def teacher_report_student_data(request):
             "classroom": s.current_classroom.name if s.current_classroom else "",
         })
 
-    return Response({"tests": test_data, "lessons": lesson_data, "students": students})
+    return Response({"tests": test_data, "lessons": lesson_data, "offline_works": offline_data, "students": students})
 
 
 # ─── Student/Parent Report Viewing ──────────────────────────

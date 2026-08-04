@@ -779,6 +779,29 @@ class ReportCodingItem(TimeStampedModel):
         super().save(*args, **kwargs)
 
 
+class ReportOfflineItem(TimeStampedModel):
+    """An off-practical work item included in a report."""
+    report = models.ForeignKey(
+        TeacherReport, on_delete=models.CASCADE, related_name="offline_items",
+    )
+    opw = models.ForeignKey(
+        "offline_work.OfflinePracticalWork", on_delete=models.CASCADE, related_name="+",
+    )
+    opw_title = models.CharField(max_length=255, blank=True)
+    max_score = models.DecimalField(max_digits=7, decimal_places=2, default=100)
+
+    class Meta:
+        unique_together = ("report", "opw")
+        ordering = ["created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.opw_title and self.opw_id:
+            self.opw_title = self.opw.title
+        if not self.max_score and self.opw_id:
+            self.max_score = self.opw.max_score
+        super().save(*args, **kwargs)
+
+
 class ReportActivity(TimeStampedModel):
     """Custom class activity added by the teacher."""
     report = models.ForeignKey(
@@ -826,6 +849,8 @@ class ReportRecipient(TimeStampedModel):
     cbt_scores = models.JSONField(default=dict, blank=True)
     # Per-student coding scores snapshot: { lesson_id: { score, feedback, project_title } }
     coding_scores = models.JSONField(default=dict, blank=True)
+    # Per-student off-practical work scores snapshot: { opw_id: { score, max_score, feedback, status } }
+    offline_scores = models.JSONField(default=dict, blank=True)
     # Overall teacher remark for this specific student
     teacher_remark = models.TextField(blank=True)
     # Whether parent has viewed this report
