@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import create_live_session,user_live_sessions,update_live_session_status,delete_live_session,update_private_tutoring
+from .views import create_live_session,user_live_sessions,update_live_session_status,delete_live_session,update_private_tutoring,public_session_info
 
 urlpatterns = [
     ##### STUDENT AND TEACHER ENDPOINT ###############
@@ -15,4 +15,6 @@ urlpatterns = [
     path("api/delete-live-session/<str:session_id>/delete/", delete_live_session, name="delete_live_session"),
 
     path("api/update-private-tutoring/<str:session_id>/", update_private_tutoring, name="update_private_tutoring"),
+
+    path('public-session/<str:meeting_id>/', public_session_info, name='public-session-info'),
 ]

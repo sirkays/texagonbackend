@@ -223,6 +223,10 @@ def _resolve_org(request):
     if admin_access is None or admin_access.selected_organization is None:
         org_id = request.query_params.get("org_id") or getattr(getattr(request.user, "primary_org", None), "id", None)
         if not org_id:
+            mem = OrganizationMembership.objects.filter(user=request.user, is_active=True).first()
+            if mem:
+                org_id = mem.organization_id
+        if not org_id:
             return None, Response({"detail": "Organization not specified and no primary_org on user."},
                                 status=status.HTTP_400_BAD_REQUEST)
         try:

@@ -8,7 +8,12 @@ class LiveSession(TimeStampedModel):
         CONFIRMED = "started", "Started"
         COMPLETED = "completed", "Completed"
         CANCELLED = "cancelled", "Cancelled"
-    course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="live_sessions")
+
+    class SessionType(models.TextChoices):
+        SFU = "default", "Group Call (SFU)"
+        LIVESTREAM = "livestream", "Live Class (Broadcast)"
+
+    course = models.ForeignKey("learning.Course", on_delete=models.CASCADE, related_name="live_sessions", null=True, blank=True)
     title = models.CharField(max_length=255)
     scheduled_at = models.DateTimeField()
     duration_minutes = models.PositiveIntegerField(default=60)
@@ -18,6 +23,12 @@ class LiveSession(TimeStampedModel):
     meta = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     active = models.BooleanField(default=True)
+    is_public = models.BooleanField(default=False)
+    session_type = models.CharField(
+        max_length=16,
+        choices=SessionType.choices,
+        default=SessionType.SFU,
+    )
 
 
 ##### CREATED BY TEACHER FOR DISPLAYING PRIVATE TUTORING

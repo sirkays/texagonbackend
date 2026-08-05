@@ -7,6 +7,7 @@ from django.utils.dateparse import parse_datetime
 from django.utils.timezone import is_naive, make_aware
 
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 
@@ -47,28 +48,32 @@ def create_live_session(request):
 
         data = request.data
 
+        is_public = str(data.get("is_public", "")).lower() == "true" or data.get("is_public") is True
+
         # required fields
         course_id = data.get("course_id")
         title = data.get("title")
         scheduled_at_raw = data.get("scheduled_at")
 
-        if not course_id:
-            return Response({"detail": "course_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not is_public and not course_id:
+            return Response({"detail": "course_id is required for private sessions."}, status=status.HTTP_400_BAD_REQUEST)
         if not title:
             return Response({"detail": "title is required."}, status=status.HTTP_400_BAD_REQUEST)
         if not scheduled_at_raw:
             return Response({"detail": "scheduled_at is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # fetch course and ensure the teacher is the assigned teacher for that course
-        try:
-            course = Course.objects.select_related("teacher").get(pk=course_id)
-        except Course.DoesNotExist:
-            return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+        course = None
+        if course_id:
+            # fetch course and ensure the teacher is the assigned teacher for that course
+            try:
+                course = Course.objects.select_related("teacher").get(pk=course_id)
+            except Course.DoesNotExist:
+                return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if course.teacher_id != teacher.id:
-            # The currently authenticated teacher is not assigned to this course
-            return Response({"detail": "You are not authorized to create a live session for this course."},
-                            status=status.HTTP_403_FORBIDDEN)
+            if not is_public and course.teacher_id != teacher.id:
+                # The currently authenticated teacher is not assigned to this course
+                return Response({"detail": "You are not authorized to create a live session for this course."},
+                                status=status.HTTP_403_FORBIDDEN)
 
         # parse scheduled_at into an aware datetime
         scheduled_dt = parse_datetime(scheduled_at_raw)
@@ -94,6 +99,12 @@ def create_live_session(request):
         join_url = data.get("join_url", "") or ""
         recording_url = data.get("recording_url", "") or ""
         active = data.get("active", True)
+
+        session_type = data.get("session_type", "default")
+        valid_session_types = dict(LiveSession.SessionType.choices).keys()
+        if session_type not in valid_session_types:
+            return Response({"detail": f"Invalid session_type. Must be one of: {list(valid_session_types)}"},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         # meta: accept dict or JSON string
         meta_raw = data.get("meta", {})
@@ -121,12 +132,15 @@ def create_live_session(request):
             recording_url=recording_url,
             meta=meta,
             active=bool(active),
+            is_public=is_public,
+            session_type=session_type,
         )
 
         # response payload
         payload = {
             "id": live_session.id,
             "course_id": live_session.course_id,
+            "is_public": live_session.is_public,
             "title": live_session.title,
             "scheduled_at": live_session.scheduled_at.isoformat(),
             "duration_minutes": live_session.duration_minutes,
@@ -135,6 +149,7 @@ def create_live_session(request):
             "recording_url": live_session.recording_url,
             "meta": live_session.meta,
             "active": live_session.active,
+            "session_type": live_session.session_type,
             "created_at": getattr(live_session, "created", None) or getattr(live_session, "date_created", None)
         }
 
@@ -234,6 +249,7 @@ def user_live_sessions(request):
                 "host": getattr(session.host.user, "email", ""),
                 "active": session.active,
                 "status": session.status,
+                "session_type": session.session_type,
             })
 
         return Response({"live_sessions": sessions_data}, status=status.HTTP_200_OK)
@@ -402,7 +418,7 @@ def update_live_session(request, session_id):
         # Allowed fields to update
         allowed_fields = [
             "title", "scheduled_at", "duration_minutes",
-            "join_url", "recording_url", "meta", "active"
+            "join_url", "recording_url", "meta", "active", "session_type", "is_public"
         ]
 
         data = request.data
@@ -534,3 +550,28 @@ def update_private_tutoring(request, session_id):
         if request.query_params.get("debug") in {"1", "true"} or getattr(settings, "DEBUG", False):
             payload["traceback"] = traceback.format_exc()
         return Response(payload, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def public_session_info(request, meeting_id):
+    """Get basic info about a public meeting. No auth required."""
+    try:
+        session = LiveSession.objects.filter(
+            join_url__icontains=meeting_id,
+            is_public=True,
+            active=True
+        ).first()
+        
+        if not session:
+            return Response({"is_public": False}, status=200)
+        
+        return Response({
+            "is_public": True,
+            "title": session.title,
+            "scheduled_at": session.scheduled_at.isoformat() if session.scheduled_at else None,
+            "session_type": session.session_type,
+            "status": session.status,
+        }, status=200)
+    except Exception as e:
+        return Response({"is_public": False, "error": str(e)}, status=200)
