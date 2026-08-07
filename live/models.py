@@ -24,6 +24,7 @@ class LiveSession(TimeStampedModel):
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     active = models.BooleanField(default=True)
     is_public = models.BooleanField(default=False)
+    is_room_open = models.BooleanField(default=True)
     session_type = models.CharField(
         max_length=16,
         choices=SessionType.choices,

@@ -122,6 +122,7 @@ def create_live_session(request):
 
         join_url = f"{FRONTEND_ORIGIN}/{join_url}"
         # create the LiveSession; host should be the authenticated teacher
+        is_room_open = str(data.get("is_room_open", "true")).lower() != "false" and data.get("is_room_open") is not False
         live_session = LiveSession.objects.create(
             course=course,
             title=title,
@@ -133,6 +134,7 @@ def create_live_session(request):
             meta=meta,
             active=bool(active),
             is_public=is_public,
+            is_room_open=is_room_open,
             session_type=session_type,
         )
 
@@ -141,6 +143,7 @@ def create_live_session(request):
             "id": live_session.id,
             "course_id": live_session.course_id,
             "is_public": live_session.is_public,
+            "is_room_open": live_session.is_room_open,
             "title": live_session.title,
             "scheduled_at": live_session.scheduled_at.isoformat(),
             "duration_minutes": live_session.duration_minutes,
@@ -248,6 +251,8 @@ def user_live_sessions(request):
                 },
                 "host": getattr(session.host.user, "email", ""),
                 "active": session.active,
+                "is_public": session.is_public,
+                "is_room_open": getattr(session, "is_room_open", True),
                 "status": session.status,
                 "session_type": session.session_type,
             })
@@ -418,7 +423,7 @@ def update_live_session(request, session_id):
         # Allowed fields to update
         allowed_fields = [
             "title", "scheduled_at", "duration_minutes",
-            "join_url", "recording_url", "meta", "active", "session_type", "is_public"
+            "join_url", "recording_url", "meta", "active", "session_type", "is_public", "is_room_open"
         ]
 
         data = request.data
@@ -445,6 +450,8 @@ def update_live_session(request, session_id):
             "meta": live_session.meta,
             "status": live_session.status,
             "active": live_session.active,
+            "is_public": live_session.is_public,
+            "is_room_open": live_session.is_room_open,
             "course": {
                 "id": live_session.course.id,
                 "name": live_session.course.name,
@@ -559,19 +566,61 @@ def public_session_info(request, meeting_id):
     try:
         session = LiveSession.objects.filter(
             join_url__icontains=meeting_id,
-            is_public=True,
             active=True
         ).first()
-        
+
         if not session:
-            return Response({"is_public": False}, status=200)
-        
+            return Response({"is_public": False, "is_room_open": True}, status=200)
+
         return Response({
-            "is_public": True,
+            "is_public": session.is_public,
+            "is_room_open": session.is_room_open,
             "title": session.title,
             "scheduled_at": session.scheduled_at.isoformat() if session.scheduled_at else None,
             "session_type": session.session_type,
             "status": session.status,
+            "host_id": session.host_id,
         }, status=200)
     except Exception as e:
-        return Response({"is_public": False, "error": str(e)}, status=200)
+        return Response({"is_public": False, "is_room_open": True, "error": str(e)}, status=200)
+
+
+@api_view(["POST", "PATCH"])
+@permission_classes([HasAPIKey])
+@authentication_classes([SessionTokenAuthentication])
+def toggle_room_access(request, session_id):
+    """
+    Host-authorized endpoint to open or close room access.
+    """
+    try:
+        user = request.user
+        teacher = _get_teacher_for_user(user)
+        if not teacher:
+            return Response({"detail": "Teacher profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            live_session = LiveSession.objects.select_related("course__teacher", "host").get(pk=session_id)
+        except LiveSession.DoesNotExist:
+            return Response({"detail": "Live session not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Ensure teacher is host or course teacher
+        if live_session.host_id != teacher.id and getattr(live_session.course, "teacher_id", None) != teacher.id:
+            return Response({"detail": "You are not authorized to toggle room access for this session."}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data
+        if "is_room_open" in data:
+            live_session.is_room_open = bool(data["is_room_open"])
+        else:
+            live_session.is_room_open = not live_session.is_room_open
+
+        live_session.save(update_fields=["is_room_open"])
+
+        return Response({
+            "id": live_session.id,
+            "is_room_open": live_session.is_room_open,
+            "detail": f"Room access {'opened' if live_session.is_room_open else 'closed'} successfully."
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response({"detail": "Error toggling room access.", "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
