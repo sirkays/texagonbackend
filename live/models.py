@@ -32,6 +32,36 @@ class LiveSession(TimeStampedModel):
     )
 
 
+class LiveSessionConfiguration(TimeStampedModel):
+    """
+    Global configuration for Live Sessions and Stream Recordings.
+    Allows administrators to toggle whether recordings are enabled/fetched from Django Admin.
+    """
+    enable_recordings = models.BooleanField(
+        default=False,
+        help_text="If enabled, recordings will be fetched and displayed on student/teacher portals."
+    )
+
+    class Meta:
+        verbose_name = "Live Session Configuration"
+        verbose_name_plural = "Live Session Configuration"
+
+    def __str__(self):
+        return f"Live Session Configuration (Recordings: {'Enabled' if self.enable_recordings else 'Disabled'})"
+
+    def save(self, *args, **kwargs):
+        if LiveSessionConfiguration.objects.exists() and not self.pk:
+            return LiveSessionConfiguration.objects.first()
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def get_settings(cls):
+        config = cls.objects.first()
+        if not config:
+            config = cls.objects.create(enable_recordings=False)
+        return config
+
+
 ##### CREATED BY TEACHER FOR DISPLAYING PRIVATE TUTORING
 class PrivateTutoring(TimeStampedModel):
     title = models.CharField(max_length=250, default="My Private Tutoring")

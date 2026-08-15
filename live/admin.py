@@ -1,16 +1,49 @@
 from django.contrib import admin
-from .models import (LiveSession, TutoringBooking, 
-    PrivateTutoring, AvailableDay,PrivateTutoringRating
+from .models import (
+    LiveSession,
+    LiveSessionConfiguration,
+    TutoringBooking, 
+    PrivateTutoring,
+    AvailableDay,
+    PrivateTutoringRating,
 )
+
+# --------------------
+# LiveSessionConfiguration (Global Settings)
+# --------------------
+@admin.register(LiveSessionConfiguration)
+class LiveSessionConfigurationAdmin(admin.ModelAdmin):
+    list_display = ("__str__", "enable_recordings", "updated_at")
+    list_editable = ("enable_recordings",)
+    readonly_fields = ("created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        return not LiveSessionConfiguration.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 # --------------------
 # LiveSession
 # --------------------
 @admin.register(LiveSession)
 class LiveSessionAdmin(admin.ModelAdmin):
-    list_display = ("title", "course", "host", "scheduled_at", "duration_minutes", "created_at")
-    list_filter = ("course", "host")
-    search_fields = ("title", "course__name", "host__user__username")
+    list_display = (
+        "title",
+        "course",
+        "host",
+        "session_type",
+        "is_public",
+        "is_room_open",
+        "active",
+        "scheduled_at",
+        "duration_minutes",
+        "created_at",
+    )
+    list_filter = ("session_type", "is_public", "is_room_open", "active", "course", "host")
+    list_editable = ("is_room_open", "active")
+    search_fields = ("title", "course__name", "host__user__username", "host__user__email")
     autocomplete_fields = ("course", "host")
     list_select_related = ("course", "host__user")
     ordering = ("-created_at",)

@@ -1,9 +1,20 @@
 from django.urls import path
-from .views import create_live_session,user_live_sessions,update_live_session_status,delete_live_session,update_private_tutoring,public_session_info,toggle_room_access
+from .views import (
+    create_live_session,
+    user_live_sessions,
+    update_live_session_status,
+    delete_live_session,
+    update_private_tutoring,
+    public_session_info,
+    toggle_room_access,
+    live_session_config,
+)
 
 urlpatterns = [
     ##### STUDENT AND TEACHER ENDPOINT ###############
     path("api/get-live-session/", user_live_sessions, name="get-live-session"),
+    path("api/config/", live_session_config, name="live_session_config"),
+    path("api/live-config/", live_session_config, name="live_session_config_alias"),
 
     ########## TEACHER ENDPOINT ##########
     path("api/create-live-session/", create_live_session, name="create-live-session"),

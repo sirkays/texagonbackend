@@ -13,7 +13,7 @@ from rest_framework import status
 
 from api.authentication import SessionTokenAuthentication  # adjust import path
 from rest_framework_api_key.permissions import HasAPIKey  # adjust import path
-from .models import LiveSession, PrivateTutoring, AvailableDay  # adjust app label if different
+from .models import LiveSession, LiveSessionConfiguration, PrivateTutoring, AvailableDay
 from academics.models import TeacherProfile  # adjust if needed
 from learning.models import Course,Enrollment
 from core.utils import _get_teacher_for_user, _get_student_for_user
@@ -213,7 +213,8 @@ def user_live_sessions(request):
                 enrollments = enrollments.filter(course_id=course_id)
 
             if not enrollments.exists():
-                return Response({"live_sessions": []}, status=status.HTTP_200_OK)
+                config = LiveSessionConfiguration.get_settings()
+                return Response({"live_sessions": [], "enable_recordings": config.enable_recordings}, status=status.HTTP_200_OK)
 
             course_ids = [en.course_id for en in enrollments]
 
@@ -224,7 +225,8 @@ def user_live_sessions(request):
                 courses = courses.filter(id=course_id)
 
             if not courses.exists():
-                return Response({"live_sessions": []}, status=status.HTTP_200_OK)
+                config = LiveSessionConfiguration.get_settings()
+                return Response({"live_sessions": [], "enable_recordings": config.enable_recordings}, status=status.HTTP_200_OK)
 
             course_ids = list(courses.values_list("id", flat=True))
         # Fetch live sessions
@@ -257,7 +259,11 @@ def user_live_sessions(request):
                 "session_type": session.session_type,
             })
 
-        return Response({"live_sessions": sessions_data}, status=status.HTTP_200_OK)
+        config = LiveSessionConfiguration.get_settings()
+        return Response({
+            "live_sessions": sessions_data,
+            "enable_recordings": config.enable_recordings,
+        }, status=status.HTTP_200_OK)
 
     except Exception as e:
         print(e)
@@ -623,4 +629,23 @@ def toggle_room_access(request, session_id):
 
     except Exception as e:
         return Response({"detail": "Error toggling room access.", "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def live_session_config(request):
+    """
+    Returns global LiveSessionConfiguration settings (e.g. enable_recordings).
+    """
+    try:
+        config = LiveSessionConfiguration.get_settings()
+        return Response({
+            "enable_recordings": config.enable_recordings,
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({
+            "enable_recordings": False,
+            "error": str(e),
+        }, status=status.HTTP_200_OK)
+
 
