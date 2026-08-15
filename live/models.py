@@ -47,16 +47,22 @@ class LiveSessionConfiguration(TimeStampedModel):
         verbose_name_plural = "Live Session Configuration"
 
     def __str__(self):
-        return f"Live Session Configuration (Recordings: {'Enabled' if self.enable_recordings else 'Disabled'})"
+        status_text = "Enabled" if self.is_recordings_enabled else "Disabled"
+        return f"Live Session Configuration (Recordings: {status_text})"
+
+    @property
+    def is_recordings_enabled(self):
+        for attr in ("enable_recordings", "enable", "enabled", "is_enabled", "active"):
+            if hasattr(self, attr):
+                return bool(getattr(self, attr))
+        return False
 
     def save(self, *args, **kwargs):
-        if LiveSessionConfiguration.objects.exists() and not self.pk:
-            return LiveSessionConfiguration.objects.first()
-        return super().save(*args, **kwargs)
+        super().save(*args, **kwargs)
 
     @classmethod
     def get_settings(cls):
-        config = cls.objects.first()
+        config = cls.objects.order_by("-updated_at", "-id").first()
         if not config:
             config = cls.objects.create(enable_recordings=False)
         return config

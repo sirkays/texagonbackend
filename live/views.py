@@ -260,9 +260,12 @@ def user_live_sessions(request):
             })
 
         config = LiveSessionConfiguration.get_settings()
+        is_enabled = config.is_recordings_enabled
         return Response({
             "live_sessions": sessions_data,
-            "enable_recordings": config.enable_recordings,
+            "enable_recordings": is_enabled,
+            "enabled": is_enabled,
+            "enable": is_enabled,
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
@@ -639,12 +642,17 @@ def live_session_config(request):
     """
     try:
         config = LiveSessionConfiguration.get_settings()
+        is_enabled = config.is_recordings_enabled
         return Response({
-            "enable_recordings": config.enable_recordings,
+            "enable_recordings": is_enabled,
+            "enabled": is_enabled,
+            "enable": is_enabled,
         }, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({
             "enable_recordings": False,
+            "enabled": False,
+            "enable": False,
             "error": str(e),
         }, status=status.HTTP_200_OK)
 
