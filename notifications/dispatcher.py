@@ -1,6 +1,6 @@
 #texagon_academy\texagonbackend\notifications\dispatcher.py
 from django.db import transaction
-from texagonbackend.settings import FRONTEND_ORIGIN
+from texagonbackend.settings import FRONTEND_ORIGIN, SITE_NAME
 from notifications.services import dispatch
 from notifications.events import ORDER_CREATED
 
@@ -29,9 +29,10 @@ def _dispatch_order_created(user, order, items, *, is_bnpl=False, is_buy_now=Fal
     dispatch(
         users=[user],
         message=ORDER_CREATED,
-        ctx={"app_name": "Techxagon Academy"},
+        ctx={"app_name": SITE_NAME},
         data=data,
         send_in_app=True,
         send_email=True,
         fail_silently=True,
     )
+

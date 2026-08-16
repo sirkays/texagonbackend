@@ -51,11 +51,13 @@ def dispatch(
         if send_in_app:
             for user in users:
                 per_user_ctx = {
+                    "app_name": getattr(settings, "SITE_NAME", "Techxagon Academy"),
+                    "frontend_origin": getattr(settings, "FRONTEND_ORIGIN", "https://learn.techxagonacademy.com"),
+                    "logo_url": getattr(settings, "LOGO_URL", "https://learn.techxagonacademy.com/logo.png"),
                     **ctx,
                     "user": user,
                     "data": merged_data,
                     "now": timezone.now(),
-                    "logo_url":"https://res.cloudinary.com/dqzqyeijp/image/upload/v1769618417/techxagon_logo_xbv3k2.png",
                 }
 
                 title = message.render_title(per_user_ctx)
@@ -83,6 +85,9 @@ def dispatch(
                 continue
 
             per_user_ctx = {
+                "app_name": getattr(settings, "SITE_NAME", "Techxagon Academy"),
+                "frontend_origin": getattr(settings, "FRONTEND_ORIGIN", "https://learn.techxagonacademy.com"),
+                "logo_url": getattr(settings, "LOGO_URL", "https://learn.techxagonacademy.com/logo.png"),
                 **ctx,
                 "user": user,
                 "data": merged_data,

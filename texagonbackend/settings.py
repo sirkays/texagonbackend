@@ -3,6 +3,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from decimal import Decimal
 from corsheaders.defaults import default_headers
+from .brand import get_brand_config, get_active_brand, brand_config, APP_BRAND
 
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -10,15 +11,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "CHANGE_ME")
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
-FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "https://learn.techxagonacademy.com")
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
+FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", brand_config["frontend_origin"])
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",") if h.strip()] or ["*"]
 PAYMENT_TEST = os.environ.get("PAYMENT_TEST", "1") == "1"
-LOGO_URL = os.environ.get("LOGO_URL", "https://learn.techxagonacademy.com/logo.png")
+LOGO_URL = os.environ.get("LOGO_URL", brand_config["logo_url"])
+SITE_NAME = brand_config["full_name"]
 
 TEST_KEY_SECRET = os.environ.get("TEST_KEY_SECRET", "CHANGE_ME")
 FLW_SECRET_KEY = os.environ.get("FLW_SECRET_KEY", "CHANGE_ME")
 
-KONNECT_LOGOUT_URL = os.environ.get("KONNECT_LOGOUT_URL", "https://learn.techxagonacademy.com/k-dashboard/")
+KONNECT_LOGOUT_URL = os.environ.get("KONNECT_LOGOUT_URL", f"{FRONTEND_ORIGIN}/k-dashboard/")
 KONNECT_TOKEN = os.environ.get("KONNECT_TOKEN", "H9LBxlRkBWs2hb1mnZ0v2wzfhOqwfjCFaK73Jx99")
 KONNECT_MAX_ROOM = 25
 TAX_RATE = Decimal("0.08")
@@ -36,7 +38,10 @@ CORS_ALLOWED_ORIGINS = [
     "https://texagonbackend.onrender.com",
     "https://texagon.onrender.com",
     "https://learn.techxagonacademy.com",
-    "https://techxagonacademy.com"
+    "https://techxagonacademy.com",
+    "https://learn.nimet.gov.ng",
+    "https://nimet.gov.ng",
+    "https://nimet-web.onrender.com",
 ]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
@@ -57,6 +62,9 @@ if os.environ.get('LOCAL') == "0":
         "http://127.0.0.1:3000",
         "https://learn.techxagonacademy.com",
         "https://techxagonacademy.com",
+        "https://learn.nimet.gov.ng",
+        "https://nimet.gov.ng",
+        "https://nimet-web.onrender.com",
     ]
 
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -342,17 +350,14 @@ elif STORAGE_BACKEND == "cloudinary":
 
 
 
-DOMAIN_EMAIL = os.environ.get("DOMAIN_EMAIL")
-SEND_EMAIL = os.environ.get("SEND_EMAIL")
+DOMAIN_EMAIL = os.environ.get("DOMAIN_EMAIL", brand_config["domain_email"])
+SEND_EMAIL = os.environ.get("SEND_EMAIL", brand_config["domain_email"])
 EMAIL_HOST = os.environ.get("EMAIL_HOST")
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD")
-#EMAIL_HOST = 'ikpeazuchambers.com'
-#EMAIL_HOST_USER = 'quebe@ikpeazuchambers.com'
-#EMAIL_HOST_PASSWORD = ''
 EMAIL_PORT = os.environ.get("EMAIL_PORT")
 EMAIL_USE_TLS = True
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", brand_config["default_from_email"])
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
