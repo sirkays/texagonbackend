@@ -173,19 +173,36 @@ AUTHENTICATION_BACKENDS = [
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Postgres
+import urllib.parse
+
+db_url = os.environ.get("DATABASE_URL")
+
 if os.environ.get("LOCAL_DB", "0") == "0":
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("POSTGRES_DB", "appdb"),
-            "USER": os.environ.get("POSTGRES_USER", "appuser"),
-            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
-            "HOST": os.environ.get("POSTGRES_HOST", "db"),
-            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-            "CONN_MAX_AGE": 60,
+    if db_url:
+        parsed_db = urllib.parse.urlparse(db_url)
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": parsed_db.path.lstrip("/"),
+                "USER": parsed_db.username or "",
+                "PASSWORD": parsed_db.password or "",
+                "HOST": parsed_db.hostname or "localhost",
+                "PORT": str(parsed_db.port or 5432),
+                "CONN_MAX_AGE": 60,
+            }
         }
-    }
+    else:
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": os.environ.get("POSTGRES_DB", "appdb"),
+                "USER": os.environ.get("POSTGRES_USER", "appuser"),
+                "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
+                "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
+                "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+                "CONN_MAX_AGE": 60,
+            }
+        }
 else:
     DATABASES = {
         'default': {
