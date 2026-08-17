@@ -74,6 +74,12 @@ def create_superuser_view(request):
     )
 
 def home_view(request):
+    if getattr(settings, "APP_BRAND", "techxagon") == "nimet":
+        frontend_url = getattr(settings, "FRONTEND_ORIGIN", "https://nimet-frontend.onrender.com")
+        return render(request, "corefrontend/nimet_landing.html", {
+            "frontend_url": frontend_url,
+        })
+
     # Latest 3 published blog posts
     latest_posts = (
         BlogPost.objects.filter(is_published=True)

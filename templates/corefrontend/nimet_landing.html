@@ -1,0 +1,483 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nigerian Meteorological Agency (NiMet) | Learning & Training Portal</title>
+    
+    <meta name="description" content="Official digital learning and examination portal for the Nigerian Meteorological Agency (NiMet). Delivering specialized meteorological training, CBT assessments, and professional development." />
+    <link rel="canonical" href="{{ request.build_absolute_uri }}" />
+    <meta name="robots" content="index, follow" />
+
+    <link rel="icon" type="image/png" href="{% static 'assets/nimet-favicon.png' %}">
+
+    <meta property="og:title" content="NiMet Learning & Training Portal | Nigerian Meteorological Agency" />
+    <meta property="og:description" content="Advancing meteorological excellence and weather intelligence education in Nigeria." />
+    <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'assets/nimet-logo.png' %}" />
+    <meta property="og:type" content="website" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style type="text/tailwindcss">
+        @theme {
+            --color-nimet-green: #006B3E;
+            --color-nimet-darkgreen: #005230;
+            --color-nimet-deepgreen: #003822;
+            --color-nimet-gold: #FFC931;
+            --color-nimet-navy: #071a47;
+            --color-nimet-slate: #0b1528;
+            --font-sans: 'Plus Jakarta Sans', sans-serif;
+            --font-heading: 'Space Grotesk', sans-serif;
+        }
+    </style>
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #f8fafc;
+            color: #0f172a;
+        }
+        h1, h2, h3, h4, .font-heading {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+        .hero-pattern {
+            background-image: radial-gradient(rgba(0, 107, 62, 0.08) 1.5px, transparent 1.5px);
+            background-size: 24px 24px;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen flex flex-col antialiased hero-pattern">
+
+    <!-- TOP ANNOUNCEMENT BAR -->
+    <div class="bg-gradient-to-r from-[#003822] via-[#006B3E] to-[#071a47] text-white text-xs sm:text-sm py-2 px-4 shadow-sm border-b border-emerald-900/40">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
+            <div class="flex items-center gap-2">
+                <span class="inline-block w-2 h-2 rounded-full bg-[#FFC931] animate-pulse"></span>
+                <span class="font-medium tracking-wide">Federal Republic of Nigeria • Nigerian Meteorological Agency (NiMet)</span>
+            </div>
+            <div class="flex items-center gap-4 text-emerald-100/90 text-xs">
+                <span>📍 Abuja, Nigeria</span>
+                <span class="hidden md:inline">|</span>
+                <span class="hidden md:inline">📞 +234 9 291 9437</span>
+                <span class="hidden md:inline">|</span>
+                <a href="mailto:info@nimet.gov.ng" class="hover:text-white transition-colors">✉️ info@nimet.gov.ng</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN NAVBAR -->
+    <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <!-- Brand Logo -->
+            <a href="#hero" class="flex items-center gap-3 group">
+                <img src="{% static 'assets/nimet-logo.png' %}" alt="Nigerian Meteorological Agency Logo" class="h-12 sm:h-14 w-auto object-contain transition-transform group-hover:scale-102">
+            </a>
+
+            <!-- Navigation Links -->
+            <nav class="hidden lg:flex items-center gap-8 font-medium text-slate-700 text-sm">
+                <a href="#about" class="hover:text-[#006B3E] transition-colors">About Portal</a>
+                <a href="#pillars" class="hover:text-[#006B3E] transition-colors">Training Focus</a>
+                <a href="#features" class="hover:text-[#006B3E] transition-colors">Platform Capabilities</a>
+                <a href="#stakeholders" class="hover:text-[#006B3E] transition-colors">Sectors Served</a>
+                <a href="#contact" class="hover:text-[#006B3E] transition-colors">Contact</a>
+            </nav>
+
+            <!-- CTA Actions -->
+            <div class="flex items-center gap-3">
+                <a href="{{ frontend_url }}/login" 
+                   class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-[#006B3E] hover:bg-[#005230] shadow-md shadow-[#006B3E]/20 hover:shadow-lg hover:shadow-[#006B3E]/30 transition-all transform hover:-translate-y-0.5 active:translate-y-0">
+                    <span>Sign In to Portal</span>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+                    </svg>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- HERO SECTION -->
+    <section id="hero" class="relative overflow-hidden pt-12 pb-20 md:pt-20 md:pb-28">
+        <!-- Decorative Glow Orbs -->
+        <div class="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-[#006B3E]/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute top-1/3 right-10 w-72 h-72 bg-[#FFC931]/15 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div class="text-center max-w-4xl mx-auto">
+                <!-- Badge -->
+                <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-50 border border-emerald-200/80 text-[#006B3E] text-xs sm:text-sm font-semibold mb-6 shadow-xs">
+                    <span class="flex h-2 w-2 rounded-full bg-[#006B3E]"></span>
+                    <span>Official Meteorological Education & Training Platform</span>
+                </div>
+
+                <!-- Main Title -->
+                <h1 class="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-slate-900 tracking-tight leading-[1.15] mb-6">
+                    Advancing Meteorological Excellence & <span class="text-transparent bg-clip-text bg-gradient-to-r from-[#006B3E] via-[#005230] to-[#071a47]">Weather Intelligence</span> in Nigeria
+                </h1>
+
+                <!-- Subtitle -->
+                <p class="text-base sm:text-lg lg:text-xl text-slate-600 leading-relaxed mb-10 max-w-3xl mx-auto">
+                    The centralized digital learning, assessment, and research portal for the <strong>Nigerian Meteorological Agency (NiMet)</strong>. Equipping meteorologists, climate scientists, aviation professionals, and agricultural stakeholders with authoritative weather and climate training.
+                </p>
+
+                <!-- Actions -->
+                <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+                    <a href="{{ frontend_url }}/login" 
+                       class="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl text-base font-bold text-white bg-gradient-to-r from-[#006B3E] to-[#005230] hover:from-[#005230] hover:to-[#003822] shadow-xl shadow-[#006B3E]/25 transition-all transform hover:-translate-y-0.5">
+                        <span>Access Student & Staff Portal</span>
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+                        </svg>
+                    </a>
+                    <a href="#about" 
+                       class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 rounded-xl text-base font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-sm transition-all">
+                        <span>Learn About the Platform</span>
+                    </a>
+                </div>
+
+                <!-- Key Metrics Grid -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 pt-8 border-t border-slate-200">
+                    <div class="bg-white/80 backdrop-blur-xs p-5 rounded-2xl border border-slate-200/60 shadow-xs">
+                        <div class="text-2xl sm:text-3xl font-extrabold text-[#006B3E] font-heading">WMO</div>
+                        <div class="text-xs sm:text-sm font-medium text-slate-600 mt-1">Standardized Curricula</div>
+                    </div>
+                    <div class="bg-white/80 backdrop-blur-xs p-5 rounded-2xl border border-slate-200/60 shadow-xs">
+                        <div class="text-2xl sm:text-3xl font-extrabold text-[#071a47] font-heading">100%</div>
+                        <div class="text-xs sm:text-sm font-medium text-slate-600 mt-1">Automated CBT Grading</div>
+                    </div>
+                    <div class="bg-white/80 backdrop-blur-xs p-5 rounded-2xl border border-slate-200/60 shadow-xs">
+                        <div class="text-2xl sm:text-3xl font-extrabold text-[#006B3E] font-heading">Live HD</div>
+                        <div class="text-xs sm:text-sm font-medium text-slate-600 mt-1">Weather Briefings & Lectures</div>
+                    </div>
+                    <div class="bg-white/80 backdrop-blur-xs p-5 rounded-2xl border border-slate-200/60 shadow-xs">
+                        <div class="text-2xl sm:text-3xl font-extrabold text-[#071a47] font-heading">Nationwide</div>
+                        <div class="text-xs sm:text-sm font-medium text-slate-600 mt-1">Observational Coverage</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ABOUT SECTION -->
+    <section id="about" class="py-20 bg-white border-y border-slate-200/80">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+                <div class="lg:col-span-6 space-y-6">
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-[#006B3E] text-xs font-semibold uppercase tracking-wider">
+                        Agency Mandate & Vision
+                    </div>
+                    <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight">
+                        Transforming Meteorological Capacity Through Digital Learning
+                    </h2>
+                    <p class="text-slate-600 leading-relaxed text-base">
+                        The <strong>Nigerian Meteorological Agency (NiMet)</strong> is statutorily mandated to observe, collate, analyze, and disseminate meteorological data and climate information across all socioeconomic sectors in Nigeria.
+                    </p>
+                    <p class="text-slate-600 leading-relaxed text-base">
+                        This digital learning portal streamlines professional development, standardized Computer-Based Testing (CBT), synoptic weather chart analysis, and continuous certification for meteorological officers, aviation personnel, and allied scientists.
+                    </p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 rounded-lg bg-emerald-100 text-[#006B3E] flex items-center justify-center shrink-0 font-bold">✓</div>
+                            <div>
+                                <h4 class="text-sm font-bold text-slate-900">Standardized Testing</h4>
+                                <p class="text-xs text-slate-500 mt-0.5">Rigorous CBT assessments for certification.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 rounded-lg bg-emerald-100 text-[#006B3E] flex items-center justify-center shrink-0 font-bold">✓</div>
+                            <div>
+                                <h4 class="text-sm font-bold text-slate-900">Interactive Briefings</h4>
+                                <p class="text-xs text-slate-500 mt-0.5">Real-time live video and weather forecasting sessions.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 rounded-lg bg-emerald-100 text-[#006B3E] flex items-center justify-center shrink-0 font-bold">✓</div>
+                            <div>
+                                <h4 class="text-sm font-bold text-slate-900">Structured Courseware</h4>
+                                <p class="text-xs text-slate-500 mt-0.5">Comprehensive syllabi in synoptic and physical meteorology.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 rounded-lg bg-emerald-100 text-[#006B3E] flex items-center justify-center shrink-0 font-bold">✓</div>
+                            <div>
+                                <h4 class="text-sm font-bold text-slate-900">Verified Credentials</h4>
+                                <p class="text-xs text-slate-500 mt-0.5">Instant tamper-proof digital certificate verification.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Visual Infographic Card -->
+                <div class="lg:col-span-6">
+                    <div class="bg-gradient-to-br from-[#071a47] via-[#005230] to-[#003822] rounded-3xl p-8 sm:p-10 text-white shadow-2xl relative overflow-hidden">
+                        <div class="absolute top-0 right-0 w-64 h-64 bg-[#FFC931]/10 rounded-full blur-2xl pointer-events-none"></div>
+                        <div class="relative z-10 space-y-6">
+                            <div class="flex items-center justify-between border-b border-emerald-700/50 pb-4">
+                                <span class="text-xs font-semibold tracking-wider uppercase text-emerald-300">NiMet Training Ecosystem</span>
+                                <span class="text-xs bg-[#FFC931] text-slate-900 font-bold px-2.5 py-0.5 rounded-full">Active</span>
+                            </div>
+                            <h3 class="text-xl sm:text-2xl font-bold leading-snug">
+                                World-Class Meteorological Training Infrastructure
+                            </h3>
+                            <p class="text-sm text-emerald-100/80 leading-relaxed">
+                                Empowering Nigeria's national weather observing network with modern digital education, synoptic analysis toolkits, and early warning climate intelligence.
+                            </p>
+                            <div class="space-y-3 pt-2">
+                                <div class="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/10 flex items-center justify-between">
+                                    <span class="text-sm font-medium">Synoptic & Dynamic Meteorology</span>
+                                    <span class="text-xs bg-emerald-400/20 text-emerald-300 font-semibold px-2 py-0.5 rounded">Core Track</span>
+                                </div>
+                                <div class="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/10 flex items-center justify-between">
+                                    <span class="text-sm font-medium">Aviation Weather & TAF Reporting</span>
+                                    <span class="text-xs bg-emerald-400/20 text-emerald-300 font-semibold px-2 py-0.5 rounded">Certified</span>
+                                </div>
+                                <div class="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/10 flex items-center justify-between">
+                                    <span class="text-sm font-medium">Seasonal Rainfall & Climate Prediction</span>
+                                    <span class="text-xs bg-emerald-400/20 text-emerald-300 font-semibold px-2 py-0.5 rounded">Advanced</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TRAINING PILLARS -->
+    <section id="pillars" class="py-20 bg-slate-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-[#006B3E] text-xs font-semibold uppercase tracking-wider mb-3">
+                    Curriculum & Disciplines
+                </div>
+                <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+                    Specialized Training Focus Areas
+                </h2>
+                <p class="text-slate-600 text-sm sm:text-base mt-4">
+                    High-level courseware and assessment modules tailored to critical meteorological disciplines.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <!-- Pillar 1 -->
+                <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all group">
+                    <div class="w-12 h-12 rounded-xl bg-emerald-50 text-[#006B3E] flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition-transform">
+                        ✈️
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-900 mb-2">Aviation Meteorology</h3>
+                    <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                        Flight safety forecasting, Terminal Aerodrome Forecasts (TAF), METAR/SPECI reporting, upper-air wind analysis, and severe turbulence tracking.
+                    </p>
+                </div>
+
+                <!-- Pillar 2 -->
+                <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all group">
+                    <div class="w-12 h-12 rounded-xl bg-emerald-50 text-[#006B3E] flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition-transform">
+                        🌾
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-900 mb-2">Agro-Meteorology</h3>
+                    <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                        Seasonal Rainfall Prediction (SRP), drought monitoring, soil moisture modeling, and crop-weather advisory to boost national food security.
+                    </p>
+                </div>
+
+                <!-- Pillar 3 -->
+                <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all group">
+                    <div class="w-12 h-12 rounded-xl bg-emerald-50 text-[#006B3E] flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition-transform">
+                        🌊
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-900 mb-2">Marine & Hydrology</h3>
+                    <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                        Coastal weather observations, sea-state forecasting, storm surge advisories, and hydrological flood risk early warning systems.
+                    </p>
+                </div>
+
+                <!-- Pillar 4 -->
+                <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all group">
+                    <div class="w-12 h-12 rounded-xl bg-emerald-50 text-[#006B3E] flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition-transform">
+                        🛰️
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-900 mb-2">Radar & Satellite</h3>
+                    <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                        Meteosat imagery analysis, Doppler weather radar interpretation, Numerical Weather Prediction (NWP), and severe convective storm diagnostics.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- PLATFORM CAPABILITIES -->
+    <section id="features" class="py-20 bg-white border-y border-slate-200/80">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-[#006B3E] text-xs font-semibold uppercase tracking-wider mb-3">
+                    Portal Features
+                </div>
+                <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+                    Engineered for Rigorous Meteorological Education
+                </h2>
+                <p class="text-slate-600 text-sm sm:text-base mt-4">
+                    Integrated digital tools powering distance training, real-time assessments, and institutional collaboration.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="bg-slate-50 p-8 rounded-3xl border border-slate-200/70 hover:bg-white hover:shadow-lg transition-all">
+                    <div class="w-12 h-12 rounded-2xl bg-[#006B3E] text-white flex items-center justify-center font-bold text-xl mb-6 shadow-md shadow-[#006B3E]/20">
+                        01
+                    </div>
+                    <h3 class="text-xl font-bold text-slate-900 mb-3">CBT Examination System</h3>
+                    <p class="text-sm text-slate-600 leading-relaxed">
+                        Comprehensive Computer-Based Testing engine with randomized meteorological questions, synoptic chart questions, timed exams, and instant performance analytics.
+                    </p>
+                </div>
+
+                <div class="bg-slate-50 p-8 rounded-3xl border border-slate-200/70 hover:bg-white hover:shadow-lg transition-all">
+                    <div class="w-12 h-12 rounded-2xl bg-[#071a47] text-white flex items-center justify-center font-bold text-xl mb-6 shadow-md shadow-[#071a47]/20">
+                        02
+                    </div>
+                    <h3 class="text-xl font-bold text-slate-900 mb-3">Live Video Sessions & Briefings</h3>
+                    <p class="text-sm text-slate-600 leading-relaxed">
+                        High-definition virtual classrooms designed for live synoptic chart reviews, daily weather briefing webinars, and interactive instructor-led workshops.
+                    </p>
+                </div>
+
+                <div class="bg-slate-50 p-8 rounded-3xl border border-slate-200/70 hover:bg-white hover:shadow-lg transition-all">
+                    <div class="w-12 h-12 rounded-2xl bg-[#006B3E] text-white flex items-center justify-center font-bold text-xl mb-6 shadow-md shadow-[#006B3E]/20">
+                        03
+                    </div>
+                    <h3 class="text-xl font-bold text-slate-900 mb-3">Certified Credentials</h3>
+                    <p class="text-sm text-slate-600 leading-relaxed">
+                        Automated generation of verified digital certificates with unique verification QR codes, confirming training completion and technical competencies.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- STAKEHOLDERS -->
+    <section id="stakeholders" class="py-20 bg-slate-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-[#006B3E] text-xs font-semibold uppercase tracking-wider mb-3">
+                    Who We Serve
+                </div>
+                <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+                    Supporting Diverse National Sectors
+                </h2>
+                <p class="text-slate-600 text-sm sm:text-base mt-4">
+                    Providing tailored meteorological learning paths for specialized operational personnel across Nigeria.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 text-center">
+                    <div class="text-3xl mb-2">🧑‍🔬</div>
+                    <h4 class="text-sm font-bold text-slate-900">NiMet Officers</h4>
+                    <p class="text-xs text-slate-500 mt-1">Continuous Professional Training</p>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 text-center">
+                    <div class="text-3xl mb-2">👨‍✈️</div>
+                    <h4 class="text-sm font-bold text-slate-900">Aviation Stakeholders</h4>
+                    <p class="text-xs text-slate-500 mt-1">Pilots & ATC Officers</p>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 text-center">
+                    <div class="text-3xl mb-2">🚜</div>
+                    <h4 class="text-sm font-bold text-slate-900">Agro-Advisory</h4>
+                    <p class="text-xs text-slate-500 mt-1">Agricultural Extension Staff</p>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 text-center">
+                    <div class="text-3xl mb-2">🚢</div>
+                    <h4 class="text-sm font-bold text-slate-900">Marine Operators</h4>
+                    <p class="text-xs text-slate-500 mt-1">Port & Maritime Safety</p>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 text-center">
+                    <div class="text-3xl mb-2">🎓</div>
+                    <h4 class="text-sm font-bold text-slate-900">Students & Researchers</h4>
+                    <p class="text-xs text-slate-500 mt-1">Atmospheric Science Cadets</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CALL TO ACTION STRIP -->
+    <section class="py-16 bg-gradient-to-r from-[#003822] via-[#006B3E] to-[#071a47] text-white">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6">
+            <h2 class="text-2xl sm:text-4xl font-extrabold tracking-tight">
+                Ready to Access the NiMet Learning Platform?
+            </h2>
+            <p class="text-emerald-100/90 text-sm sm:text-base max-w-2xl mx-auto">
+                Sign in with your official account credentials to access your courses, live lecture sessions, CBT assessments, and certificates.
+            </p>
+            <div class="pt-4">
+                <a href="{{ frontend_url }}/login" 
+                   class="inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl text-base font-bold text-slate-900 bg-[#FFC931] hover:bg-[#ffe082] shadow-xl transition-all transform hover:-translate-y-0.5">
+                    <span>Sign In to Your Account</span>
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+                    </svg>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer id="contact" class="bg-slate-900 text-slate-400 text-sm py-14 border-t border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-8 pb-12 border-b border-slate-800">
+                <!-- Agency Info -->
+                <div class="md:col-span-5 space-y-4">
+                    <img src="{% static 'assets/nimet-logo.png' %}" alt="NiMet Logo" class="h-12 w-auto object-contain brightness-0 invert">
+                    <p class="text-xs sm:text-sm text-slate-400 leading-relaxed max-w-sm">
+                        Nigerian Meteorological Agency (NiMet) is the Federal Government agency responsible for weather observation, forecasting, and climate services across Nigeria.
+                    </p>
+                </div>
+
+                <!-- Quick Links -->
+                <div class="md:col-span-3 space-y-3">
+                    <h4 class="text-white text-xs font-bold uppercase tracking-wider">Platform Links</h4>
+                    <ul class="space-y-2 text-xs sm:text-sm">
+                        <li><a href="#about" class="hover:text-white transition-colors">About Portal</a></li>
+                        <li><a href="#pillars" class="hover:text-white transition-colors">Training Focus</a></li>
+                        <li><a href="#features" class="hover:text-white transition-colors">CBT Assessments</a></li>
+                        <li><a href="{{ frontend_url }}/login" class="hover:text-white transition-colors font-semibold text-emerald-400">Portal Login</a></li>
+                    </ul>
+                </div>
+
+                <!-- Contact & Headquarters -->
+                <div class="md:col-span-4 space-y-3">
+                    <h4 class="text-white text-xs font-bold uppercase tracking-wider">Agency Headquarters</h4>
+                    <p class="text-xs text-slate-400 leading-relaxed">
+                        National Weather Forecasting & Climate Research Centre,<br>
+                        Bill Clinton Drive, Nnamdi Azikiwe International Airport,<br>
+                        Abuja, Nigeria.
+                    </p>
+                    <div class="text-xs space-y-1 text-slate-300 pt-1">
+                        <div>📞 +234 9 291 9437</div>
+                        <div>✉️ info@nimet.gov.ng | support@nimet.gov.ng</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Copyright -->
+            <div class="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+                <div>
+                    © {% now "Y" %} Nigerian Meteorological Agency (NiMet). All rights reserved.
+                </div>
+                <div class="flex items-center gap-6">
+                    <a href="https://nimet.gov.ng" target="_blank" rel="noopener noreferrer" class="hover:text-slate-400 transition-colors">Official NiMet Website</a>
+                    <a href="{{ frontend_url }}/login" class="hover:text-slate-400 transition-colors">Learning Portal Login</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>

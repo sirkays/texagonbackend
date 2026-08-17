@@ -42,6 +42,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://learn.nimet.gov.ng",
     "https://nimet.gov.ng",
     "https://nimet-web.onrender.com",
+    "https://nimet-frontend.onrender.com",
+    "https://nimet-backend.onrender.com",
 ]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
@@ -65,6 +67,8 @@ if os.environ.get('LOCAL') == "0":
         "https://learn.nimet.gov.ng",
         "https://nimet.gov.ng",
         "https://nimet-web.onrender.com",
+        "https://nimet-frontend.onrender.com",
+        "https://nimet-backend.onrender.com",
     ]
 
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
