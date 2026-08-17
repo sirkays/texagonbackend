@@ -184,6 +184,13 @@ db_url = os.environ.get("DATABASE_URL")
 if os.environ.get("LOCAL_DB", "0") == "0":
     if db_url:
         parsed_db = urllib.parse.urlparse(db_url)
+        qs = urllib.parse.parse_qs(parsed_db.query)
+        options = {}
+        if "sslmode" in qs:
+            options["sslmode"] = qs["sslmode"][0]
+        elif parsed_db.hostname and not parsed_db.hostname.startswith("localhost") and not parsed_db.hostname.startswith("127.0.0.1"):
+            options["sslmode"] = "require"
+
         DATABASES = {
             "default": {
                 "ENGINE": "django.db.backends.postgresql",
@@ -193,6 +200,7 @@ if os.environ.get("LOCAL_DB", "0") == "0":
                 "HOST": parsed_db.hostname or "localhost",
                 "PORT": str(parsed_db.port or 5432),
                 "CONN_MAX_AGE": 60,
+                "OPTIONS": options,
             }
         }
     else:

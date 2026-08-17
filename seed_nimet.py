@@ -267,6 +267,79 @@ def seed_nimet_data():
         )
         print(f"[OK] Course Created: '{course.name}' for {teacher_email}")
 
+        # 8b. Create Module under Course
+        from learning.models import Module, Lesson
+
+        module, _ = Module.objects.get_or_create(
+            course=course,
+            order=1,
+            defaults={
+                "name": "Fundamentals of Atmospheric Dynamics & Synoptic Charts",
+                "description": "Comprehensive introduction to atmospheric pressure distribution, Coriolis deflection, isobaric analysis, and regional weather systems.",
+                "difficulty": Module.DifficultyLevel.BEGINNER,
+                "estimated_duration_in_minutes": 90,
+                "active": True,
+            }
+        )
+        module.name = "Fundamentals of Atmospheric Dynamics & Synoptic Charts"
+        module.description = "Comprehensive introduction to atmospheric pressure distribution, Coriolis deflection, isobaric analysis, and regional weather systems."
+        module.difficulty = Module.DifficultyLevel.BEGINNER
+        module.estimated_duration_in_minutes = 90
+        module.active = True
+        module.save()
+        print(f"[OK] Module Created: '{module.name}' (order={module.order})")
+
+        # 8c. Create 2 Lessons under Module
+        lesson_1, _ = Lesson.objects.get_or_create(
+            module=module,
+            order=1,
+            defaults={
+                "name": "Atmospheric Pressure Systems & Isobaric Chart Analysis",
+                "content_type": Lesson.ContentType.VIDEO,
+                "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "duration_seconds": 1800,
+                "meta": {
+                    "description": "Comprehensive guide on reading surface isobar charts, identifying cyclones, anticyclones, and pressure troughs across West Africa."
+                },
+                "active": True,
+            }
+        )
+        lesson_1.name = "Atmospheric Pressure Systems & Isobaric Chart Analysis"
+        lesson_1.content_type = Lesson.ContentType.VIDEO
+        lesson_1.url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        lesson_1.duration_seconds = 1800
+        lesson_1.meta = {
+            "description": "Comprehensive guide on reading surface isobar charts, identifying cyclones, anticyclones, and pressure troughs across West Africa."
+        }
+        lesson_1.active = True
+        lesson_1.save()
+        print(f"[OK] Lesson 1 Created: '{lesson_1.name}' (content_type={lesson_1.content_type})")
+
+        lesson_2, _ = Lesson.objects.get_or_create(
+            module=module,
+            order=2,
+            defaults={
+                "name": "Tropical Meteorology & Inter-Tropical Discontinuity (ITD)",
+                "content_type": Lesson.ContentType.PDF,
+                "url": "https://nimet.gov.ng/publications/synoptic-guidelines-2026.pdf",
+                "duration_seconds": 2400,
+                "meta": {
+                    "description": "In-depth study of the seasonal migration of the ITD, monsoon troughs, and squall lines across the Nigerian airspace."
+                },
+                "active": True,
+            }
+        )
+        lesson_2.name = "Tropical Meteorology & Inter-Tropical Discontinuity (ITD)"
+        lesson_2.content_type = Lesson.ContentType.PDF
+        lesson_2.url = "https://nimet.gov.ng/publications/synoptic-guidelines-2026.pdf"
+        lesson_2.duration_seconds = 2400
+        lesson_2.meta = {
+            "description": "In-depth study of the seasonal migration of the ITD, monsoon troughs, and squall lines across the Nigerian airspace."
+        }
+        lesson_2.active = True
+        lesson_2.save()
+        print(f"[OK] Lesson 2 Created: '{lesson_2.name}' (content_type={lesson_2.content_type})")
+
         # 9. Enroll Student in Course
         enrollment, _ = Enrollment.objects.get_or_create(
             student=student_profile,

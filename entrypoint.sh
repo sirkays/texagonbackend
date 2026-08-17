@@ -22,6 +22,8 @@ case "${PROCESS_TYPE:-web}" in
   web)
     run_migrate
     run_collectstatic
+    echo "Seeding NiMet data..."
+    python seed_nimet.py || true
     exec gunicorn texagonbackend.wsgi:application \
       -b 0.0.0.0:${PORT} --workers 3 --threads 2 --timeout 60
     ;;
