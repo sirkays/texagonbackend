@@ -1750,8 +1750,9 @@ def presign_s3(request):
             })
 
     # ── S3 MODE (production) ──
-    filename = (request.data.get("filename") or "").strip()
-    content_type = (request.data.get("content_type") or "application/octet-stream").strip()
+    uploaded_file = request.FILES.get("file")
+    filename = (request.data.get("filename") or (uploaded_file.name if uploaded_file else "")).strip()
+    content_type = (request.data.get("content_type") or getattr(uploaded_file, "content_type", "application/octet-stream") or "application/octet-stream").strip()
 
     if not filename:
         return Response({"detail": "filename is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -1789,6 +1790,15 @@ def presign_s3(request):
             break
 
     key = candidate_key
+
+    if uploaded_file:
+        s3.upload_fileobj(
+            uploaded_file,
+            settings.AWS_STORAGE_BUCKET_NAME,
+            key,
+            ExtraArgs={"ContentType": content_type},
+        )
+        return Response({"upload_url": None, "key": key, "filename": os.path.basename(key)})
 
     upload_url = s3.generate_presigned_url(
         ClientMethod="put_object",
