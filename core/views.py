@@ -182,7 +182,7 @@ def active_modules_for_user(request):
         page_size = _i(request.query_params.get("page_size"), 20, cap=100)
 
         # ----------- student enrollments -----------
-        enroll_qs = Enrollment.objects.filter(student=student, status=Enrollment.Status.ACTIVE)
+        enroll_qs = Enrollment.objects.filter(student=student, status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED])
         if only_active_courses:
             enroll_qs = enroll_qs.filter(course__is_active=True)
 

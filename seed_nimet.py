@@ -346,16 +346,15 @@ def seed_nimet_data():
             course=course,
             defaults={
                 "academic_session": session,
-                "status": Enrollment.Status.COMPLETED,
+                "status": Enrollment.Status.ACTIVE,
                 "progress_pct": Decimal("100.00"),
                 "completed_at": timezone.now(),
             }
         )
-        enrollment.status = Enrollment.Status.COMPLETED
+        enrollment.status = Enrollment.Status.ACTIVE
         enrollment.progress_pct = Decimal("100.00")
-        enrollment.completed_at = timezone.now()
         enrollment.save()
-        print(f"[OK] Student Enrolled: {student_email} in {course.name} (Progress: 100%)")
+        print(f"[OK] Student Enrolled: {student_email} in {course.name} (Status: ACTIVE, Progress: 100%)")
 
         # 10. Generate NiMet Certificate
         cert = EnrollmentCertificate.objects.filter(enrollment=enrollment).first()

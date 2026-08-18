@@ -416,7 +416,7 @@ def learning_modules(request):
 
         if enrolled_course_ids is None:
             enrolled_course_ids = list(
-                Enrollment.objects.filter(student=student, status=Enrollment.Status.ACTIVE).values_list("course_id", flat=True)
+                Enrollment.objects.filter(student=student, status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED]).values_list("course_id", flat=True)
             )
         
         if not enrolled_course_ids:
@@ -449,11 +449,11 @@ def learning_modules(request):
         }
         progress_map = {
             e.course_id: int(e.progress_pct or 0)
-            for e in Enrollment.objects.filter(student=student,  status=Enrollment.Status.ACTIVE, course_id__in=course_ids)
+            for e in Enrollment.objects.filter(student=student,  status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED], course_id__in=course_ids)
         }
         size_map = {
             r["course_id"]: r["cnt"]
-            for r in (Enrollment.objects.filter(course_id__in=course_ids,  status=Enrollment.Status.ACTIVE)
+            for r in (Enrollment.objects.filter(course_id__in=course_ids,  status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED])
                       .values("course_id").annotate(cnt=Count("id")))
         }
 
@@ -2372,7 +2372,7 @@ def my_courses(request):
             .prefetch_related("course__modules")
             .filter(
                 student=student,
-                status=Enrollment.Status.ACTIVE,
+                status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
                 course__is_active=True,   # optional: hide inactive courses
             )
             .order_by("course__name")
@@ -2400,7 +2400,7 @@ def my_lessons(request):
     lessons = (
         Lesson.objects.filter(
             module__course__enrollments__student=student,
-            module__course__enrollments__status=Enrollment.Status.ACTIVE,  # or remove if you want all statuses
+            module__course__enrollments__status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.COMPLETED],
             active=True,
             module__active=True,
         )
